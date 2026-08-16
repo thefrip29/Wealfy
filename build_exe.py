@@ -1,13 +1,20 @@
-"""Construit Wealfy.exe puis l'installateur Windows.
+"""Construit l'artefact de distribution de la plateforme courante.
 
-    python build_exe.py              exe + installateur
-    python build_exe.py --exe-seul   exe uniquement (iteration rapide)
+    python build_exe.py                    application + installateur
+    python build_exe.py --exe-seul         application seule (iteration rapide)
 
-Fait quatre choses :
-  1. genere l'icone .ico multi-tailles a partir du symbole de la marque ;
-  2. ecrit le fichier de version lu par Windows (proprietes du fichier) ;
-  3. lance PyInstaller en mode --onefile --noconsole ;
-  4. compile installer.iss avec Inno Setup -> dist/Setup_Wealfy.exe.
+Le script s'adapte au systeme sur lequel il tourne, parce qu'aucun outil ne
+sait construire pour un autre : PyInstaller produit du natif, et l'image disque
+comme l'installateur reposent sur des outils fournis par chaque systeme. Un
+binaire macOS ne peut donc PAS etre fabrique depuis Windows — c'est le role de
+l'integration continue, qui lance ce meme script sur un runner de chaque bord.
+
+  Windows -> dist/Wealfy.exe (--onefile) puis dist/Setup_Wealfy.exe (Inno Setup)
+  macOS   -> dist/Wealfy.app (--onedir)  puis dist/Wealfy-<version>-<arch>.dmg
+
+Le dessin de l'icone est commun ; seul le format d'ecriture change (.ico et
+.icns). Les metadonnees suivent la meme logique : ressource PE sous Windows,
+Info.plist sous macOS.
 
 A relancer apres chaque modification du code : l'exe embarque une copie figee
 de l'application.
@@ -25,8 +32,15 @@ from app.version import APP_NAME, DESCRIPTION, PUBLISHER, VERSION  # noqa: E402
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 ICON_PATH = os.path.join(ROOT, "app", "static", "img", "icon.ico")
+# L'icone macOS n'est PAS versionnee : elle est redessinee a chaque
+# construction, et n'a de sens que sur un Mac.
+ICNS_PATH = os.path.join(ROOT, "build", "icon.icns")
 VERSION_FILE = os.path.join(ROOT, "build", "version_info.txt")
 ISS_PATH = os.path.join(ROOT, "installer.iss")
+# Identifiant du bundle macOS, en notation DNS inversee. Il identifie
+# l'application aupres du systeme (preferences, quarantaine, signature) et ne
+# doit plus changer une fois publie.
+BUNDLE_ID = "app.wealfy.desktop"
 
 # Geometrie du symbole, dans le repere 378x289 de logo-symbole.svg : le W trace
 # d'un seul trait, en quatre courbes de Bezier cubiques enchainees, puis le
@@ -71,8 +85,12 @@ def _bezier(p0, p1, p2, p3, pas):
                u ** 3 * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t ** 3 * p3[1])
 
 
-def build_icon(size=512, supersample=4):
+def dessiner_icone(size=1024, supersample=4):
     """Dessine l'icone applicative : symbole de la marque sur anthracite.
+
+    Renvoie une image ; l'ECRITURE est laissee aux fonctions ci-dessous. Les
+    deux plateformes ont besoin du meme dessin dans deux formats differents, et
+    fusionner dessin et enregistrement obligerait a le refaire deux fois.
 
     Meme anthracite que la barre de navigation de l'application : l'icone
     annonce ce qu'on va ouvrir.
@@ -117,10 +135,46 @@ def build_icon(size=512, supersample=4):
     cx, cy, r, couleur = DOT
     disque(place(cx, cy), r * echelle, couleur)
 
-    image = image.resize((size, size), Image.LANCZOS)
+    return image.resize((size, size), Image.LANCZOS)
+
+
+def ecrire_ico(image):
+    """Icone Windows, multi-tailles dans un seul fichier."""
     os.makedirs(os.path.dirname(ICON_PATH), exist_ok=True)
     image.save(ICON_PATH, format="ICO", sizes=[(s, s) for s in ICON_SIZES])
-    print(f"Icone generee : {ICON_PATH}")
+    print(f"Icone Windows : {ICON_PATH}")
+    return ICON_PATH
+
+
+def ecrire_icns(image):
+    """Icone macOS, via l'outil d'Apple.
+
+    `iconutil` est fourni avec macOS et valide le jeu d'icones : il signale une
+    taille manquante au lieu de produire un fichier silencieusement casse.
+    L'ecriture ICNS de Pillow sert de repli, avec une fidelite moindre.
+
+    Les variantes @2x sont les doublons en pixels de la taille au-dessus : un
+    unique rendu a 1024 px suffit donc a tout produire par reduction, ce qui
+    preserve le lissage que le supersampling a paye.
+    """
+    from PIL import Image
+
+    os.makedirs(os.path.dirname(ICNS_PATH), exist_ok=True)
+    if shutil.which("iconutil"):
+        jeu = os.path.join(ROOT, "build", f"{APP_NAME}.iconset")
+        shutil.rmtree(jeu, ignore_errors=True)
+        os.makedirs(jeu, exist_ok=True)
+        for base in (16, 32, 128, 256, 512):
+            image.resize((base, base), Image.LANCZOS).save(
+                os.path.join(jeu, f"icon_{base}x{base}.png"))
+            image.resize((base * 2, base * 2), Image.LANCZOS).save(
+                os.path.join(jeu, f"icon_{base}x{base}@2x.png"))
+        subprocess.run(["iconutil", "-c", "icns", jeu, "-o", ICNS_PATH], check=True)
+        shutil.rmtree(jeu, ignore_errors=True)
+    else:
+        image.save(ICNS_PATH, format="ICNS")
+    print(f"Icone macOS : {ICNS_PATH}")
+    return ICNS_PATH
 
 
 def build_version_file():
@@ -159,8 +213,25 @@ def build_version_file():
     print(f"Version {VERSION} : {VERSION_FILE}")
 
 
-def build_exe():
+def _donnees_embarquees():
+    """Ressources a embarquer, destinations alignees sur app/paths.py.
+
+    Le separateur source/destination differe : « ; » sous Windows, « : »
+    ailleurs, parce que sous Windows « : » apparait deja dans « C: ».
+    """
     sep = ";" if os.name == "nt" else ":"
+    paires = [
+        (os.path.join("app", "templates"), os.path.join("app", "templates")),
+        (os.path.join("app", "static"), os.path.join("app", "static")),
+        (os.path.join("app", "schema.sql"), "app"),
+    ]
+    args = []
+    for source, destination in paires:
+        args += ["--add-data", f"{source}{sep}{destination}"]
+    return args
+
+
+def construire_windows():
     command = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm", "--clean", "--onefile",
@@ -168,11 +239,9 @@ def build_exe():
         "--noconsole",
         "--name", APP_NAME,
         "--icon", ICON_PATH,
+        # Metadonnees PE : une ressource propre a Windows.
         "--version-file", VERSION_FILE,
-        # Ressources embarquees : destinations alignees sur app/paths.py.
-        "--add-data", f"{os.path.join('app', 'templates')}{sep}{os.path.join('app', 'templates')}",
-        "--add-data", f"{os.path.join('app', 'static')}{sep}{os.path.join('app', 'static')}",
-        "--add-data", f"{os.path.join('app', 'schema.sql')}{sep}app",
+        *_donnees_embarquees(),
         # PyInstaller ne voit pas ces imports : waitress est charge par nom,
         # et pywebview choisit son moteur d'affichage a l'execution.
         "--hidden-import", "waitress",
@@ -183,6 +252,124 @@ def build_exe():
     ]
     print("PyInstaller :", " ".join(command))
     subprocess.run(command, cwd=ROOT, check=True)
+
+
+def construire_macos():
+    """Construit Wealfy.app.
+
+    Trois choix qui ne sont pas des preferences :
+
+    - `--onedir` et NON `--onefile`. Une application macOS est une arborescence
+      (Contents/MacOS, Contents/Frameworks, Contents/Resources) : c'est la seule
+      forme que comprennent Finder, Gatekeeper et les outils de signature. En
+      --onefile, PyInstaller produit bien un .app, mais dont le binaire
+      redecompresse une soixantaine de mega-octets a CHAQUE lancement, et qu'on
+      ne pourra jamais notariser proprement.
+    - `--noupx`. UPX modifie les segments Mach-O : la signature devient invalide
+      et le chargeur arm64 refuse souvent le binaire.
+    - pas de `--version-file`, qui n'ecrit qu'une ressource Windows. Les
+      metadonnees macOS vont dans Info.plist, complete juste apres.
+
+    `--windowed` suffit a declencher la creation du bundle : PyInstaller ajoute
+    lui-meme l'etape BUNDLE quand la console est desactivee sur darwin. Aucun
+    fichier .spec n'est donc necessaire.
+    """
+    command = [
+        sys.executable, "-m", "PyInstaller",
+        "--noconfirm", "--clean", "--onedir", "--windowed", "--noupx",
+        "--name", APP_NAME,
+        "--icon", ICNS_PATH,
+        "--osx-bundle-identifier", BUNDLE_ID,
+        *_donnees_embarquees(),
+        "--hidden-import", "waitress",
+        # Cocoa remplace les moteurs Windows. Les inclure ici ferait echouer
+        # l'analyse, faute de pythonnet.
+        "--hidden-import", "webview.platforms.cocoa",
+        "--collect-all", "webview",
+        # pyobjc resout ses liaisons a l'execution (objc.loadBundle) : l'analyse
+        # statique les manque, et l'application meurt alors au lancement sur un
+        # « No module named objc » que personne ne voit, --windowed masquant la
+        # sortie d'erreur.
+        "--collect-submodules", "objc",
+        "--hidden-import", "Foundation",
+        "--hidden-import", "AppKit",
+        "--hidden-import", "WebKit",
+        # Rien de tout cela n'existe sur un Mac : les exclure allege le bundle
+        # et evite qu'une dependance fantome fasse echouer l'analyse.
+        "--exclude-module", "clr",
+        "--exclude-module", "pythonnet",
+        "--exclude-module", "PyQt5",
+        "--exclude-module", "PySide6",
+        "--exclude-module", "gi",
+        "run.py",
+    ]
+    print("PyInstaller :", " ".join(command))
+    subprocess.run(command, cwd=ROOT, check=True)
+    completer_info_plist()
+
+
+def completer_info_plist():
+    """Ajoute a Info.plist ce que la ligne de commande ne sait pas ecrire.
+
+    `NSHighResolutionCapable` est le plus important : sans lui, macOS rend la
+    vue web en 1x puis l'agrandit. Toute la typographie devient floue sur un
+    ecran Retina, c'est-a-dire sur tous les Mac recents.
+    """
+    import plistlib
+
+    chemin = os.path.join(ROOT, "dist", f"{APP_NAME}.app", "Contents", "Info.plist")
+    if not os.path.exists(chemin):
+        print(f"Info.plist introuvable : {chemin}")
+        return
+    with open(chemin, "rb") as f:
+        plist = plistlib.load(f)
+    plist.update({
+        "CFBundleShortVersionString": VERSION,
+        "CFBundleVersion": VERSION,
+        "NSHighResolutionCapable": True,
+        "NSHumanReadableCopyright": f"© {PUBLISHER}",
+        "LSApplicationCategoryType": "public.app-category.finance",
+    })
+    with open(chemin, "wb") as f:
+        plistlib.dump(plist, f)
+    print(f"Info.plist complete : version {VERSION}, Retina active")
+
+
+def construire_dmg():
+    """Image disque : le .app et un raccourci vers Applications.
+
+    `hdiutil` suffit — pas d'outil tiers. Les scripts qui pilotent le Finder
+    pour placer les icones se bloquent sur une machine sans ecran, ce qui est
+    exactement le cas d'un runner d'integration continue.
+
+    `cp -R` et non `-r` : le bundle contient quantite de liens symboliques dans
+    Contents/Frameworks, et les suivre doublerait la taille tout en cassant
+    l'arborescence.
+    """
+    import platform
+
+    app = os.path.join(ROOT, "dist", f"{APP_NAME}.app")
+    if not os.path.exists(app):
+        raise SystemExit(f"Bundle introuvable : {app}")
+
+    scene = os.path.join(ROOT, "build", "dmg")
+    shutil.rmtree(scene, ignore_errors=True)
+    os.makedirs(scene, exist_ok=True)
+    subprocess.run(["cp", "-R", app, scene], check=True)
+    os.symlink("/Applications", os.path.join(scene, "Applications"))
+
+    dmg = os.path.join(ROOT, "dist", f"{APP_NAME}-{VERSION}-{platform.machine()}.dmg")
+    subprocess.run([
+        "hdiutil", "create",
+        "-volname", APP_NAME,
+        "-srcfolder", scene,
+        "-ov", "-format", "UDZO",       # compresse, lecture seule
+        dmg,
+    ], check=True)
+    shutil.rmtree(scene, ignore_errors=True)
+    taille = os.path.getsize(dmg) / (1024 * 1024)
+    print(f"\nImage disque : {dmg} ({taille:.1f} Mo)")
+    return dmg
 
 
 def trouver_iscc():
@@ -209,15 +396,38 @@ def build_installer():
     return setup
 
 
+def main():
+    sans_installateur = "--exe-seul" in sys.argv or "--sans-installateur" in sys.argv
+    image = dessiner_icone()
+
+    if sys.platform == "win32":
+        ecrire_ico(image)
+        build_version_file()
+        construire_windows()
+        exe = os.path.join(ROOT, "dist", f"{APP_NAME}.exe")
+        if not os.path.exists(exe):
+            raise SystemExit(f"Executable introuvable : {exe}")
+        print(f"Executable : {exe} ({os.path.getsize(exe) / (1024 * 1024):.1f} Mo)")
+        if not sans_installateur:
+            build_installer()
+
+    elif sys.platform == "darwin":
+        ecrire_icns(image)
+        construire_macos()
+        app = os.path.join(ROOT, "dist", f"{APP_NAME}.app")
+        if not os.path.exists(app):
+            raise SystemExit(f"Bundle introuvable : {app}")
+        print(f"Application : {app}")
+        if not sans_installateur:
+            construire_dmg()
+
+    else:
+        raise SystemExit(
+            f"Plateforme non prise en charge pour la construction : {sys.platform}.\n"
+            "L'application FONCTIONNE sous Linux (python run.py), mais aucun\n"
+            "paquet n'y est produit — il n'existe pas de format unique."
+        )
+
+
 if __name__ == "__main__":
-    build_icon()
-    build_version_file()
-    build_exe()
-
-    exe = os.path.join(ROOT, "dist", f"{APP_NAME}.exe")
-    if not os.path.exists(exe):
-        raise SystemExit(f"Executable introuvable : {exe}")
-    print(f"Executable : {exe} ({os.path.getsize(exe) / (1024 * 1024):.1f} Mo)")
-
-    if "--exe-seul" not in sys.argv:
-        build_installer()
+    main()
