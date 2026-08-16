@@ -8,6 +8,19 @@ from ._blueprint import bp
 from ._helpers import as_int, body, fail
 
 
+# Reglages qui ne SORTENT jamais de la base. La cle API des cours est un
+# secret : la renvoyer au navigateur la rendrait lisible dans les outils de
+# developpement et dans n'importe quelle capture reseau. L'interface n'a pas
+# besoin de la valeur, seulement de savoir si elle est renseignee — c'est deja
+# ce que fait /api/market/status avec `cle_configuree`.
+CLES_SECRETES = ("market_api_key",)
+
+# Suffixe des indicateurs qui remplacent ces valeurs dans la reponse. Ils sont
+# calcules, donc jamais ecrits : les refuser en ecriture evite de creer un
+# reglage fantome `market_api_key_configuree` dans la base.
+SUFFIXE_INDICATEUR = "_configuree"
+
+
 @bp.get("/api/settings")
 def get_settings():
     rows = query("SELECT key, value FROM settings")
@@ -17,6 +30,10 @@ def get_settings():
             out[row["key"]] = json.loads(row["value"])
         except (ValueError, TypeError):
             out[row["key"]] = row["value"]
+    for cle in CLES_SECRETES:
+        valeur = out.pop(cle, None)
+        renseignee = bool(valeur.strip()) if isinstance(valeur, str) else bool(valeur)
+        out[cle + SUFFIXE_INDICATEUR] = renseignee
     return jsonify(out)
 
 
@@ -26,6 +43,11 @@ def put_settings():
     if not isinstance(data, dict) or not data:
         return fail("Corps invalide.")
     for key, value in data.items():
+        if key.endswith(SUFFIXE_INDICATEUR):
+            # Indicateur calcule renvoye tel quel par un client naif : l'ecrire
+            # creerait un reglage qui ne sert a rien et que plus rien ne met a
+            # jour. On l'ignore en silence plutot que d'echouer.
+            continue
         set_setting(key, value)
     return jsonify({"ok": True})
 

@@ -39,6 +39,66 @@ class ApiTestCase(unittest.TestCase):
         return res.get_json()
 
 
+class TestDurcissement(ApiTestCase):
+    """Le serveur n'ecoute que sur la boucle locale — ce qui ne suffit pas.
+
+    Un site malveillant peut faire pointer son domaine vers 127.0.0.1 (DNS
+    rebinding) : le navigateur traite alors ses requetes comme de meme origine
+    et peut LIRE la reponse. Ces tests verrouillent les trois garde-fous.
+    """
+
+    def test_cle_api_jamais_renvoyee(self):
+        self.client.put("/api/settings", json={"market_api_key": "SECRET-ABC123"})
+        reglages = self.get("/api/settings")
+        self.assertNotIn("market_api_key", reglages)
+        self.assertTrue(reglages["market_api_key_configuree"])
+        # La valeur n'apparait nulle part dans la reponse, pas meme sous une
+        # autre cle : c'est le corps entier qu'on inspecte, pas un champ.
+        self.assertNotIn("SECRET-ABC123",
+                         self.client.get("/api/settings").get_data(as_text=True))
+
+    def test_cle_absente_signalee_comme_non_configuree(self):
+        self.assertFalse(self.get("/api/settings")["market_api_key_configuree"])
+        self.client.put("/api/settings", json={"market_api_key": "   "})
+        self.assertFalse(self.get("/api/settings")["market_api_key_configuree"])
+
+    def test_cle_reste_lisible_par_le_serveur(self):
+        """Masquee pour le navigateur, pas perdue : les cours en ont besoin."""
+        from app.db import get_setting
+        self.client.put("/api/settings", json={"market_api_key": "SECRET-ABC123"})
+        with self.app.app_context():
+            self.assertEqual(get_setting("market_api_key"), "SECRET-ABC123")
+
+    def test_indicateur_calcule_non_ecrit(self):
+        self.client.put("/api/settings", json={"market_api_key_configuree": True})
+        with self.app.app_context():
+            from app.db import get_setting
+            self.assertIsNone(get_setting("market_api_key_configuree"))
+
+    def test_hote_etranger_refuse(self):
+        """Le scenario du DNS rebinding, reduit a son en-tete."""
+        res = self.client.get("/api/meta", headers={"Host": "evil.example.com"})
+        self.assertEqual(res.status_code, 403)
+
+    def test_hotes_locaux_acceptes(self):
+        for hote in ("127.0.0.1:5000", "localhost:5000", "127.0.0.1", "[::1]:5000"):
+            with self.subTest(hote=hote):
+                res = self.client.get("/api/meta", headers={"Host": hote})
+                self.assertEqual(res.status_code, 200, hote)
+
+    def test_origine_etrangere_refusee(self):
+        res = self.client.post("/api/backups", headers={"Origin": "https://evil.example.com"})
+        self.assertEqual(res.status_code, 403)
+
+    def test_origine_locale_acceptee(self):
+        res = self.client.get("/api/meta", headers={"Origin": "http://127.0.0.1:5000"})
+        self.assertEqual(res.status_code, 200)
+
+    def test_sans_origine_accepte(self):
+        """curl, le sondage de run.py : hors navigateur, rien a comparer."""
+        self.assertEqual(self.client.get("/api/meta").status_code, 200)
+
+
 class TestCrud(ApiTestCase):
     def test_transaction_lifecycle(self):
         tx = self.post("/api/transactions", {

@@ -536,9 +536,14 @@ App.settings = {
     enabled.checked = !!settings.market_enabled;
     const providerSel = App.select('market_provider',
       [['twelvedata', 'Twelve Data (titres, clé requise)']], settings.market_provider);
+    /* La clé n'est plus renvoyée par l'API : le serveur n'expose qu'un booléen
+       (voir CLES_SECRETES dans app/routes/settings.py). Le champ part donc
+       toujours vide, et son texte d'invite dit l'état plutôt que la valeur. */
+    const cleEnPlace = !!settings.market_api_key_configuree;
     const keyIn = App.input('market_api_key', {
-      type: 'password', value: settings.market_api_key || '',
-      placeholder: 'clé API Twelve Data',
+      type: 'password', value: '',
+      placeholder: cleEnPlace ? 'clé enregistrée — laisser vide pour la garder'
+        : 'clé API Twelve Data',
     });
     const autoIn = App.h('input', { type: 'checkbox' });
     autoIn.checked = settings.market_auto_refresh !== false;
@@ -546,13 +551,26 @@ App.settings = {
       type: 'number', min: 1, value: settings.market_cache_ttl_hours ?? 24,
     });
 
-    const save = () => App.settings.save({
-      market_enabled: enabled.checked,
-      market_provider: providerSel.value,
-      market_api_key: keyIn.value.trim(),
-      market_auto_refresh: autoIn.checked,
-      market_cache_ttl_hours: parseInt(ttlIn.value, 10) || 24,
-    }, 'Réglages des cours enregistrés');
+    const save = () => {
+      const reglages = {
+        market_enabled: enabled.checked,
+        market_provider: providerSel.value,
+        market_auto_refresh: autoIn.checked,
+        market_cache_ttl_hours: parseInt(ttlIn.value, 10) || 24,
+      };
+      /* Champ vide alors qu'une clé existe : on ne l'envoie PAS. Sans cette
+         garde, le simple fait d'enregistrer un autre réglage effacerait la clé,
+         puisque le champ ne peut plus être pré-rempli. Pour la retirer
+         volontairement, le bouton « Oublier la clé » ci-dessous. */
+      const saisie = keyIn.value.trim();
+      if (saisie || !cleEnPlace) reglages.market_api_key = saisie;
+      App.settings.save(reglages, 'Réglages des cours enregistrés');
+    };
+
+    const oublierCle = async () => {
+      await App.settings.save({ market_api_key: '' }, 'Clé oubliée');
+      keyIn.value = '';
+    };
 
     /* --- test d'un symbole : la vérification de couverture Euronext --- */
     const testSym = App.input('sym', { placeholder: 'ex : CW8' });
@@ -671,14 +689,21 @@ App.settings = {
       App.h('div', { class: 'form-grid', style: 'margin-top:16px' },
         App.field('Activer les cours de marché', enabled),
         App.field('Fournisseur', providerSel),
-        App.field('Clé API', keyIn, { hint: 'gratuite sur twelvedata.com' }),
+        App.field('Clé API', keyIn, {
+          hint: cleEnPlace
+            ? 'gratuite sur twelvedata.com — une clé est déjà enregistrée, '
+              + 'laissez le champ vide pour la conserver'
+            : 'gratuite sur twelvedata.com',
+        }),
         App.field('Rafraîchir au lancement', autoIn),
         App.field('Durée de vie du cache (heures)', ttlIn)),
       App.h('div', { class: 'actions', style: 'margin-top:12px' },
         App.h('button', { class: 'btn primary', onclick: save }, 'Enregistrer'),
         App.h('button', {
           class: 'btn', onclick: (e) => refreshNow(e.target),
-        }, 'Rafraîchir les cours maintenant')),
+        }, 'Rafraîchir les cours maintenant'),
+        cleEnPlace ? App.h('button', { class: 'btn', onclick: oublierCle },
+          'Oublier la clé') : null),
 
       App.h('div', { class: 'section-title' }, 'Vérifier la couverture d’un symbole'),
       App.h('p', { class: 'hint' },
