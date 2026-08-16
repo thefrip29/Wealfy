@@ -8,15 +8,63 @@ Une seule fonction peut sortir sur le réseau : le rafraîchissement des cours d
 marché, **désactivé par défaut** — voir la section qui lui est consacrée. Tant
 qu'il n'est pas activé, aucune donnée ne quitte la machine.
 
+## Installation
+
+Les fichiers sont dans [la dernière version publiée](../../releases/latest).
+
+### Windows
+
+`Wealfy-<version>-Setup.exe` — raccourcis menu Démarrer et Bureau,
+désinstallation propre. `Wealfy-<version>-portable.exe` fonctionne aussi seul,
+sans installation, y compris depuis une clé USB.
+
+SmartScreen peut afficher un avertissement au premier lancement : l'application
+n'est pas signée par un certificat d'éditeur. « Informations complémentaires »
+puis « Exécuter quand même ».
+
+Vos données vont dans `%LOCALAPPDATA%\Patrimoine`, ou à côté de l'exe en mode
+portable.
+
+### macOS
+
+`Wealfy-<version>-arm64.dmg` pour les Mac Apple Silicon (M1 à M4),
+`Wealfy-<version>-x86_64.dmg` pour les Mac Intel. Ouvrez l'image et glissez
+**Wealfy** dans **Applications**.
+
+**Au premier lancement, macOS refusera d'ouvrir l'application** — un message
+annonce que le développeur n'est pas identifié, ou, sur Apple Silicon, que
+l'application « est endommagée ». Elle ne l'est pas. Wealfy n'est pas signée par
+un certificat Apple, qui coûte 99 $ par an ; macOS bloque par défaut tout
+logiciel qui n'en a pas, quel qu'il soit.
+
+Pour l'autoriser une fois pour toutes, ouvrez le **Terminal**
+(Applications → Utilitaires) et collez :
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Wealfy.app
+```
+
+Puis lancez l'application normalement. Cette commande retire le seul drapeau que
+macOS pose sur les fichiers téléchargés ; elle ne modifie rien d'autre.
+
+*Sans passer par le Terminal :* double-cliquez Wealfy, fermez le message, puis
+**Réglages Système → Confidentialité et sécurité**, descendez jusqu'à « Wealfy a
+été bloquée », cliquez **Ouvrir quand même**. Sur macOS 15 et suivants, l'ancien
+contournement par clic droit → Ouvrir ne fonctionne plus.
+
+Vos données vont dans `~/Bibliothèque/Application Support/Wealfy`.
+
+### Linux
+
+Aucun paquet n'est fourni — il n'existe pas de format unique. L'application
+fonctionne depuis les sources (voir ci-dessous) ; il faut le paquet système
+`gir1.2-webkit2-4.1` en plus des dépendances Python. Les données vont dans
+`~/.local/share/wealfy`.
+
 ## Lancement
 
-**Le plus simple : lancer Wealfy depuis le menu Démarrer.** L'application
-s'ouvre dans sa propre fenêtre — ni console, ni navigateur, ni adresse à
-retenir. La fermer arrête l'application.
-
-L'installation se fait avec `Setup_Wealfy.exe` (raccourcis menu Démarrer et
-Bureau, désinstallation propre). `Wealfy.exe` fonctionne aussi seul, sans
-installation, y compris depuis une clé USB.
+L'application s'ouvre dans sa propre fenêtre — ni console, ni navigateur, ni
+adresse à retenir. La fermer arrête l'application.
 
 En mode développement :
 
@@ -43,22 +91,64 @@ copies écrivant dans la même base SQLite finiraient par se marcher dessus.
 
 | Mode de lancement | Emplacement de la base |
 |---|---|
-| Installé (menu Démarrer) | `%LOCALAPPDATA%\Patrimoine\patrimoine.db` |
-| `Wealfy.exe` posé dans un dossier inscriptible | `patrimoine.db` à côté de l'exe |
+| Windows, installé | `%LOCALAPPDATA%\Patrimoine\patrimoine.db` |
+| Windows, exe posé dans un dossier inscriptible | `patrimoine.db` à côté de l'exe |
+| macOS | `~/Bibliothèque/Application Support/Wealfy/patrimoine.db` |
+| Linux | `~/.local/share/wealfy/patrimoine.db` |
 | `python run.py` | `patrimoine.db` à la racine du projet |
 
-L'exe choisit tout seul : si une base existe déjà à côté de lui, il la prend ; à
-défaut, si une base existe dans `%LOCALAPPDATA%\Patrimoine`, il la reprend — on
-ne repart jamais d'une base vide alors que les données existent ailleurs. Sinon
-il en crée une à côté de lui si le dossier l'accepte, dans `%LOCALAPPDATA%`
-sinon (cas d'une installation dans `Program Files`, non inscriptible).
+**Le mode portable est propre à Windows**, où l'exe est un fichier qu'on pose où
+l'on veut. Sur macOS, « à côté de l'exécutable » désignerait l'intérieur de
+`Wealfy.app` : y écrire invaliderait la signature du bundle et les données
+disparaîtraient à la mise à jour suivante, quand le bundle entier est remplacé.
+
+Sous Windows, l'exe choisit tout seul : si une base existe déjà à côté de lui, il
+la prend ; à défaut, si une base existe dans `%LOCALAPPDATA%\Patrimoine`, il la
+reprend — on ne repart jamais d'une base vide alors que les données existent
+ailleurs. Sinon il en crée une à côté de lui si le dossier l'accepte, dans
+`%LOCALAPPDATA%` sinon (cas d'une installation dans `Program Files`, non
+inscriptible).
 
 La désinstallation ne touche jamais à `%LOCALAPPDATA%\Patrimoine` : les données
 survivent aux mises à jour comme aux réinstallations.
 
-Ce dossier garde son nom d'origine alors que le logiciel s'appelle désormais
-Wealfy : le renommer rendrait invisible la base d'une installation existante,
-pour le seul bénéfice d'un nom de dossier que personne ne voit.
+Ce dossier garde son nom d'origine sous Windows alors que le logiciel s'appelle
+désormais Wealfy : le renommer rendrait invisible la base d'une installation
+existante, pour le seul bénéfice d'un nom de dossier que personne ne voit. macOS
+et Linux n'ayant aucune installation antérieure à ménager, le nom actuel y est
+employé directement.
+
+### Ce contre quoi l'application protège, et ce contre quoi elle ne protège pas
+
+Autant l'écrire franchement, puisque le logiciel manipule des données bancaires.
+
+**Ce qui est tenu.** Le serveur n'écoute que sur `127.0.0.1` : il est
+injoignable depuis le réseau local comme depuis Internet. Les requêtes dont
+l'en-tête `Host` n'est pas une adresse locale sont refusées, ce qui ferme
+l'attaque par *DNS rebinding* — un site malveillant qui ferait pointer son
+domaine vers `127.0.0.1` pour lire votre base à travers votre navigateur. Les
+requêtes provenant d'une autre origine sont refusées également. La clé API des
+cours n'est jamais renvoyée par l'API, seulement l'information qu'elle est
+renseignée ou non. Les sauvegardes ne l'exportent pas non plus.
+
+**Ce qui ne l'est pas.** Il n'y a **aucune authentification** : toute personne
+ayant accès à votre session Windows ou macOS ouverte a accès à vos données. La
+base SQLite n'est **pas chiffrée**, et la clé API des cours y est stockée en
+clair — sur une application locale sans mot de passe maître, un chiffrement
+n'arrêterait de toute façon personne, puisque la clé de déchiffrement devrait
+vivre à côté. Les sauvegardes sont des CSV en clair. Enfin, les exécutables ne
+sont signés ni sur Windows ni sur macOS : rien ne prouve
+cryptographiquement qu'un fichier téléchargé vient bien de ce dépôt.
+
+**En clair** : le chiffrement du disque de votre machine (BitLocker, FileVault)
+est votre véritable protection au repos. Wealfy protège vos données du réseau,
+pas de quelqu'un devant votre écran déverrouillé.
+
+Une seule fonction peut faire sortir des données de la machine, le
+rafraîchissement des cours, **désactivé par défaut** : il transmet au
+fournisseur les symboles interrogés et votre clé API. Vos montants, quantités et
+transactions ne sortent jamais — mais une liste de tickers renseigne déjà sur la
+composition d'un portefeuille.
 
 Base de développement et base de l'exe restent **distinctes** : l'exe embarque
 une copie figée du code, il ne voit pas les données de la version

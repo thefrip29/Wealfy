@@ -1,0 +1,155 @@
+# Construit Wealfy pour Windows et macOS, puis prepare une release.
+#
+# Pourquoi une chaine d'integration alors que le projet est mono-utilisateur :
+# PyInstaller produit du natif et ne sait pas construire pour un autre systeme.
+# Un binaire macOS ne peut donc PAS sortir d'une machine Windows. Ce fichier
+# lance le meme build_exe.py sur un runner de chaque bord.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  # Permet d'exercer toute la chaine sans poser de tag — indispensable ici,
+  # puisque la branche macOS ne peut pas etre essayee en local.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Un echec cote macOS ne doit pas emporter l'installateur Windows.
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows-x64
+          - os: macos-14        # Apple Silicon
+            label: macos-arm64
+          - os: macos-13        # dernier runner Intel
+            label: macos-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # 3.13 et non 3.14 : les roues pyobjc et Pillow y sont sures pour les
+          # deux architectures macOS. Le code n'emploie aucune syntaxe 3.14.
+          python-version: '3.13'
+          cache: pip
+
+      - name: Dependances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      # Le filet : jamais d'artefact produit a partir d'un arbre qui ne passe
+      # pas ses tests.
+      - name: Tests
+        run: python -m unittest discover -s tests -t . -v
+
+      - name: Test de fumee (sources)
+        shell: bash
+        run: bash ci/smoke.sh python run.py
+
+      - name: Construction
+        run: python build_exe.py
+
+      # Celui qui compte vraiment : il exerce le paquet, la ou vivent les
+      # pannes d'empaquetage.
+      - name: Test de fumee (artefact)
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            bash ci/smoke.sh ./dist/Wealfy.exe
+          else
+            bash ci/smoke.sh ./dist/Wealfy.app/Contents/MacOS/Wealfy
+          fi
+
+      - name: Rassembler les artefacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(python -c "import app.version; print(app.version.VERSION)")
+          mkdir -p out
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "dist/Wealfy.exe" "out/Wealfy-$VERSION-portable.exe"
+            if [ -f "dist/Setup_Wealfy.exe" ]; then
+              cp "dist/Setup_Wealfy.exe" "out/Wealfy-$VERSION-Setup.exe"
+            else
+              # build_installer() se contente d'un message quand Inno Setup
+              # manque. Sans ce garde-fou, la release sortirait amputee de
+              # l'installateur sans que rien ne l'ait signale.
+              echo "ECHEC : Inno Setup n'a pas produit l'installateur." >&2
+              exit 1
+            fi
+          else
+            ARCH=$(uname -m)
+            cp dist/Wealfy-"$VERSION"-"$ARCH".dmg out/
+            # `ditto` et non `zip` : il preserve les liens symboliques, les
+            # attributs etendus et le bit d'execution. upload-artifact televerse
+            # fichier par fichier et demolirait un .app brut.
+            ditto -c -k --sequesterRsrc --keepParent \
+                  "dist/Wealfy.app" "out/Wealfy-$VERSION-$ARCH.app.zip"
+          fi
+          ls -la out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artefacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artefacts/**
+          # Brouillon : on relit les notes et on verifie les fichiers avant que
+          # quiconque puisse telecharger.
+          draft: true
+          generate_release_notes: true
+          body: |
+            ## Windows
+
+            Telechargez `Wealfy-*-Setup.exe` et lancez-le. SmartScreen peut
+            afficher un avertissement, l'application n'etant pas signee :
+            « Informations complementaires » puis « Executer quand meme ».
+
+            `Wealfy-*-portable.exe` fonctionne sans installation, y compris
+            depuis une cle USB.
+
+            ## macOS
+
+            `arm64` pour les Mac Apple Silicon (M1 a M4), `x86_64` pour les Mac
+            Intel. Ouvrez l'image disque et glissez Wealfy dans Applications.
+
+            **macOS refusera de l'ouvrir la premiere fois**, avec un message
+            annoncant que le developpeur n'est pas identifie ou que
+            l'application « est endommagee ». Elle ne l'est pas : Wealfy n'est
+            pas signee par un certificat Apple. Dans le Terminal :
+
+                xattr -dr com.apple.quarantine /Applications/Wealfy.app
+
+            Details et methode sans Terminal dans le README.
+
+            ## Vos donnees
+
+            Tout reste sur votre machine. Le serveur n'ecoute que sur la boucle
+            locale et la seule fonction reseau, le rafraichissement des cours,
+            est desactivee par defaut.
