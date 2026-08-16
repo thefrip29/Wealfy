@@ -1093,3 +1093,29 @@ s'ajoutent depuis les paramètres, sans toucher au code.
   rafraîchissements. Charger un historique complet à la première utilisation
   permettrait de reconstruire la courbe de patrimoine passée avec de vrais
   cours plutôt qu'avec les valorisations saisies.
+
+## Licence
+
+Wealfy est distribué sous **GNU Affero General Public License v3.0** — texte
+intégral dans [`LICENSE`](LICENSE).
+
+```
+Copyright (C) 2026 The Wealfy Authors
+
+Ce programme est un logiciel libre : vous pouvez le redistribuer et le modifier
+selon les termes de la GNU Affero General Public License, version 3, telle que
+publiée par la Free Software Foundation.
+
+Il est distribué dans l'espoir qu'il sera utile, mais SANS AUCUNE GARANTIE —
+sans même la garantie implicite de VALEUR MARCHANDE ou d'ADÉQUATION À UN USAGE
+PARTICULIER. Voir la GNU Affero General Public License pour plus de détails.
+```
+
+L'AGPL plutôt que la GPL pour une raison précise : sa clause 13 impose de
+publier le code source à quiconque **héberge** une version modifiée comme
+service en ligne, là où la GPL ne l'exige qu'à la redistribution du logiciel.
+Un gestionnaire de patrimoine est exactement le genre d'outil qu'on transforme
+en service fermé.
+
+Les composants tiers embarqués gardent leur propre licence : voir
+[`THIRD-PARTY.md`](THIRD-PARTY.md).
