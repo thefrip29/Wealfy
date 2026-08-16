@@ -18,11 +18,25 @@
                   l'arrivée — une balle qui tombe ne ralentit pas avant de
                   toucher. Elle s'écrase au contact, puis reprend sa forme.
     2. TRACÉ      elle parcourt le W et laisse le trait derrière elle. Sa vitesse
-                  vient de la CONSERVATION DE L'ÉNERGIE : v = √(v₀² + 2g·Δh).
-                  Elle entre lentement (le choc lui a coûté sa vitesse), fonce
-                  au fond des creux — 2,3 fois plus vite — retombe à 1,8 au
-                  sommet de la bosse centrale, et s'essouffle à 1,17 dans la
-                  dernière montée. Les 21 paliers de `parcourir` sont
+                  combine DEUX effets :
+
+                      v(s) = √(1 + k·Δh) · e^(−λ·s/L)
+
+                  Le premier facteur est la conservation de l'énergie : elle
+                  accélère en descendant. Le second est l'amortissement : elle
+                  ARRIVE LANCÉE de sa chute et s'essouffle en avançant.
+
+                  Sans ce second terme, l'énergie seule faisait repartir la
+                  bille de son point le plus lent — juste après une chute à
+                  pleine vitesse. Le contraste se lisait comme un arrêt net, et
+                  la première descente du W paraissait traînante. Avec
+                  l'amortissement, elle a couvert 22 % du tracé au premier
+                  cinquième du temps, contre 15 % auparavant : elle est en
+                  avance là où elle était en retard.
+
+                  Vitesses relatives : entrée 1,00 · creux 1,38 · fin 0,65.
+                  Finir essoufflée n'est pas un défaut, c'est ce qui motive le
+                  saut qui suit. Les 21 paliers de `parcourir` sont
                   l'intégration de ds/v le long de la courbe.
     3. SAUT       à bout de souffle en haut du trait, elle décolle : parabole de
                   120 unités, six dixièmes de seconde, et elle retombe exactement
@@ -67,11 +81,11 @@
        situer un instant dans la séquence. */
     --chute-duree:  560ms;
     --trace-debut:  560ms;
-    --trace-duree: 1150ms;
-    --saut-debut:  1710ms;
+    --trace-duree: 1020ms;
+    --saut-debut:  1580ms;
     --saut-duree:   600ms;
-    --impact:      2310ms;   /* --saut-debut + --saut-duree */
-    --repos:       2900ms;   /* début de la boucle d'attente */
+    --impact:      2180ms;   /* --saut-debut + --saut-duree */
+    --repos:       2770ms;   /* début de la boucle d'attente */
 
     /* Hauteur de chute, en unités du dessin.
 
@@ -239,54 +253,55 @@
     100% { transform: scale(1, 1); }
   }
 
-  /* Paliers issus de l'intégration de ds/v le long du tracé, v tirée de la
-     conservation de l'énergie. L'écart au mouvement uniforme atteint 5 points :
-     c'est exactement ce qu'on voit, la bille prend de l'avance dans les creux
-     et se fait rattraper dans les montées. */
+  /* Paliers issus de l'intégration de ds/v le long du tracé (énergie ×
+     amortissement — voir l'en-tête du fichier). La bille prend de l'avance dès
+     le départ, l'accentue dans les creux, puis se fait rattraper : à mi-parcours
+     elle a couvert 57 % du tracé, et le dernier cinquième du temps ne lui en
+     donne plus que 3 %. */
   @keyframes parcourir {
       0.0% { offset-distance:   0.00%; }
-      5.0% { offset-distance:   2.99%; }
-     10.0% { offset-distance:   6.51%; }
-     15.0% { offset-distance:  10.56%; }
-     20.0% { offset-distance:  15.10%; }
-     25.0% { offset-distance:  20.19%; }
-     30.0% { offset-distance:  25.76%; }
-     35.0% { offset-distance:  31.82%; }
-     40.0% { offset-distance:  38.09%; }
-     45.0% { offset-distance:  44.09%; }
-     50.0% { offset-distance:  49.64%; }
-     55.0% { offset-distance:  54.75%; }
-     60.0% { offset-distance:  59.95%; }
-     65.0% { offset-distance:  65.60%; }
-     70.0% { offset-distance:  71.64%; }
-     75.0% { offset-distance:  77.59%; }
-     80.0% { offset-distance:  83.08%; }
-     85.0% { offset-distance:  88.08%; }
-     90.0% { offset-distance:  92.56%; }
-     95.0% { offset-distance:  96.55%; }
+      5.0% { offset-distance:   5.05%; }
+     10.0% { offset-distance:  10.52%; }
+     15.0% { offset-distance:  16.32%; }
+     20.0% { offset-distance:  22.41%; }
+     25.0% { offset-distance:  28.72%; }
+     30.0% { offset-distance:  35.16%; }
+     35.0% { offset-distance:  41.32%; }
+     40.0% { offset-distance:  47.00%; }
+     45.0% { offset-distance:  52.21%; }
+     50.0% { offset-distance:  57.11%; }
+     55.0% { offset-distance:  62.08%; }
+     60.0% { offset-distance:  67.18%; }
+     65.0% { offset-distance:  72.32%; }
+     70.0% { offset-distance:  77.23%; }
+     75.0% { offset-distance:  81.80%; }
+     80.0% { offset-distance:  86.03%; }
+     85.0% { offset-distance:  89.94%; }
+     90.0% { offset-distance:  93.57%; }
+     95.0% { offset-distance:  96.89%; }
     100.0% { offset-distance: 100.00%; }
   }
   @keyframes tracer {
       0.0% { stroke-dashoffset: 100.00; }
-      5.0% { stroke-dashoffset:  97.01; }
-     10.0% { stroke-dashoffset:  93.49; }
-     15.0% { stroke-dashoffset:  89.44; }
-     20.0% { stroke-dashoffset:  84.90; }
-     25.0% { stroke-dashoffset:  79.81; }
-     30.0% { stroke-dashoffset:  74.24; }
-     35.0% { stroke-dashoffset:  68.18; }
-     40.0% { stroke-dashoffset:  61.91; }
-     45.0% { stroke-dashoffset:  55.91; }
-     50.0% { stroke-dashoffset:  50.36; }
-     55.0% { stroke-dashoffset:  45.25; }
-     60.0% { stroke-dashoffset:  40.05; }
-     65.0% { stroke-dashoffset:  34.40; }
-     70.0% { stroke-dashoffset:  28.36; }
-     75.0% { stroke-dashoffset:  22.41; }
-     80.0% { stroke-dashoffset:  16.92; }
-     85.0% { stroke-dashoffset:  11.92; }
-     90.0% { stroke-dashoffset:   7.44; }
-     95.0% { stroke-dashoffset:   3.45; }
+      5.0% { stroke-dashoffset:  94.95; }
+     10.0% { stroke-dashoffset:  89.48; }
+     15.0% { stroke-dashoffset:  83.68; }
+     20.0% { stroke-dashoffset:  77.59; }
+     25.0% { stroke-dashoffset:  71.28; }
+     30.0% { stroke-dashoffset:  64.84; }
+     35.0% { stroke-dashoffset:  58.68; }
+     40.0% { stroke-dashoffset:  53.00; }
+     45.0% { stroke-dashoffset:  47.79; }
+     50.0% { stroke-dashoffset:  42.89; }
+     55.0% { stroke-dashoffset:  37.92; }
+     60.0% { stroke-dashoffset:  32.82; }
+     65.0% { stroke-dashoffset:  27.68; }
+     70.0% { stroke-dashoffset:  22.77; }
+     75.0% { stroke-dashoffset:  18.20; }
+     80.0% { stroke-dashoffset:  13.97; }
+     85.0% { stroke-dashoffset:  10.06; }
+     90.0% { stroke-dashoffset:   6.43; }
+     95.0% { stroke-dashoffset:   3.11; }
     100.0% { stroke-dashoffset:   0.00; }
   }
 
