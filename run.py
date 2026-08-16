@@ -14,6 +14,7 @@ Options :
     --debug      serveur de developpement Flask, rechargement automatique
     --no-browser ne rien ouvrir du tout (tests, lancement manuel)
 """
+import json
 import os
 import socket
 import sys
@@ -21,6 +22,7 @@ import threading
 import time
 import traceback
 import webbrowser
+from pathlib import Path
 
 from app import create_app
 from app.paths import data_dir, is_frozen, resource_path
@@ -211,6 +213,33 @@ def servir(app, port):
         journal("Demarrage du serveur", exc)
 
 
+def alerte_systeme(message):
+    """Boite de dialogue native, pour l'echec au demarrage.
+
+    C'est le dernier recours : sans console ni fenetre, une application gelee
+    qui echoue disparait sans un mot. La version precedente n'appelait que
+    l'API Windows, protegee par un `except` muet — donc sur macOS elle mourait
+    silencieusement, ce qui ressemble a un plantage sans cause.
+
+    Aucune de ces deux voies ne doit pouvoir masquer l'exception d'origine :
+    l'appelant la releve juste apres.
+    """
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, message, APP_NAME, 0x10)
+        elif sys.platform == "darwin":
+            import subprocess
+            # `display alert` plutot que `display dialog` : il s'affiche au
+            # premier plan meme sans application active, ce qui est le cas ici.
+            subprocess.run(
+                ["osascript", "-e",
+                 f'display alert {json.dumps(APP_NAME)} message {json.dumps(message)}'],
+                check=False, timeout=30)
+    except Exception:
+        pass
+
+
 def attendre_fin_animation(fenetre):
     """Laisse la sequence d'ouverture du splash aller a son terme.
 
@@ -279,7 +308,12 @@ def ouvrir_fenetre(url, port):
         return False
 
     splash = resource_path("app", "static", "splash.html")
-    depart = f"file:///{splash.replace(os.sep, '/')}" if os.path.exists(splash) else url
+    # `as_uri()` et non une concatenation : sur macOS et Linux le chemin commence
+    # deja par une barre, donc « file:/// » + le chemin en produisait QUATRE, et
+    # WebKit lisait alors le premier dossier comme un nom d'hote. Resultat : une
+    # fenetre blanche, sans la moindre erreur. La methode echappe au passage les
+    # espaces du chemin, que le dossier du projet contient.
+    depart = Path(splash).as_uri() if os.path.exists(splash) else url
 
     largeur, hauteur, x, y, mini = geometrie_fenetre()
     place = {} if x is None else {"x": x, "y": y}
@@ -324,8 +358,12 @@ def ouvrir_fenetre(url, port):
 
     threading.Thread(target=basculer, daemon=True).start()
 
+    # `icon=` n'est honore que par les moteurs GTK et Qt. Sur macOS, l'icone
+    # vient du bundle (CFBundleIconFile) et un .ico n'y aurait aucun sens.
     icone = resource_path("app", "static", "img", "icon.ico")
-    webview.start(icon=icone if os.path.exists(icone) else None)
+    if sys.platform == "darwin" or not os.path.exists(icone):
+        icone = None
+    webview.start(icon=icone)
     return True
 
 
@@ -378,7 +416,13 @@ def main():
             message = "Le serveur local n'a pas demarre."
             print(message)
             if is_frozen():
-                input("Appuyez sur Entree pour fermer...")
+                # Dans un bundle fenetre, l'entree standard est branchee sur le
+                # vide : `input()` y leve EOFError au lieu d'attendre. On ne
+                # retient la fenetre que s'il y a vraiment quelqu'un au clavier.
+                if sys.stdin and sys.stdin.isatty():
+                    input("Appuyez sur Entree pour fermer...")
+                else:
+                    alerte_systeme(message)
             raise SystemExit(1)
         print(f"{APP_NAME} {VERSION} — {url}")
         webbrowser.open(url)
@@ -401,12 +445,5 @@ if __name__ == "__main__":
         # sans un mot. On laisse au moins une trace sur le disque.
         chemin = journal("Demarrage de l'application", exc)
         if is_frozen():
-            try:
-                import ctypes
-                ctypes.windll.user32.MessageBoxW(
-                    None,
-                    f"{APP_NAME} n'a pas pu demarrer.\n\nDetail : {chemin}",
-                    APP_NAME, 0x10)
-            except Exception:
-                pass
+            alerte_systeme(f"{APP_NAME} n'a pas pu demarrer.\n\nDetail : {chemin}")
         raise

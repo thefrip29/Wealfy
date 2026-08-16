@@ -1,4 +1,16 @@
 Flask>=3.0
 waitress>=3.0
+
+# pywebview choisit son moteur d'affichage a l'execution, mais il ne tire PAS
+# les liaisons systeme correspondantes : installe seul, il s'importe sans erreur
+# et echoue au moment d'ouvrir la fenetre. Chaque plateforme doit donc reclamer
+# les siennes.
+#   Windows : WebView2, deja present avec Edge — rien a installer.
+#   macOS   : Cocoa et WKWebView, via pyobjc.
+#   Linux   : GTK et WebKit2 (le paquet systeme gir1.2-webkit2-4.1 reste requis).
 pywebview>=6.2
+pywebview[cocoa]>=6.2 ; sys_platform == "darwin"
+pywebview[gtk]>=6.2 ; sys_platform == "linux"
+
+# Dessin de l'icone applicative, a la construction uniquement.
 pillow>=10

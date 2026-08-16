@@ -25,11 +25,15 @@ import os
 import sys
 
 # Le logiciel s'appelle desormais Wealfy, mais le dossier de donnees garde son
-# nom d'origine : le renommer rendrait invisible la base d'une installation
-# existante (%LOCALAPPDATA%\Patrimoine). Un nom de dossier n'est pas une marque,
-# et il ne se voit nulle part dans l'interface — le changer ne gagnerait rien et
-# couterait les donnees deja en place.
+# nom d'origine SOUS WINDOWS : le renommer rendrait invisible la base d'une
+# installation existante (%LOCALAPPDATA%\Patrimoine). Un nom de dossier n'est
+# pas une marque, et il ne se voit nulle part dans l'interface — le changer ne
+# gagnerait rien et couterait les donnees deja en place.
 APP_DIR_NAME = "Patrimoine"
+
+# macOS et Linux n'ont aucune installation existante a menager : le nom actuel
+# du logiciel y est donc utilise directement.
+APP_DIR_NAME_UNIX = "Wealfy"
 
 
 def is_frozen() -> bool:
@@ -61,8 +65,23 @@ def _is_writable(path) -> bool:
 
 
 def appdata_dir() -> str:
-    root = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
-    return os.path.join(root, APP_DIR_NAME)
+    """Dossier de donnees de l'utilisateur, selon l'usage de chaque systeme.
+
+    Chaque plateforme a sa convention, et s'en ecarter donne un dossier que
+    l'utilisateur ne trouvera pas et que les outils de sauvegarde du systeme
+    n'iront pas chercher. Sur macOS, se rabattre sur `~` comme le faisait la
+    version precedente deposerait un dossier nu dans le repertoire personnel.
+    """
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~"), "Library",
+                            "Application Support", APP_DIR_NAME_UNIX)
+    if sys.platform == "win32":
+        root = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        return os.path.join(root, APP_DIR_NAME)
+    # Linux et le reste : specification XDG.
+    root = (os.environ.get("XDG_DATA_HOME")
+            or os.path.join(os.path.expanduser("~"), ".local", "share"))
+    return os.path.join(root, APP_DIR_NAME_UNIX.lower())
 
 
 def data_dir() -> str:
@@ -73,6 +92,15 @@ def data_dir() -> str:
         # tester evite de prendre le dossier de l'interpreteur pour celui de
         # l'application quand `sys.frozen` est simule (tests).
         if not getattr(sys, "_MEIPASS", None):
+            os.makedirs(appdata, exist_ok=True)
+            return appdata
+        # Le mode PORTABLE est propre a Windows, ou l'executable est un fichier
+        # qu'on pose ou l'on veut. Ailleurs, l'application est un bundle
+        # (Wealfy.app/Contents/MacOS/) ou un paquet installe : « a cote de
+        # l'executable » designe l'interieur du bundle. Y ecrire invaliderait
+        # sa signature, et les donnees disparaitraient a la mise a jour
+        # suivante, quand le bundle entier est remplace.
+        if sys.platform != "win32":
             os.makedirs(appdata, exist_ok=True)
             return appdata
         pres_de_l_exe = os.path.dirname(os.path.abspath(sys.executable))
