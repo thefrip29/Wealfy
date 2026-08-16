@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128"
+     role="img" aria-label="Wealfy">
+  <!-- Fond clair : l'olive du trait est une couleur moyenne, qui perdrait en
+       contraste sur un fond sombre à cette taille. Le fond neutre laisse les
+       deux couleurs de marque intactes. -->
+  <rect width="128" height="128" rx="28" fill="#F4F7F5"/>
+  <rect width="128" height="128" rx="28" fill="none" stroke="#DDE2DE" stroke-width="2"/>
+  <!-- Le symbole (repère 378x289) ramené à 100 de large, centré dans les 128. -->
+  <g transform="translate(14 25.75) scale(.2646)">
+    <path d="M 28 33 C 21 143 33 263 88 263 C 138 263 153 158 178 158
+             C 205 158 221 248 258 248 C 295 248 309 143 328 53"
+          fill="none" stroke="#7D9440" stroke-width="44"
+          stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="332" cy="46" r="42" fill="#DD8C10"/>
+  </g>
+</svg>

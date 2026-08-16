@@ -1,0 +1,8 @@
+# Bibliotheques tierces embarquees : du code minifie dont les symboles (tn, n, l...)
+# noyaient les god nodes et occupaient 35 des 64 communautes du graphe.
+app/static/vendor/
+
+# Sorties de build
+build/
+dist/
+graphify-out/

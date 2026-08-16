@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<!--
+  Écran de lancement, affiché pendant que le serveur se lève.
+
+  Volontairement AUTONOME : aucun lien vers tokens.css ni vers une police. Cette
+  page s'affiche avant que Flask ne réponde — rien ne peut être servi. Les
+  couleurs et les durées sont donc recopiées depuis tokens.css et app.css ; c'est
+  la seule duplication assumée du projet.
+
+  LE MOUVEMENT est celui de l'animation de marque (Logo Launch.mp4), mais la
+  physique est CALCULÉE et non relevée : une bille filmée à 30 images par
+  seconde donne un rythme mou une fois transposé, parce que l'échelle et la
+  durée ne sont plus les mêmes. Quatre temps :
+
+    1. CHUTE      la bille tombe du haut de la page. `cubic-bezier(.33,0,.67,.33)`
+                  n'est pas un réglage esthétique : c'est l'expression exacte de
+                  y = t², donc d'une accélération constante. Aucun freinage à
+                  l'arrivée — une balle qui tombe ne ralentit pas avant de
+                  toucher. Elle s'écrase au contact, puis reprend sa forme.
+    2. TRACÉ      elle parcourt le W et laisse le trait derrière elle. Sa vitesse
+                  vient de la CONSERVATION DE L'ÉNERGIE : v = √(v₀² + 2g·Δh).
+                  Elle entre lentement (le choc lui a coûté sa vitesse), fonce
+                  au fond des creux — 2,3 fois plus vite — retombe à 1,8 au
+                  sommet de la bosse centrale, et s'essouffle à 1,17 dans la
+                  dernière montée. Les 21 paliers de `parcourir` sont
+                  l'intégration de ds/v le long de la courbe.
+    3. SAUT       à bout de souffle en haut du trait, elle décolle : parabole de
+                  120 unités, six dixièmes de seconde, et elle retombe exactement
+                  sur la place du point du logo.
+    4. IMPACT     l'atterrissage donne au trait son épaisseur définitive, écrase
+                  une dernière fois la bille, fait partir une onde et imprime un
+                  léger zoom au logo entier.
+
+  Ni texte ni barre de progression : le logo se construit, c'est tout ce qu'il y
+  a à regarder. Une fois posé, une onde lente prend le relais — sans elle, un
+  démarrage un peu long donnerait l'impression d'une image figée.
+
+  AUCUNE DURÉE N'EST RECOPIÉE DANS run.py. La page expose `resteAnimation()`
+  (tout en bas) : elle lit ses propres animations et répond combien de temps il
+  reste avant la fin. Retoucher les keyframes ne demande donc rien ailleurs, et
+  surtout, le compte part de la PREMIÈRE IMAGE RÉELLE — pas du lancement du
+  programme, qui précède l'ouverture de la fenêtre d'une bonne seconde.
+-->
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Wealfy</title>
+<style>
+  :root {
+    /* Reprise de tokens.css */
+    --bg-page: #F4F7F5;
+
+    /* Couleurs de MARQUE : constantes, identiques dans les deux thèmes. Elles
+       viennent du logo (logo-symbole.svg), pas de la palette d'interface. */
+    --olive:  #7D9440;
+    --bronze: #DD8C10;
+    --lueur:  hsl(78 40% 42% / .16);
+
+    /* Reprise des durées de app.css */
+    --ease:      cubic-bezier(.22, .61, .36, 1);
+    --pose-ease: cubic-bezier(.16, .9, .3, 1);
+    --t-reveal:  1050ms;
+
+    /* ---- Découpage de la séquence ----
+       Chaque temps commence où le précédent finit ; les valeurs cumulées sont
+       écrites en clair plutôt que calculées, pour qu'un coup d'œil suffise à
+       situer un instant dans la séquence. */
+    --chute-duree:  560ms;
+    --trace-debut:  560ms;
+    --trace-duree: 1150ms;
+    --saut-debut:  1710ms;
+    --saut-duree:   600ms;
+    --impact:      2310ms;   /* --saut-debut + --saut-duree */
+    --repos:       2900ms;   /* début de la boucle d'attente */
+
+    /* Hauteur de chute, en unités du dessin.
+
+       La bille doit partir du HAUT DE LA PAGE, quelle que soit la fenêtre. Le
+       symbole étant seul et centré, la distance vaut, en unités :
+
+           hauteurFenêtre / (2 × échelle) − 289/2 + 75
+
+       soit 99,5vh − 70 pour une viewBox de 378 rendue en 190 px (échelle
+       0,5026). `vh` est résolu en pixels CSS puis appliqué en unités
+       utilisateur : le facteur 99,5 contient déjà la conversion. REDIMENSIONNER
+       LE SVG OBLIGE À REFAIRE CE CALCUL. */
+    --chute-h: calc(-99.5vh + 70px);
+
+    /* Fondu de sortie : run.py attend exactement cette durée avant de charger
+       l'application. Les deux valeurs doivent rester d'accord (FONDU_SORTIE). */
+    --t-fondu: 320ms;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg-page: #08090A;
+      --lueur:   hsl(78 40% 42% / .12);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  /* Le fond est porté par <html> autant que par <body> : au moment du fondu de
+     sortie, le corps devient transparent, et sans ce fond dessous on verrait le
+     blanc par défaut du navigateur — un éclair, précisément ce qu'on évite. */
+  html { background: var(--bg-page); }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg-page);
+    /* Ce n'est pas une page : rien à sélectionner, rien à faire glisser. */
+    user-select: none; -webkit-user-select: none;
+    overflow: hidden;
+    transition: opacity var(--t-fondu) var(--ease);
+  }
+
+  /* Sortie : run.py pose cette classe, attend la fin du fondu, puis charge
+     l'application. On fait disparaître le CORPS entier d'un bloc plutôt que
+     chaque élément séparément — les animations d'attente tournent encore, et
+     les couper une à une ferait sauter les opacités au lieu de les fondre.
+     Le fond de <html> reste, donc l'écran ne fait que se vider. */
+  body.sortie { opacity: 0; pointer-events: none; }
+
+  /* ---- lueur d'ambiance : rappel discret du fond animé de l'application ---- */
+  .lueur {
+    position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(30vmin 30vmin at 50% 50%, var(--lueur), transparent 70%);
+    opacity: 0;
+    animation: lueur-entre var(--t-reveal) var(--ease) 200ms forwards,
+               lueur-respire 5s ease-in-out var(--repos) infinite;
+  }
+  @keyframes lueur-entre   { to { opacity: 1; } }
+  @keyframes lueur-respire { 0%, 100% { opacity: .75; } 50% { opacity: 1; } }
+
+  /* ==========================================================================
+     Le symbole
+     ========================================================================== */
+
+  /* `overflow: visible` est indispensable : la bille commence sa chute très
+     au-dessus du cadre du SVG, largement hors de la viewBox. */
+  .mark {
+    display: block; overflow: visible;
+    transform-box: view-box; transform-origin: 50% 50%;
+    /* Le zoom d'impact : le logo accuse le coup, puis se repose. `forwards` et
+       non `both`, sinon son remplissage arrière figerait l'échelle dès la
+       première image et le reste ne bougerait plus. */
+    animation: zoom-impact 520ms var(--pose-ease) var(--impact) forwards;
+  }
+  @keyframes zoom-impact {
+    0%   { transform: scale(1); }
+    26%  { transform: scale(1.05); }
+    100% { transform: scale(1); }
+  }
+
+  /* Le repère du dessin commence à (0,0) — c'est ce qui rend `offset-path`
+     lisible : les coordonnées du chemin de déplacement sont exactement celles
+     du tracé, sans décalage à compenser. */
+  .trait, .rail, .point, .onde, .onde-loop, .chute-y, .chute-x, .saut {
+    transform-box: view-box;
+  }
+
+  /* ---- 1. le trait ---------------------------------------------------------
+     `pathLength="100"` normalise la longueur : on raisonne en pourcentage du
+     geste, sans avoir à mesurer la courbe. Le trait reste FIN pendant tout le
+     parcours — il n'est encore que la trace laissée par la bille. */
+  .trait {
+    stroke-dasharray: 100;
+    stroke-dashoffset: 100;
+    stroke-width: 5;
+    opacity: .78;
+    animation: tracer var(--trace-duree) linear var(--trace-debut) both,
+               epaissir 150ms var(--pose-ease) var(--impact) forwards;
+  }
+  /* L'épaississement est le vrai moment du logo : le geste devient une forme.
+     Déclenché par l'atterrissage, et tenu en 150 ms — sur la vidéo, quatre
+     images séparent la bille en l'air du logo complet. */
+  @keyframes epaissir {
+    from { stroke-width: 5;  opacity: .78; }
+    to   { stroke-width: 44; opacity: 1; }
+  }
+
+  /* ---- 2. la chute ---------------------------------------------------------
+     Deux groupes imbriqués parce que les deux axes n'obéissent pas à la même
+     loi : la verticale accélère jusqu'au bout (gravité), l'horizontale
+     s'amortit (inertie). Une seule transformation ne peut pas porter deux
+     courbes différentes. */
+  .chute-y {
+    transform: translateY(var(--chute-h));
+    animation: tomber var(--chute-duree) cubic-bezier(.33, 0, .67, .33) both;
+  }
+  @keyframes tomber { to { transform: translateY(0); } }
+
+  .chute-x {
+    transform: translateX(-30px);
+    animation: deriver var(--chute-duree) cubic-bezier(0, .6, .4, 1) both;
+  }
+  @keyframes deriver { to { transform: translateX(0); } }
+
+  /* ---- 3. la bille sur le tracé --------------------------------------------
+     Deux éléments, deux rôles :
+
+     `.rail` porte le déplacement. `transform-origin: 0 0` avec un cercle centré
+     en (0,0) : le point d'ancrage du déplacement est alors le centre du cercle,
+     qui suit donc le tracé exactement. Il porte aussi le battement de repos,
+     dont l'échelle se calcule depuis ce même centre.
+
+     `.point` porte les DÉFORMATIONS, avec pour origine (0, 42) : le bas de la
+     bille, c'est-à-dire son point de contact. Un écrasement se calcule depuis
+     le sol, pas depuis le centre — sinon la bille s'enfonce dedans.
+
+     `parcourir` et `tracer` partagent durée, délai et paliers : le trait naît
+     sous la bille, jamais devant ni derrière. Interpolation LINÉAIRE entre les
+     paliers — ce sont eux qui portent la physique, y superposer une courbe de
+     temps la fausserait. */
+  .rail {
+    transform-origin: 0 0;
+    offset-path: path("M 28 33 C 21 143 33 263 88 263 C 138 263 153 158 178 158 C 205 158 221 248 258 248 C 295 248 309 143 328 53");
+    offset-distance: 0%;
+    offset-rotate: 0deg;
+    animation: parcourir var(--trace-duree) linear var(--trace-debut) both,
+               battement 2.8s ease-in-out var(--repos) infinite;
+  }
+  @keyframes battement { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+
+  .point {
+    transform-origin: 0 42px;
+    filter: drop-shadow(0 0 26px hsl(36 87% 46% / .55));
+    /* Deux chocs, deux écrasements : l'arrivée sur le W, puis la pose finale.
+       Sans mode de remplissage — la bille doit revenir ronde d'elle-même. */
+    animation: choc 150ms ease-out var(--trace-debut),
+               choc-final 190ms ease-out var(--impact);
+  }
+  @keyframes choc {
+    0%   { transform: scale(1.24, .74); }
+    55%  { transform: scale(.95, 1.06); }
+    100% { transform: scale(1, 1); }
+  }
+  @keyframes choc-final {
+    0%   { transform: scale(1.18, .80); }
+    60%  { transform: scale(.97, 1.04); }
+    100% { transform: scale(1, 1); }
+  }
+
+  /* Paliers issus de l'intégration de ds/v le long du tracé, v tirée de la
+     conservation de l'énergie. L'écart au mouvement uniforme atteint 5 points :
+     c'est exactement ce qu'on voit, la bille prend de l'avance dans les creux
+     et se fait rattraper dans les montées. */
+  @keyframes parcourir {
+      0.0% { offset-distance:   0.00%; }
+      5.0% { offset-distance:   2.99%; }
+     10.0% { offset-distance:   6.51%; }
+     15.0% { offset-distance:  10.56%; }
+     20.0% { offset-distance:  15.10%; }
+     25.0% { offset-distance:  20.19%; }
+     30.0% { offset-distance:  25.76%; }
+     35.0% { offset-distance:  31.82%; }
+     40.0% { offset-distance:  38.09%; }
+     45.0% { offset-distance:  44.09%; }
+     50.0% { offset-distance:  49.64%; }
+     55.0% { offset-distance:  54.75%; }
+     60.0% { offset-distance:  59.95%; }
+     65.0% { offset-distance:  65.60%; }
+     70.0% { offset-distance:  71.64%; }
+     75.0% { offset-distance:  77.59%; }
+     80.0% { offset-distance:  83.08%; }
+     85.0% { offset-distance:  88.08%; }
+     90.0% { offset-distance:  92.56%; }
+     95.0% { offset-distance:  96.55%; }
+    100.0% { offset-distance: 100.00%; }
+  }
+  @keyframes tracer {
+      0.0% { stroke-dashoffset: 100.00; }
+      5.0% { stroke-dashoffset:  97.01; }
+     10.0% { stroke-dashoffset:  93.49; }
+     15.0% { stroke-dashoffset:  89.44; }
+     20.0% { stroke-dashoffset:  84.90; }
+     25.0% { stroke-dashoffset:  79.81; }
+     30.0% { stroke-dashoffset:  74.24; }
+     35.0% { stroke-dashoffset:  68.18; }
+     40.0% { stroke-dashoffset:  61.91; }
+     45.0% { stroke-dashoffset:  55.91; }
+     50.0% { stroke-dashoffset:  50.36; }
+     55.0% { stroke-dashoffset:  45.25; }
+     60.0% { stroke-dashoffset:  40.05; }
+     65.0% { stroke-dashoffset:  34.40; }
+     70.0% { stroke-dashoffset:  28.36; }
+     75.0% { stroke-dashoffset:  22.41; }
+     80.0% { stroke-dashoffset:  16.92; }
+     85.0% { stroke-dashoffset:  11.92; }
+     90.0% { stroke-dashoffset:   7.44; }
+     95.0% { stroke-dashoffset:   3.45; }
+    100.0% { stroke-dashoffset:   0.00; }
+  }
+
+  /* ---- 4. le saut ----------------------------------------------------------
+     Parabole y = 465,9·t² − 472,9·t : sommet à 120 unités, et une arrivée
+     décalée de (4, −7) — l'écart exact entre le bout du trait (328, 53) et le
+     centre du point du logo (332, 46). C'est donc le saut lui-même qui pose la
+     bille à sa place définitive.
+
+     Onze paliers en interpolation linéaire : la parabole est déjà dans les
+     valeurs, une courbe de temps par-dessus la fausserait. */
+  .saut {
+    animation: sauter var(--saut-duree) linear var(--saut-debut) forwards;
+  }
+  @keyframes sauter {
+      0% { transform: translate(0,      0); }
+     10% { transform: translate(.4px,  -42.6px); }
+     20% { transform: translate(.8px,  -75.9px); }
+     30% { transform: translate(1.2px, -99.9px); }
+     40% { transform: translate(1.6px, -114.6px); }
+     50% { transform: translate(2px,   -120px); }
+     60% { transform: translate(2.4px, -116px); }
+     70% { transform: translate(2.8px, -102.7px); }
+     80% { transform: translate(3.2px, -80.1px); }
+     90% { transform: translate(3.6px, -48.2px); }
+    100% { transform: translate(4px,   -7px); }
+  }
+
+  /* ---- l'onde d'arrivée : la ponctuation du geste ---- */
+  .onde {
+    transform-origin: 332px 46px;
+    opacity: 0;
+    animation: onde-arrivee 900ms cubic-bezier(.12, .7, .3, 1) var(--impact) forwards;
+  }
+  @keyframes onde-arrivee {
+    0%   { opacity: .55; transform: scale(.3); }
+    100% { opacity: 0;   transform: scale(3.6); }
+  }
+
+  /* ---- la boucle d'attente, une fois le logo construit ----
+     Discrète — elle dit « ça travaille », elle ne réclame pas l'attention. */
+  .onde-loop {
+    transform-origin: 332px 46px;
+    opacity: 0;
+    animation: onde-calme 2.8s ease-out var(--repos) infinite;
+  }
+  @keyframes onde-calme {
+    0%   { opacity: .40; transform: scale(1); }
+    70%  { opacity: 0;   transform: scale(2.6); }
+    100% { opacity: 0;   transform: scale(2.6); }
+  }
+
+  /* Un démarrage n'est pas le moment d'imposer du mouvement à qui n'en veut
+     pas : le symbole s'affiche construit, sans rien qui bouge. */
+  @media (prefers-reduced-motion: reduce) {
+    .lueur, .mark, .trait, .rail, .point, .chute-y, .chute-x, .saut,
+    .onde, .onde-loop {
+      animation: none;
+    }
+    .lueur { opacity: 1; }
+    .trait { stroke-dashoffset: 0; stroke-width: 44; opacity: 1; }
+    .chute-y, .chute-x { transform: none; }
+    .saut  { transform: translate(4px, -7px); }
+    .rail  { offset-distance: 100%; }
+    .onde, .onde-loop { opacity: 0; }
+  }
+</style>
+</head>
+<body>
+  <div class="lueur"></div>
+
+  <svg class="mark" viewBox="0 0 378 289" width="190" height="145"
+       role="img" aria-label="Wealfy">
+    <!-- Le trait du W. Même géométrie que logo-symbole.svg, au trait près. -->
+    <path class="trait" pathLength="100"
+          d="M 28 33 C 21 143 33 263 88 263 C 138 263 153 158 178 158
+             C 205 158 221 248 258 248 C 295 248 309 143 328 53"
+          fill="none" stroke="#7D9440"
+          stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Les ondes partent du centre du point posé, pas de la bille en vol. -->
+    <circle class="onde"      cx="332" cy="46" r="42" fill="none"
+            stroke="#DD8C10" stroke-width="3"/>
+    <circle class="onde-loop" cx="332" cy="46" r="42" fill="none"
+            stroke="#DD8C10" stroke-width="2"/>
+
+    <!-- Un groupe par mouvement : chute (deux axes), saut, parcours, puis la
+         bille elle-même qui ne porte que ses déformations. Le cercle est centré
+         en (0,0) — c'est `offset-path` qui le place, image par image. -->
+    <g class="chute-y"><g class="chute-x"><g class="saut"><g class="rail">
+      <circle class="point" cx="0" cy="0" r="42" fill="#DD8C10"/>
+    </g></g></g></g>
+  </svg>
+
+<script>
+  /* run.py interroge cette fonction pour savoir quand basculer sur
+     l'application : « combien de millisecondes avant la fin ? »
+
+     Compter depuis le lancement du programme ne marche pas. Entre le démarrage
+     et la première image d'ici, il y a l'ouverture de la fenêtre et
+     l'initialisation du moteur d'affichage — souvent plus d'une seconde à
+     froid, et autant d'animation coupée. Cette page est le seul endroit qui
+     connaisse l'heure exacte de ses propres animations.
+
+     On lit les animations CSS réelles plutôt qu'une durée recopiée : retoucher
+     les keyframes ne demande donc aucune mise à jour ailleurs. Les boucles
+     d'attente ont une fin infinie — elles ne comptent pas, sans quoi on
+     n'ouvrirait jamais l'application.
+
+     Le seul fait que cette fonction EXISTE dit que la page est en place : le
+     script est en fin de <body>, tout est construit. run.py distingue donc
+     « pas encore chargée » (fonction absente) de « plus rien à jouer » (zéro) —
+     ce dernier cas étant celui d'un système réglé sur animations réduites, où
+     il faut basculer tout de suite. */
+  window.resteAnimation = function () {
+    var reste = 0;
+    document.getAnimations().forEach(function (a) {
+      var fin = a.effect.getComputedTiming().endTime;
+      if (!isFinite(fin)) return;
+      var encore = fin - (a.currentTime || 0);
+      if (encore > reste) reste = encore;
+    });
+    return Math.ceil(reste);
+  };
+</script>
+</body>
+</html>

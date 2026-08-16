@@ -1,0 +1,53 @@
+# ==========================================================================
+#  Ce fichier doit exister AVANT le premier `git add`.
+#
+#  Un fichier commite une seule fois reste recuperable dans l'historique, meme
+#  supprime au commit suivant. Pour un logiciel de patrimoine, cela veut dire
+#  des releves bancaires publics a jamais. L'ordre compte plus que le contenu.
+# ==========================================================================
+
+# ---- Donnees personnelles : ne doivent JAMAIS entrer dans l'historique ----
+# La base vit a la racine du projet en mode developpement (voir app/paths.py :
+# data_dir() renvoie la racine quand l'application n'est pas gelee). Elle
+# contient les transactions, les actifs, et la cle API des cours en clair.
+patrimoine.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Exports de sauvegarde : un dossier date par sauvegarde, dix CSV chacun, avec
+# le detail ligne a ligne des transactions et des comptes.
+sauvegarde/
+
+# Journal d'erreurs : ecrit dans data_dir(), donc a la racine en developpement.
+# Les traces peuvent contenir des valeurs et des chemins absolus.
+erreur.log
+
+# Temoin d'ecriture laisse par app/paths.py::_is_writable en cas d'interruption.
+.ecriture_test
+
+# ---- Artefacts de construction ----
+build/
+dist/
+graphify-out/
+__pycache__/
+*.pyc
+
+# Fichiers .spec : PyInstaller les REGENERE a chaque build. Les versionner est
+# un piege — `pyinstaller Wealfy.spec` ignore silencieusement tous les drapeaux
+# de la ligne de commande, donc un contributeur macOS obtiendrait une
+# configuration Windows qui echoue sans explication.
+*.spec
+
+# ---- Local a la machine ----
+# Contient le nom d'utilisateur Windows et des chemins temporaires.
+.claude/settings.local.json
+
+# Filet de securite local pour le changement de police, sans interet public.
+avant-geist-pixel/
+
+# ---- Environnements Python ----
+.venv/
+venv/
+env/
+.python-version

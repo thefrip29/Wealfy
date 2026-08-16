@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wealfy</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/icon.svg') }}">
+<script>
+  /* Pose le thème avant le premier rendu pour éviter tout flash :
+     choix mémorisé si l'utilisateur en a fait un, réglage système sinon. */
+  (function () {
+    var saved = null;
+    try { saved = localStorage.getItem('patrimoine.theme'); } catch (e) { /* ignore */ }
+    var dark = saved ? saved === 'dark'
+      : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  })();
+
+  /* Richesse des animations, décidée AVANT le premier rendu — la première
+     apparition se joue dès le chargement, un réglage plus tardif arriverait
+     après elle.
+
+     Le mode économe supprime les flous animés et fige le fond : ce sont les
+     deux seuls postes qui coûtent une re-rastérisation à chaque image. Le reste
+     du mouvement (déplacements, opacités) est traité par le compositeur et ne
+     pèse quasiment rien.
+
+     Choix explicite d'abord, puis estimation d'après la machine. `app.js`
+     mesure ensuite la fluidité réelle et corrige si l'estimation était
+     optimiste. Pour forcer :
+       localStorage.setItem('patrimoine.animations', 'economes')  // ou 'completes' */
+  (function () {
+    var force = null;
+    try { force = localStorage.getItem('patrimoine.animations'); } catch (e) { /* ignore */ }
+    var econome;
+    if (force === 'economes' || force === 'completes') {
+      econome = force === 'economes';
+    } else {
+      var coeurs = navigator.hardwareConcurrency || 4;
+      var memoire = navigator.deviceMemory || 4;
+      econome = coeurs <= 4 || memoire <= 4;
+    }
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) econome = true;
+    document.documentElement.setAttribute('data-anim', econome ? 'econome' : 'complet');
+  })();
+</script>
+</head>
+<body>
+
+<!-- Fond animé « lampe à lave » : purement décoratif, donc masqué aux lecteurs
+     d'écran et insensible à la souris. Les cartes restent opaques par-dessus,
+     la lisibilité des chiffres n'est pas touchée. -->
+<div class="lava" aria-hidden="true">
+  <span class="blob b1"></span>
+  <span class="blob b2"></span>
+  <span class="blob b3"></span>
+  <span class="blob b4"></span>
+</div>
+
+<!-- Une seule barre : identité, navigation et contrôles. Deux bandeaux collants
+     empilés donnaient une impression d'encombrement. -->
+<header class="topbar">
+  <div class="brand">
+    <!-- Le symbole est posé ici en clair plutôt que chargé depuis img/ : il se
+         trace au chargement (voir .brand-logo dans app.css), ce qui demande
+         d'atteindre le chemin en CSS — impossible à travers une balise <img>.
+         Les couleurs sont écrites en dur pour la même raison qu'ailleurs : ce
+         sont des constantes de marque, pas des jetons de thème. -->
+    <svg class="brand-logo" viewBox="0 0 378 289" role="img" aria-label="Wealfy">
+      <path class="brand-trait" pathLength="100"
+            d="M 28 33 C 21 143 33 263 88 263 C 138 263 153 158 178 158
+               C 205 158 221 248 258 248 C 295 248 309 143 328 53"
+            fill="none" stroke="#7D9440" stroke-width="44"
+            stroke-linecap="round" stroke-linejoin="round"/>
+      <circle class="brand-point" cx="332" cy="46" r="42" fill="#DD8C10"/>
+    </svg>
+    <span class="brand-name">Wealfy</span>
+  </div>
+
+  <!-- Un seul trait pour toute la barre, qui glisse d'un onglet à l'autre. Deux
+       traits animés en sens inverse pouvaient rester affichés ensemble : ici la
+       situation est impossible, il n'y a qu'un élément. -->
+  <nav class="tabs">
+    <button class="tab active" data-tab="overview">Vue d'ensemble</button>
+    <button class="tab" data-tab="expenses">Dépenses</button>
+    <button class="tab" data-tab="wealth">Patrimoine</button>
+    <button class="tab" data-tab="history">Historique</button>
+    <span class="tab-indicator" aria-hidden="true"></span>
+  </nav>
+
+  <div class="topbar-right">
+    <div class="month-picker">
+      <button class="icon-btn" id="month-prev" title="Mois précédent">&#8249;</button>
+      <input type="month" id="month-input">
+      <button class="icon-btn" id="month-next" title="Mois suivant">&#8250;</button>
+    </div>
+    <button class="icon-btn" id="toggle-privacy"
+            title="Masquer les montants" aria-pressed="true">&#128065;</button>
+    <button class="icon-btn" id="toggle-theme" title="Thème clair / sombre">&#9789;</button>
+    <button class="icon-btn" id="open-settings" title="Paramètres">&#9881;</button>
+  </div>
+</header>
+
+<main>
+  <!-- ============ VUE D'ENSEMBLE ============ -->
+  <section class="panel active" id="tab-overview">
+    <!-- Un seul chiffre domine la page : le patrimoine net. -->
+    <div class="hero" id="ov-hero"></div>
+
+    <!-- Observations factuelles. Vide et invisible quand il n'y a rien à
+         signaler : placé sous le héros pour ne pas repousser le chiffre
+         principal. -->
+    <div id="ov-alertes"></div>
+
+    <div class="kpi-grid" id="ov-kpis"></div>
+
+    <div class="grid-2">
+      <div class="card">
+        <h3>Patrimoine net — 12 mois</h3>
+        <button class="zoom-btn" data-zoom="networth" title="Agrandir" aria-label="Agrandir"></button>
+        <div class="chart-wrap"><canvas id="chart-networth"></canvas></div>
+        <div class="card-extra" id="extra-networth"></div>
+        <details class="note">
+          <summary>Comment cette courbe est construite</summary>
+          Les points passés sont reconstitués depuis les mouvements et les valorisations
+          datées. Utilisez « Valoriser » sur un actif chaque mois pour obtenir une courbe
+          fidèle plutôt qu'un saut au dernier point.
+        </details>
+      </div>
+      <div class="card">
+        <h3>Dépenses par catégorie <span class="sub" id="ov-cat-month"></span></h3>
+        <button class="zoom-btn" data-zoom="categories" title="Agrandir" aria-label="Agrandir"></button>
+        <div class="chart-wrap"><canvas id="chart-categories"></canvas></div>
+        <div class="card-extra" id="extra-categories"></div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <h3>Répartition cible vs réelle</h3>
+        <div id="ov-repartition" class="repartition"></div>
+        <p class="sub" id="ov-frais" style="margin:12px 0 0"></p>
+      </div>
+      <div class="card">
+        <h3>Dépenses / revenus — 6 mois</h3>
+        <button class="zoom-btn" data-zoom="flows" title="Agrandir" aria-label="Agrandir"></button>
+        <div class="chart-wrap"><canvas id="chart-flows"></canvas></div>
+        <div class="card-extra" id="extra-flows"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ DÉPENSES ============ -->
+  <section class="panel" id="tab-expenses">
+    <!-- Point d'entrée principal de l'onglet : ajouter un relevé. -->
+    <div class="card banner">
+      <div class="banner-text">
+        <h3>Relevés bancaires</h3>
+        <p class="sub" id="ex-last-import">Aucun relevé importé pour le moment.</p>
+      </div>
+      <div class="actions">
+        <button class="btn primary big" id="ex-import">+ Ajouter un relevé</button>
+      </div>
+    </div>
+
+    <div class="kpi-grid" id="ex-kpis"></div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>Transactions <span class="sub" id="ex-month-label"></span></h3>
+        <div class="actions">
+          <input type="search" id="ex-search" placeholder="Rechercher…">
+          <select id="ex-filter-cat"><option value="">Toutes catégories</option></select>
+          <button class="btn" id="ex-add">+ Transaction</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="table" id="ex-table">
+          <thead>
+            <tr>
+              <th style="width:110px">Date</th>
+              <th>Libellé</th>
+              <th style="width:190px">Catégorie</th>
+              <th style="width:130px" class="right">Montant</th>
+              <th style="width:150px">Rattachement</th>
+              <th style="width:44px"></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <!-- Le journal est ici, où les imports se font — plutôt que dans
+           l'Historique, qui n'a pas à recueillir ce qui ne rentre ailleurs. -->
+      <details class="note" id="ex-imports">
+        <summary>Journal des imports</summary>
+        <div class="table-wrap scroll-y">
+          <table class="table" id="hi-imports">
+            <thead>
+              <tr>
+                <th>Date d'import</th><th>Source</th><th>Période couverte</th>
+                <th class="right">Lignes</th><th style="width:150px"></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- ============ PATRIMOINE ============ -->
+  <section class="panel" id="tab-wealth">
+    <!-- Point d'entrée pour la saisie initiale du patrimoine. -->
+    <div class="card banner">
+      <div class="banner-text">
+        <h3>Mon patrimoine</h3>
+      </div>
+      <div class="actions">
+        <button class="btn primary big" id="we-add">+ Ajouter</button>
+      </div>
+    </div>
+
+    <div class="kpi-grid" id="we-kpis"></div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>Actifs</h3>
+        <div class="actions">
+          <label class="checkline"><input type="checkbox" id="we-archived"> Voir archivés</label>
+          <span id="we-market-state"></span>
+          <button class="btn" id="we-refresh-quotes">Rafraîchir les cours</button>
+        </div>
+      </div>
+      <div id="we-assets"></div>
+    </div>
+
+    <div class="card">
+      <h3>Passifs</h3>
+      <div class="table-wrap">
+        <table class="table" id="we-liabilities">
+          <thead>
+            <tr>
+              <th>Prêt</th><th>Bien financé</th>
+              <th class="right">Mensualité</th>
+              <th class="right">Capital restant</th>
+              <th class="right">Échéances</th>
+              <th class="right">Fin</th>
+              <th style="width:80px"></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HISTORIQUE ============ -->
+  <section class="panel" id="tab-history">
+    <div class="card">
+      <div class="card-head">
+        <h3>Archive mensuelle</h3>
+        <span class="sub">Recalculée à la volée — aucun snapshot figé</span>
+      </div>
+      <div class="table-wrap">
+        <table class="table" id="hi-archive">
+          <thead>
+            <tr>
+              <th>Mois</th>
+              <th class="right">Revenus</th>
+              <th class="right">Dépenses</th>
+              <th class="right">Solde</th>
+              <th class="right">Épargne</th>
+              <th class="right">Taux d'épargne</th>
+              <th class="right">Patrimoine net</th>
+              <th>Répartition atteinte</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+  </section>
+</main>
+
+<div class="modal-backdrop" id="modal-backdrop" hidden>
+  <div class="modal" id="modal">
+    <div class="modal-head">
+      <h2 id="modal-title"></h2>
+      <button class="icon-btn" id="modal-close">&times;</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-foot" id="modal-foot"></div>
+  </div>
+</div>
+
+<div id="toast-host"></div>
+
+<script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/core.js') }}"></script>
+<script src="{{ url_for('static', filename='js/overview.js') }}"></script>
+<script src="{{ url_for('static', filename='js/expenses.js') }}"></script>
+<script src="{{ url_for('static', filename='js/wealth.js') }}"></script>
+<script src="{{ url_for('static', filename='js/history.js') }}"></script>
+<script src="{{ url_for('static', filename='js/settings.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

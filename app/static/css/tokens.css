@@ -1,0 +1,295 @@
+/* ==========================================================================
+   Design tokens — palette « forêt & bronze »
+
+   Palette source fournie (6 couleurs) :
+     black #08090A · lilac-ash #A7A2A9 · bright-snow #F4F7F5
+     charcoal #575A5E · black-forest #113406 · bronze #CE7E0F
+
+   Rôle de chaque couleur :
+     black-forest  origine du kaki, qui porte l'identité et l'action
+     bronze        attention, alerte, mise en avant ponctuelle
+     black         fond du thème sombre, barre de navigation
+     bright-snow   fond du thème clair, texte sur fond sombre
+     charcoal      texte secondaire
+     lilac-ash     bordures et états désactivés (voir l'ajout 4)
+
+   TROIS AJOUTS ASSUMÉS, signalés comme tels :
+
+   1. Un ROUGE (`--brick`). La palette n'en contient aucun, or une application
+      financière doit distinguer une perte d'un gain. Faute de rouge, il aurait
+      fallu surcharger le bronze — qui sert déjà à l'alerte — et un moins-value
+      deviendrait indistinguable d'un avertissement. Le rouge choisi est chaud
+      et désaturé pour rester dans la famille du bronze.
+
+   2. Des NUANCES CLAIRES du vert. `black-forest` est à 11 % de luminosité :
+      superbe en texte sur fond clair, invisible sur le fond noir du thème
+      sombre. Les variantes gardent la teinte 106°, seule la luminosité change.
+
+   3. Dix COULEURS CATÉGORIELLES pour les graphiques, volontairement HORS
+      palette. Sur un camembert, la question n'est pas l'harmonie avec la
+      marque mais de distinguer une part de sa voisine : dix nuances de kaki
+      auraient été indéchiffrables. Teintes réparties sur toute la roue.
+
+   4. Un GRIS DE TEXTE plus foncé que `lilac-ash`. Mesuré, `lilac-ash` sur
+      `bright-snow` ne donne que 2,3:1 — sous le seuil de lisibilité de 4,5:1,
+      et l'application affiche beaucoup de libellés en 12 px. `lilac-ash` garde
+      donc les bordures et les états désactivés, où le contraste importe peu.
+
+   Tout le reste de l'application ne consomme que les RÔLES définis plus bas :
+   remplacer ce seul fichier suffit à changer l'identité visuelle.
+   ========================================================================== */
+
+:root {
+  /* ---- Palette source, telle que fournie ---- */
+  --black:        #08090A;
+  --lilac-ash:    #A7A2A9;
+  --bright-snow:  #F4F7F5;
+  --charcoal:     #575A5E;
+  --black-forest: #113406;
+  --bronze:       #CE7E0F;
+
+  /* ---- Kaki : le vert de la palette, ramené vers le bronze ----
+     `black-forest` est à 106° — un vert franc, à 71° du bronze : les deux
+     couleurs se tiraient l'une contre l'autre. La rampe est reconstruite à
+     70°, soit 35° du bronze : deux teintes analogues, qui s'accordent au lieu
+     de se disputer. La couleur source reste disponible ci-dessus. */
+  --khaki-900: hsl(70 45% 12%);
+  --khaki-800: hsl(70 45% 19%);
+  --khaki-700: hsl(70 42% 26%);
+  --khaki-600: hsl(70 40% 32%);
+  --khaki-500: hsl(70 38% 42%);
+  --khaki-400: hsl(70 44% 52%);
+  --khaki-300: hsl(70 48% 64%);
+  --khaki-200: hsl(70 48% 76%);
+  --khaki-100: hsl(70 42% 92%);
+
+  --bronze-700: hsl(35 86% 34%);
+  --bronze-600: var(--bronze);                /* hsl(35 86% 43%) */
+  --bronze-400: hsl(35 84% 58%);
+  --bronze-200: hsl(35 82% 78%);
+  --bronze-100: hsl(35 80% 92%);
+
+  /* Rouge ajouté — absent de la palette, voir note 1 en tête de fichier. */
+  --brick-700: hsl(8 68% 32%);
+  --brick-600: hsl(8 66% 41%);
+  --brick-400: hsl(8 70% 62%);
+  --brick-300: hsl(8 74% 72%);
+  --brick-100: hsl(8 72% 93%);
+
+  /* Neutres, interpolés entre black, charcoal, lilac-ash et bright-snow. */
+  --neutral-0:   #FFFFFF;
+  --neutral-50:  var(--bright-snow);
+  --neutral-100: hsl(140 12% 92%);
+  --neutral-200: hsl(150 8% 87%);
+  --neutral-300: hsl(240 5% 78%);
+  --neutral-400: var(--lilac-ash);
+  --neutral-600: var(--charcoal);
+  --neutral-700: hsl(214 5% 26%);
+  --neutral-800: hsl(210 8% 15%);
+  --neutral-900: var(--black);
+
+  /* ---- Sémantiques ---- */
+  --gain:      var(--khaki-600);
+  --gain-bg:   var(--khaki-100);
+  --perte:     var(--brick-600);
+  --perte-bg:  var(--brick-100);
+  --alerte:    var(--bronze-700);
+  --alerte-bg: var(--bronze-100);
+  --info:      var(--khaki-700);
+  --info-bg:   var(--khaki-100);
+
+  /* ---- Classes d'actifs (graphiques) — voir note 3 ----
+     Volontairement HORS palette : dix teintes bien réparties sur la roue.
+     Sur un camembert, la question n'est pas l'harmonie avec la marque mais
+     de distinguer une part de sa voisine ; des nuances de kaki auraient été
+     indéchiffrables. */
+  --actif-1:  #2E6BE6;   /* bleu */
+  --actif-2:  #E07A1F;   /* orange */
+  --actif-3:  #12A15C;   /* vert */
+  --actif-4:  #8B5CF6;   /* violet */
+  --actif-5:  #DB2E7C;   /* rose */
+  --actif-6:  #0E93B8;   /* cyan */
+  --actif-7:  #A8801A;   /* or */
+  --actif-8:  #D6432F;   /* rouge */
+  --actif-9:  #64748B;   /* ardoise */
+  --actif-10: #6C9C1F;   /* citron vert */
+
+  /* ---- Rôles — thème clair ---- */
+  --bg-page:        var(--bright-snow);
+  --bg-surface:     var(--neutral-0);
+  --bg-surface-alt: var(--neutral-100);
+  /* Anthracite neutre, sans teinte kaki : la barre appartient à la page, elle
+     ne porte pas la couleur de marque. L'accent reste sur l'onglet actif. */
+  --bg-nav:         hsl(210 8% 15%);
+  --border:         var(--neutral-200);
+  --border-strong:  var(--neutral-300);
+  --text-primary:   var(--black);
+  --text-secondary: var(--charcoal);          /* 6,4:1 sur bright-snow */
+  /* `lilac-ash` ne tient que 2,3:1 sur `bright-snow` : illisible pour du
+     texte. Il reste la couleur des bordures et des états désactivés
+     (--neutral-400), et le texte discret prend un gris assez foncé pour
+     franchir 4,5:1. */
+  --text-muted:     hsl(214 5% 45%);          /* 4,6:1 sur bright-snow */
+  --text-on-brand:  var(--bright-snow);
+  --nav-indicator:  var(--bronze-400);
+  /* `--action` habille le TEXTE, les bordures et les icônes.
+     `--action-surface` remplit les boutons pleins : il doit rester FONCÉ dans
+     les deux thèmes, puisqu'il porte du texte clair. Confondre les deux rendait
+     le bouton primaire illisible en thème sombre (1,56:1 mesuré). */
+  --action:              var(--khaki-700);
+  --action-hover:        var(--khaki-800);
+  --action-subtle:       var(--khaki-100);
+  --action-surface:      var(--khaki-800);   /* texte clair : 9,3:1 */
+  --action-surface-hover: var(--khaki-900);  /* 13,4:1 */
+  --on-action-surface:   var(--bright-snow);
+  --focus-ring:          var(--khaki-500);
+  --scrim:          hsl(210 11% 4% / .55);
+
+  /* Fond animé (« lampe à lave ») */
+  --lava-1: var(--khaki-400);
+  --lava-2: var(--bronze-400);
+  --lava-3: var(--khaki-600);
+  --lava-4: var(--bronze-200);
+  /* Assez de matière pour que le déplacement se lise. Trop flou et trop pâle,
+     une masse en mouvement passe pour un fond fixe. */
+  --lava-opacity: .30;
+  --lava-blur: 56px;
+
+  /* ---- Rayons ---- */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 22px; /* icône applicative */
+
+  /* ---- Espacements ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* ---- Typographie ---- */
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace; /* montants, ISIN, tableaux */
+  /* Police d'AFFICHAGE — voir la note en fin de fichier. Réservée à l'identité
+     et aux intitulés décoratifs ; jamais un montant, jamais un tableau. */
+  --font-display: "Geist Pixel", var(--font-sans);
+  /* Forme du pixel : 0 = carré net, 100 = rond. Le seul réglage de la police. */
+  --pixel-forme: 0;
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-md: 16px;
+  --text-lg: 20px;
+  --text-xl: 28px;
+  --weight-regular: 400;
+  --weight-medium: 500;
+}
+
+/* ==========================================================================
+   Thème sombre — le noir de la palette prend le fond.
+   Les couleurs sémantiques remontent en luminosité : sur #08090A, le vert
+   d'origine (11 %) et le rouge foncé seraient illisibles.
+   ========================================================================== */
+
+[data-theme="dark"] {
+  --bg-page:        var(--black);
+  --bg-surface:     hsl(210 9% 8%);
+  --bg-surface-alt: hsl(210 8% 12%);
+  /* Un cran au-dessus du fond de page (4 %) : la barre se détache sans
+     tirer sur le kaki. */
+  --bg-nav:         hsl(210 9% 9%);
+  --border:         hsl(214 5% 19%);
+  --border-strong:  hsl(214 5% 30%);
+  --text-primary:   var(--bright-snow);
+  --text-secondary: hsl(240 5% 72%);
+  --text-muted:     hsl(283 4% 52%);
+  --text-on-brand:  var(--bright-snow);
+  --nav-indicator:  var(--bronze-400);
+  --action:              var(--khaki-300);
+  --action-hover:        var(--khaki-200);
+  --action-subtle:       hsl(70 35% 13%);
+  /* Foncé ici aussi : le bouton porte du texte clair. Il ressort quand même
+     de la carte (3,6:1). Le survol assombrit encore, dans les deux thèmes. */
+  --action-surface:      var(--khaki-600);   /* texte clair : 4,8:1 */
+  --action-surface-hover: var(--khaki-700);  /* 6,5:1 */
+  --on-action-surface:   var(--bright-snow);
+  --focus-ring:          var(--khaki-300);
+  --scrim:          hsl(210 11% 2% / .68);
+
+  --gain:      var(--khaki-300);
+  --gain-bg:   hsl(70 40% 12%);
+  --perte:     var(--brick-300);
+  --perte-bg:  hsl(8 45% 13%);
+  --alerte:    var(--bronze-400);
+  --alerte-bg: hsl(35 55% 12%);
+  --info:      var(--khaki-200);
+  --info-bg:   hsl(70 35% 13%);
+
+  /* Mêmes teintes, remontées en luminosité pour le fond sombre. */
+  --actif-1:  #7BA6FF;
+  --actif-2:  #F3A44D;
+  --actif-3:  #4ED894;
+  --actif-4:  #B79BFB;
+  --actif-5:  #F27CAE;
+  --actif-6:  #4FC9E3;
+  --actif-7:  #E0C05A;
+  --actif-8:  #F2806E;
+  --actif-9:  #A3ABB8;
+  --actif-10: #B4DC5E;
+
+  --lava-1: var(--khaki-600);
+  --lava-2: var(--bronze-700);
+  --lava-3: var(--khaki-800);
+  --lava-4: hsl(35 60% 30%);
+  --lava-opacity: .44;
+  --lava-blur: 64px;
+}
+
+/* ==========================================================================
+   Geist Pixel — la police d'affichage
+
+   Police à pixels, sous licence OFL, embarquée avec l'application : rien n'est
+   chargé depuis le réseau, conformément au reste du logiciel. Le fichier
+   d'origine pèse 3,5 Mo pour 481 glyphes ; il est ici réduit au latin-1 et à la
+   ponctuation employée par l'interface, soit 47 Ko — l'axe variable ELSH est
+   conservé, c'est lui qui commande la forme du pixel.
+
+   OÙ ELLE SERT, ET SURTOUT OÙ ELLE NE SERT PAS
+
+   Une police à pixels est une VOIX, pas un outil de lecture. Elle est donc
+   réservée à ce qui se reconnaît d'un coup d'œil et ne se déchiffre jamais :
+   le nom de la marque, et l'intitulé qui coiffe le chiffre principal.
+
+   Elle est tenue à l'écart de tout ce qui se lit vraiment — montants, tableaux,
+   onglets, formulaires, titres de cartes. Sur un logiciel de patrimoine, un
+   chiffre mal lu n'est pas un détail de style : un 8 pris pour un 6 dans une
+   grille de pixels, et c'est une décision qui part de travers. Les montants
+   gardent donc leur police à chasse fixe et leurs chiffres tabulaires.
+
+   `font-display: block` : le nom de la marque doit apparaître dans SA police,
+   pas se poser en deux temps. Le fichier étant local et minuscule, l'attente
+   est de toute façon imperceptible.
+   ========================================================================== */
+
+@font-face {
+  font-family: "Geist Pixel";
+  src: url("../fonts/geist-pixel.woff") format("woff");
+  font-weight: 400;
+  font-display: block;
+}
+
+/* Les montants s'alignent verticalement dans les tableaux */
+.montant {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.montant--gain  { color: var(--gain); }
+.montant--perte { color: var(--perte); }
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}

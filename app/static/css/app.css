@@ -1,0 +1,1214 @@
+/* ==========================================================================
+   Feuille de style de l'application.
+
+   Aucune couleur n'est écrite en dur : tout vient de tokens.css. Les variables
+   ci-dessous ne sont que des alias sémantiques internes, plus le système
+   d'animation (une courbe, trois durées).
+
+   Trois partis pris pour un rendu net plutôt qu'encombré :
+     1. UN chiffre domine chaque écran, le reste descend d'un cran.
+     2. Moins de cadres. On sépare par du blanc et des filets, pas par des
+        boîtes imbriquées.
+     3. Les explications longues se replient (<details class="note">) au lieu
+        de crier en permanence.
+   ========================================================================== */
+
+:root {
+  /* Surfaces et texte */
+  --bg: var(--bg-page);
+  --bg-2: var(--bg-surface);
+  --card: var(--bg-surface);
+  --card-2: var(--bg-surface-alt);
+  --line: var(--border);
+  --line-soft: color-mix(in srgb, var(--border) 55%, transparent);
+  --text: var(--text-primary);
+  --text-2: var(--text-secondary);
+  --muted: var(--text-muted);
+
+  /* Action */
+  --accent: var(--action);
+  --accent-hover: var(--action-hover);
+  --accent-soft: var(--action-subtle);
+
+  /* Sémantique financière */
+  --green: var(--gain);
+  --red: var(--perte);
+  --amber: var(--alerte);
+
+  --radius: var(--radius-lg);
+  --radius-s: var(--radius-md);
+
+  /* Échelle typographique : sept pas, pas un de plus.
+
+     Préfixe `--fs-` et non `--t-` : les durées d'animation portent déjà
+     `--t`, `--t-fast`, `--t-slow`. Avec un préfixe commun, `--t-sm` et
+     `--t-slow` se ressemblaient assez pour qu'on écrive une taille de police
+     là où on voulait une durée — l'erreur passe la compilation CSS sans un
+     mot et ne se voit qu'à l'œil. */
+  --fs-micro: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-base: 14px;
+  --fs-md: 16px;
+  --fs-lg: 21px;
+  --fs-hero: 40px;
+
+  /* Ombres discrètes : la profondeur vient de la hiérarchie, pas du relief. */
+  --shadow-1: 0 1px 2px rgba(31, 31, 29, .04);
+  --shadow-2: 0 4px 16px rgba(31, 31, 29, .07);
+  --shadow-3: 0 24px 64px rgba(31, 31, 29, .18);
+
+  --header-h: 58px;
+
+  --ease: cubic-bezier(.22, .61, .36, 1);
+  --t-fast: 130ms;
+  --t: 220ms;
+  --t-slow: 380ms;
+  /* Apparition des blocs : volontairement plus lente que le reste, pour que
+     l'arrivée du contenu se regarde au lieu de surgir. Le décalage entre
+     blocs compte autant que la durée. */
+  --t-reveal: 1050ms;
+  --reveal-step: 95ms;
+  --reveal-ease: cubic-bezier(.16, .9, .3, 1);
+  /* Défilement d'un mois à l'autre : plus vif que le déroulement vertical,
+     parce qu'on suit un geste et non une mise en place. Courbe symétrique —
+     un carrousel démarre et s'arrête, il ne freine pas à l'arrivée comme un
+     élément qui se pose. */
+  --t-carousel: 560ms;
+  --carousel-step: 42ms;
+  --carousel-ease: cubic-bezier(.4, 0, .2, 1);
+  --carousel-blur: 5px;
+  /* Flou d'amorce : une forme nette qui se déplace vite paraît saccadée ; un
+     léger flou au départ, résorbé avant la fin, donne la fluidité d'un
+     mouvement filé. */
+  --reveal-blur: 7px;
+}
+
+[data-theme="dark"] {
+  --line-soft: color-mix(in srgb, var(--border) 50%, transparent);
+  --shadow-1: 0 1px 2px rgba(2, 12, 24, .30);
+  --shadow-2: 0 4px 16px rgba(2, 12, 24, .34);
+  --shadow-3: 0 24px 64px rgba(2, 12, 24, .55);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+/* Le fond est aussi sur <html> : pendant le remplacement de l'écran de
+   lancement par l'application, c'est lui qu'on voit. Sans cela, l'instant de
+   bascule laisserait passer le blanc par défaut du navigateur. */
+html { background: var(--bg); }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-base);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* L'application prend le relais de l'écran de lancement en fondu : le logo
+     s'efface, le fond reste, l'interface arrive. Sans ce fondu, la barre de
+     navigation et les cartes surgiraient d'un bloc alors que le contenu, lui,
+     se déroule tranquillement. */
+  animation: page-entre var(--t-slow) var(--ease) both;
+}
+@keyframes page-entre { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  body { animation: none; }
+}
+
+h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -.011em; }
+h3 { font-size: var(--fs-sm); }
+button, input, select, textarea { font: inherit; color: inherit; }
+code { font-family: var(--font-mono); font-size: var(--fs-xs); }
+::selection { background: var(--accent-soft); }
+
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong); border-radius: 99px;
+  border: 2px solid transparent; background-clip: content-box;
+}
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* ==========================================================================
+   Animations
+   ========================================================================== */
+
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pop  { from { opacity: 0; transform: translateY(10px) scale(.99); } to { opacity: 1; transform: none; } }
+@keyframes slide-in-right { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
+@keyframes grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* Carrousel. Les deux mois sont côte à côte et défilent ensemble sur une
+   largeur de panneau entière (`--slide-dist`, mesurée en JS).
+
+   AUCUN FONDU : la matière reste opaque et se contente de se déplacer. C'est
+   exactement ce qui sépare un défilement d'un remplacement — une version
+   précédente faisait disparaître l'ancien en fondu pendant que le nouveau
+   apparaissait, et cela se lisait comme une substitution, pas comme un geste.
+
+   Le mois quitté part d'un seul tenant, comme une page qu'on pousse. Le mois
+   qui arrive garde son décalage bloc par bloc et son léger étirement. */
+@keyframes carousel-in-right {
+  0%   { transform: translateX(var(--slide-dist, 100%)) scaleX(1.03); filter: blur(var(--carousel-blur)); }
+  60%  { filter: blur(0); }
+  100% { transform: none; filter: blur(0); }
+}
+@keyframes carousel-in-left {
+  0%   { transform: translateX(calc(var(--slide-dist, 100%) * -1)) scaleX(1.03); filter: blur(var(--carousel-blur)); }
+  60%  { filter: blur(0); }
+  100% { transform: none; filter: blur(0); }
+}
+@keyframes carousel-out-left {
+  0%   { transform: none; filter: blur(0); }
+  40%  { filter: blur(var(--carousel-blur)); }
+  100% { transform: translateX(calc(var(--slide-dist, 100%) * -1)); filter: blur(var(--carousel-blur)); }
+}
+@keyframes carousel-out-right {
+  0%   { transform: none; filter: blur(0); }
+  40%  { filter: blur(var(--carousel-blur)); }
+  100% { transform: translateX(var(--slide-dist, 100%)); filter: blur(var(--carousel-blur)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important; animation-delay: 0ms !important;
+    transition-duration: 1ms !important; scroll-behavior: auto !important;
+  }
+}
+
+/* ==========================================================================
+   Fond animé « lampe à lave »
+
+   Quatre masses floutées qui dérivent lentement, fixées derrière la page.
+   Trois contraintes tenues :
+     - lisibilité : les surfaces (cartes, barre de nav, modales) sont opaques,
+       le mouvement ne se voit que dans les marges ;
+     - performance : uniquement `transform` (composé par le GPU), pas de
+       `background-position` ni de `top/left` qui forceraient un recalcul de
+       mise en page à chaque image ;
+     - respect du réglage système : `prefers-reduced-motion` fige tout.
+   ========================================================================== */
+
+.lava {
+  position: fixed; inset: 0; z-index: 0;
+  overflow: hidden; pointer-events: none;
+  /* `layout paint` isole le rendu sans imposer `size` : l'élément tire sa
+     taille de `inset: 0`, la contenir n'apporterait rien et se retournerait
+     contre nous si le bloc conteneur changeait. */
+  contain: layout paint;
+  /* Le flou est appliqué UNE fois sur le conteneur, pas sur chaque masse :
+     une seule passe GPU au lieu de quatre, ce qui change tout sur une machine
+     modeste. */
+  filter: blur(var(--lava-blur));
+}
+.lava .blob {
+  position: absolute; border-radius: 50%;
+  opacity: var(--lava-opacity);
+  will-change: transform;
+  transition: opacity var(--t-slow) var(--ease), background var(--t-slow) var(--ease);
+}
+/* Mouvement CONTINU ET PERCEPTIBLE.
+
+   Chaque trajet est une boucle fermée — l'image à 100 % est identique à celle
+   à 0 % — jouée en `linear`, sans `alternate` : la dérive ne s'arrête jamais
+   et ne rebrousse jamais chemin.
+
+   La première version était trop lente pour se voir : 13vw parcourus en 9 s,
+   soit ~7 px par seconde sur une forme floutée à 80 px. L'animation tournait
+   réellement, mais sous le seuil de perception — donc immobile à l'œil. Les
+   trajets sont désormais deux à trois fois plus amples et deux fois plus
+   rapides. Les durées restent premières entre elles pour que la composition
+   d'ensemble ne se répète qu'au bout de plusieurs minutes. */
+.lava .blob { animation-timing-function: linear; animation-iteration-count: infinite; }
+
+.lava .b1 {
+  width: 46vw; height: 46vw; min-width: 340px; min-height: 340px;
+  top: -12vh; left: -8vw; background: var(--lava-1);
+  animation-name: lava-a; animation-duration: 17s;
+}
+.lava .b2 {
+  width: 38vw; height: 38vw; min-width: 280px; min-height: 280px;
+  top: 30vh; right: -10vw; background: var(--lava-2);
+  animation-name: lava-b; animation-duration: 23s;
+}
+.lava .b3 {
+  width: 42vw; height: 42vw; min-width: 300px; min-height: 300px;
+  bottom: -16vh; left: 18vw; background: var(--lava-3);
+  animation-name: lava-c; animation-duration: 29s;
+}
+.lava .b4 {
+  width: 26vw; height: 26vw; min-width: 200px; min-height: 200px;
+  top: 8vh; left: 46vw; background: var(--lava-4);
+  animation-name: lava-d; animation-duration: 13s;
+}
+
+@keyframes lava-a {
+  0%   { transform: translate3d(0, 0, 0)          scale(1); }
+  25%  { transform: translate3d(34vw, 22vh, 0)    scale(1.22); }
+  50%  { transform: translate3d(18vw, 52vh, 0)    scale(.86); }
+  75%  { transform: translate3d(-16vw, 30vh, 0)   scale(1.12); }
+  100% { transform: translate3d(0, 0, 0)          scale(1); }
+}
+@keyframes lava-b {
+  0%   { transform: translate3d(0, 0, 0)          scale(1.05); }
+  25%  { transform: translate3d(-32vw, -26vh, 0)  scale(.82); }
+  50%  { transform: translate3d(-46vw, 20vh, 0)   scale(1.24); }
+  75%  { transform: translate3d(-14vw, 44vh, 0)   scale(.94); }
+  100% { transform: translate3d(0, 0, 0)          scale(1.05); }
+}
+@keyframes lava-c {
+  0%   { transform: translate3d(0, 0, 0)          scale(.95); }
+  25%  { transform: translate3d(38vw, -30vh, 0)   scale(1.26); }
+  50%  { transform: translate3d(10vw, -54vh, 0)   scale(1.04); }
+  75%  { transform: translate3d(-26vw, -20vh, 0)  scale(1.18); }
+  100% { transform: translate3d(0, 0, 0)          scale(.95); }
+}
+@keyframes lava-d {
+  0%   { transform: translate3d(0, 0, 0)          scale(1); }
+  25%  { transform: translate3d(-28vw, 38vh, 0)   scale(1.34); }
+  50%  { transform: translate3d(22vw, 56vh, 0)    scale(.8); }
+  75%  { transform: translate3d(36vw, 16vh, 0)    scale(1.16); }
+  100% { transform: translate3d(0, 0, 0)          scale(1); }
+}
+
+/* Figé, mais toujours présent : la couleur de fond reste, le mouvement part. */
+@media (prefers-reduced-motion: reduce) {
+  .lava .blob { animation: none !important; }
+}
+
+/* Tout le contenu passe au-dessus du fond animé. */
+.topbar, main, #toast-host, .modal-backdrop { position: relative; z-index: 1; }
+.topbar { z-index: 40; }
+.modal-backdrop { z-index: 100; }
+#toast-host { z-index: 200; }
+
+/* ==========================================================================
+   Barre unique : identité + navigation + contrôles
+   ========================================================================== */
+
+.topbar {
+  position: sticky; top: 0; z-index: 40;
+  display: flex; align-items: center; gap: var(--space-5);
+  height: var(--header-h); padding: 0 var(--space-5);
+  background: var(--bg-nav);
+  color: var(--text-on-brand);
+}
+
+.brand { display: flex; align-items: center; gap: 9px; flex: none; }
+/* Le symbole est plus large que haut (378x289) : on cale sa HAUTEUR sur celle
+   du nom, et la largeur suit. Fixer les deux le déformerait. */
+.brand-logo { width: 29px; height: 22px; display: block; overflow: visible; }
+
+/* Le W se trace au chargement, comme sur l'écran de lancement — en deux fois
+   plus court : ici c'est un rappel, pas une ouverture. `pathLength="100"` sur
+   le chemin normalise la longueur, on raisonne donc en pourcentage du geste.
+
+   Une seule fois par chargement, jamais en boucle : une marque qui s'agite en
+   permanence dans un coin de l'écran finit par gêner la lecture des chiffres.
+   La règle globale `prefers-reduced-motion` ramène ces durées à 1 ms, et
+   `both` garantit que l'état final reste affiché. */
+.brand-trait {
+  stroke-dasharray: 100;
+  animation: brand-trace 900ms var(--reveal-ease) 120ms both;
+}
+@keyframes brand-trace { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+
+.brand-point {
+  transform-box: view-box; transform-origin: 332px 46px;
+  animation: brand-point 380ms var(--reveal-ease) 940ms both;
+}
+@keyframes brand-point {
+  0%   { opacity: 0; transform: scale(.2); }
+  70%  { opacity: 1; transform: scale(1.16); }
+  100% { opacity: 1; transform: none; }
+}
+
+/* Le nom de la marque est le premier des deux seuls endroits en Geist Pixel.
+   Il se reconnaît, il ne se déchiffre pas — c'est la définition d'un logotype.
+
+   Trois ajustements imposés par la police et non par le goût : elle est un cran
+   plus PETITE d'œil que l'Inter à taille égale, d'où les 18 px ; son crénage
+   négatif d'origine (-.02em) écrasait les pixels les uns sur les autres, il
+   repasse en positif ; et sa graisse unique rend `--weight-medium` sans effet,
+   la police n'a qu'un seul poids. */
+.brand-name {
+  font-family: var(--font-display);
+  font-variation-settings: "ELSH" var(--pixel-forme);
+  font-size: 18px;
+  letter-spacing: .04em;
+  color: var(--text-on-brand);
+}
+
+.topbar-right {
+  display: flex; align-items: center; gap: 6px;
+  margin-left: auto; flex: none;
+}
+
+.month-picker {
+  display: flex; align-items: center;
+  background: color-mix(in srgb, var(--text-on-brand) 9%, transparent);
+  border-radius: var(--radius-s); padding: 2px;
+  transition: background var(--t) var(--ease);
+}
+.month-picker:focus-within { background: color-mix(in srgb, var(--text-on-brand) 16%, transparent); }
+.month-picker input {
+  background: none; border: 0; padding: 3px 4px; width: 122px;
+  color: var(--text-on-brand); text-align: center;
+  font-family: var(--font-mono); font-size: var(--fs-xs);
+}
+.month-picker input:focus { outline: none; }
+.month-picker input::-webkit-calendar-picker-indicator { filter: invert(1); opacity: .55; cursor: pointer; }
+
+.icon-btn {
+  background: transparent; border: 1px solid transparent; color: var(--muted);
+  width: 30px; height: 30px; border-radius: var(--radius-s);
+  cursor: pointer; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease),
+              border-color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+}
+.icon-btn:hover { color: var(--text); background: var(--card-2); }
+.icon-btn:active { transform: scale(.92); }
+
+.topbar .icon-btn { color: color-mix(in srgb, var(--text-on-brand) 70%, transparent); }
+.topbar .icon-btn:hover {
+  background: color-mix(in srgb, var(--text-on-brand) 14%, transparent);
+  color: var(--text-on-brand);
+}
+#open-settings { transition: transform var(--t-slow) var(--ease); }
+#open-settings:hover { transform: rotate(45deg); }
+
+/* ---------- navigation, dans la barre ---------- */
+.tabs { position: relative; display: flex; align-items: center; gap: 2px; height: 100%; }
+.tab {
+  position: relative; height: 100%;
+  background: none; border: 0; cursor: pointer;
+  padding: 0 var(--space-3);
+  font-size: var(--fs-sm);
+  color: color-mix(in srgb, var(--text-on-brand) 62%, transparent);
+  transition: color var(--t) var(--ease);
+}
+.tab:hover { color: color-mix(in srgb, var(--text-on-brand) 88%, transparent); }
+.tab.active { color: var(--text-on-brand); font-weight: var(--weight-medium); }
+
+/* Trait de navigation : UN seul élément pour toute la barre.
+
+   Auparavant chaque onglet portait le sien en `::after`, et un changement
+   d'onglet animait deux pseudo-éléments en sens inverse — celui qui part vers
+   scaleX(0), celui qui arrive vers scaleX(1). Deux traits pouvaient donc rester
+   visibles en même temps si l'une des deux transitions ne se terminait pas.
+
+   Un trait unique qui glisse ne peut pas se dédoubler, et le déplacement se lit
+   comme un geste : le trait suit l'onglet au lieu de réapparaître ailleurs.
+   Position et largeur sont posées en JS (App.placeIndicator), mesurées sur
+   l'onglet actif — les libellés n'ont pas la même longueur. */
+.tab-indicator {
+  position: absolute; bottom: 0; left: 0;
+  height: 2px; width: var(--indicator-w, 0);
+  background: var(--nav-indicator); border-radius: 2px 2px 0 0;
+  transform: translateX(var(--indicator-x, 0));
+  transition: transform var(--t) var(--ease), width var(--t) var(--ease);
+  pointer-events: none;
+}
+/* Au tout premier placement il n'y a pas de mouvement à montrer : le trait doit
+   être là, pas arriver de la gauche. */
+.tabs:not(.indicator-pret) .tab-indicator { transition: none; opacity: 0; }
+
+/* ==========================================================================
+   Mise en page
+   ========================================================================== */
+
+main { padding: var(--space-6) var(--space-5) var(--space-7); max-width: 1280px; margin: 0 auto; }
+
+/* Les blocs traversent toute la largeur : sans découpe, on les verrait défiler
+   dans les marges d'une page large. `clip` découpe sans créer de conteneur de
+   défilement, contrairement à `hidden`. */
+main { overflow-x: clip; }
+body { overflow-x: hidden; }
+
+.panel { display: none; flex-direction: column; gap: var(--space-5); }
+.panel.active { display: flex; }
+
+/* Un onglet garde à l'écran le contenu de sa visite précédente jusqu'à ce que
+   le chargement le remplace. Ce contenu périmé apparaissait le temps d'un
+   aller-retour serveur — un bref reste de l'ancienne page. Le panneau reste
+   donc transparent jusqu'au début de son animation d'entrée.
+
+   `opacity` et non `visibility` : la place doit rester occupée, sinon la page
+   se replie puis se rouvre, et la barre de défilement saute. */
+.panel.attente { opacity: 0; }
+
+/* Le contenu se déroule du haut vers le bas : chaque bloc se déplie
+   légèrement (scaleY) en montant, avec un flou d'amorce. `transform-origin`
+   en haut donne le sens du déroulement — le bloc se déplie depuis son bord
+   supérieur, comme une bande qu'on abaisse. */
+@keyframes reveal {
+  0%   { opacity: 0; transform: translateY(28px) scaleY(.94); filter: blur(var(--reveal-blur)); }
+  55%  { filter: blur(0); }
+  100% { opacity: 1; transform: none; filter: blur(0); }
+}
+
+/* `.revealing` et l'ordre `--i` sont posés par le JS au moment du rendu, et
+   JAMAIS modifiés après coup : changer `animation-name` sur un élément déjà
+   affiché relancerait l'animation — c'est ce qui faisait rejouer l'apparition
+   juste après un changement de mois, comme si la page s'était rechargée.
+
+   L'ordre est calculé en JS plutôt qu'avec `nth-child`, parce que les rangées
+   (indicateurs, colonnes) doivent s'ouvrir cellule par cellule : sans cela une
+   rangée de quatre cases arriverait d'un bloc au milieu d'un déroulement. */
+.panel.revealing .reveal-item {
+  animation: reveal var(--t-reveal) var(--reveal-ease) both;
+  animation-delay: calc(var(--reveal-step) * var(--i, 0));
+  transform-origin: top center;
+  will-change: transform, opacity, filter;
+}
+/* Défilement latéral : autre rythme, autre courbe, et l'étirement part du
+   centre et non du bord haut. */
+main[data-slide] .panel.revealing .reveal-item {
+  transform-origin: center;
+  animation-duration: var(--t-carousel);
+  animation-timing-function: var(--carousel-ease);
+  animation-delay: calc(var(--carousel-step) * var(--i, 0));
+}
+main[data-slide="next"] .panel.revealing .reveal-item { animation-name: carousel-in-right; }
+main[data-slide="prev"] .panel.revealing .reveal-item { animation-name: carousel-in-left; }
+
+/* ---------- mode économe ----------------------------------------------------
+
+   Les mêmes gestes, débarrassés de ce qui coûte cher.
+
+   Un déplacement ou une opacité sont traités par le compositeur : la couche est
+   dessinée une fois, puis déplacée. Un `filter: blur()` qui varie, lui, oblige à
+   REDESSINER l'élément à chaque image — et jusqu'à dix blocs s'animent en même
+   temps. C'est le poste dominant, et le premier à sauter sur une machine
+   modeste : sous les 60 images par seconde, un flou animé ne se lit plus comme
+   un flou, il se lit comme des saccades.
+
+   Le mouvement est donc conservé à l'identique — mêmes trajectoires, mêmes
+   courbes — seulement plus court et sans flou. `data-anim` est posé dans
+   l'en-tête du document, avant le premier rendu. */
+@keyframes reveal-sobre {
+  0%   { opacity: 0; transform: translateY(28px) scaleY(.94); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes carousel-in-right-sobre {
+  0%   { transform: translateX(var(--slide-dist, 100%)); }
+  100% { transform: none; }
+}
+@keyframes carousel-in-left-sobre {
+  0%   { transform: translateX(calc(var(--slide-dist, 100%) * -1)); }
+  100% { transform: none; }
+}
+@keyframes carousel-out-left-sobre {
+  0%   { transform: none; }
+  100% { transform: translateX(calc(var(--slide-dist, 100%) * -1)); }
+}
+@keyframes carousel-out-right-sobre {
+  0%   { transform: none; }
+  100% { transform: translateX(var(--slide-dist, 100%)); }
+}
+
+:root[data-anim="econome"] {
+  /* Plus court : une animation longue laisse plus d'occasions de décrocher. */
+  --t-reveal: 620ms;
+  --reveal-step: 55ms;
+  --t-carousel: 400ms;
+  --carousel-step: 26ms;
+}
+:root[data-anim="econome"] .panel.revealing .reveal-item {
+  animation-name: reveal-sobre;
+  /* Sans flou à annoncer, on ne réserve plus de couche pour lui. */
+  will-change: transform, opacity;
+}
+:root[data-anim="econome"] main[data-slide="next"] .panel.revealing .reveal-item { animation-name: carousel-in-right-sobre; }
+:root[data-anim="econome"] main[data-slide="prev"] .panel.revealing .reveal-item { animation-name: carousel-in-left-sobre; }
+:root[data-anim="econome"] .panel-leaving .leaving-item { will-change: transform; }
+:root[data-anim="econome"] .panel-leaving.go .leaving-item { animation-name: carousel-out-left-sobre; }
+:root[data-anim="econome"] main[data-slide="next"] .panel-leaving.go .leaving-item { animation-name: carousel-out-left-sobre; }
+:root[data-anim="econome"] main[data-slide="prev"] .panel-leaving.go .leaving-item { animation-name: carousel-out-right-sobre; }
+
+/* Le fond « lampe à lave » est le seul mouvement PERMANENT de l'application :
+   quatre masses de 26 à 46 vw floutées à 56 px, redessinées en continu. Il
+   consomme même quand l'utilisateur ne fait rien. Figé, il garde exactement le
+   même aspect — le flou est alors rastérisé une fois pour toutes. */
+:root[data-anim="econome"] .lava .blob { animation: none; will-change: auto; }
+
+/* Copie du mois qu'on quitte, posée par-dessus le temps de sa sortie. Elle est
+   hors flux : le nouveau contenu prend sa place immédiatement, sans saut de
+   mise en page. */
+.panel-leaving {
+  position: absolute; pointer-events: none; z-index: 2;
+  display: flex; flex-direction: column; gap: var(--space-5);
+}
+/* La page quittée part d'un seul tenant : c'est une page qu'on pousse, pas une
+   collection de blocs qui se dispersent. Sans cela, un bloc encore immobile et
+   opaque masquerait le bloc déjà arrivé de la page suivante.
+
+   La sortie n'est armée que par `.go`, posée à l'instant précis où l'entrée
+   démarre. Sans cette attente, l'onglet Historique — 660 ms de calcul — voyait
+   sa page sortir, disparaître, puis la nouvelle arriver bien après : deux
+   mouvements successifs au lieu d'un défilement. La copie reste donc figée à
+   l'écran le temps du rendu, ce qui évite aussi le vide. */
+.panel-leaving .leaving-item {
+  transform-origin: center;
+  will-change: transform, filter;
+}
+.panel-leaving.go .leaving-item {
+  animation: carousel-out-left var(--t-carousel) var(--carousel-ease) both;
+}
+main[data-slide="next"] .panel-leaving.go .leaving-item { animation-name: carousel-out-left; }
+main[data-slide="prev"] .panel-leaving.go .leaving-item { animation-name: carousel-out-right; }
+
+.card {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: var(--space-5);
+}
+.card > h3 { margin-bottom: var(--space-4); }
+
+.card-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-4);
+}
+.actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.sub { color: var(--muted); font-weight: var(--weight-regular); font-size: var(--fs-xs); }
+
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: var(--space-5); }
+
+/* ---------- héros : le chiffre qui compte ---------- */
+.hero {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: var(--space-6); flex-wrap: wrap;
+  padding: var(--space-2) 0 var(--space-5);
+  border-bottom: 1px solid var(--line);
+}
+.hero-main { min-width: 260px; }
+/* Second et dernier emplacement : l'intitulé qui coiffe le chiffre principal.
+   Une seule occurrence par écran, en capitales, jamais déchiffrée — on sait ce
+   qu'il y a écrit avant de l'avoir lu. Le chiffre juste en dessous, lui, reste
+   en chasse fixe : c'est la donnée.
+
+   13 px et non 12 : sous cette taille la grille de pixels se referme et les
+   capitales deviennent des taches. */
+.hero-label {
+  font-family: var(--font-display);
+  font-variation-settings: "ELSH" var(--pixel-forme);
+  font-size: 13px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .10em; margin-bottom: 6px;
+}
+.hero-value {
+  font-family: var(--font-mono); font-size: var(--fs-hero);
+  font-weight: var(--weight-medium); letter-spacing: -.035em;
+  line-height: 1.05; font-variant-numeric: tabular-nums;
+}
+.hero-meta {
+  display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+  margin-top: var(--space-3); font-size: var(--fs-sm); color: var(--muted);
+}
+.hero-side { display: flex; gap: var(--space-6); flex-wrap: wrap; }
+.hero-stat .s-label { font-size: var(--fs-xs); color: var(--muted); margin-bottom: 3px; }
+.hero-stat .s-value {
+  font-family: var(--font-mono); font-size: var(--fs-lg);
+  font-weight: var(--weight-medium); letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- KPI : secondaires, donc plus sobres ---------- */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--space-4); }
+.kpi {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: var(--space-4);
+  transition: border-color var(--t) var(--ease);
+}
+.kpi:hover { border-color: var(--border-strong); }
+.kpi .label { color: var(--muted); font-size: var(--fs-xs); margin-bottom: 8px; }
+.kpi .value {
+  font-family: var(--font-mono); font-size: var(--fs-lg);
+  font-weight: var(--weight-medium); letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums; line-height: 1.15;
+}
+.kpi .delta { font-size: var(--fs-xs); margin-top: 6px; color: var(--muted); }
+.kpi .delta.up { color: var(--red); }
+.kpi .delta.down, .kpi .delta.good { color: var(--green); }
+.kpi .delta.bad { color: var(--red); }
+
+/* ==========================================================================
+   Confidentialité — masquage des montants mis en évidence
+
+   Actif par défaut. Ne floute que les chiffres saillants : ceux qu'un regard
+   de passage attrape en premier. Les tableaux de détail restent lisibles,
+   sinon l'application devient inutilisable au quotidien.
+
+   `filter: blur()` seul laisserait le texte sélectionnable et copiable —
+   d'où `user-select: none`. La valeur exacte reste dans le DOM : c'est un
+   cache-écran, pas un chiffrement.
+   ========================================================================== */
+
+body.privacy .hero-value,
+body.privacy .hero-stat .s-value,
+body.privacy .kpi .value,
+body.privacy .metric-row .m-value {
+  filter: blur(10px);
+  user-select: none;
+  pointer-events: none;
+}
+.hero-value, .hero-stat .s-value, .kpi .value, .metric-row .m-value {
+  transition: filter var(--t) var(--ease);
+}
+#toggle-privacy[aria-pressed="true"] { color: var(--bronze-400); }
+
+/* ==========================================================================
+   Observations patrimoniales
+   ========================================================================== */
+
+/* Repliée, la carte tient sur une ligne. Elle porte un fond et un filet
+   d'accent : discrète en hauteur, mais impossible à confondre avec du décor —
+   sans quoi on cesse de la voir. */
+.alertes {
+  background: var(--card);                 /* même surface que les cartes */
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--fs-sm);
+}
+/* Seul le filet et la pastille changent de couleur : un fond teinté faisait
+   tache au milieu de cartes toutes neutres. */
+.alertes.urgent { border-left-color: var(--alerte); }
+.alertes > summary {
+  cursor: pointer; list-style: none; color: var(--text);
+  font-weight: var(--weight-medium);
+  display: flex; align-items: center; gap: 9px;
+  transition: color var(--t-fast) var(--ease);
+}
+.alertes > summary::-webkit-details-marker { display: none; }
+.alertes > summary::before {
+  content: "i"; width: 17px; height: 17px; border-radius: 50%; flex: none;
+  background: var(--accent); color: var(--text-on-brand);
+  font-size: 11px; font-style: italic; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.alertes > summary::after {
+  content: "afficher"; font-size: var(--fs-xs); font-weight: var(--weight-regular);
+  color: var(--accent); margin-left: auto;
+}
+.alertes[open] > summary::after { content: "masquer"; }
+.alertes > summary:hover::after { text-decoration: underline; }
+/* Un point à voir se signale par la couleur, pas par la taille. */
+.alertes.urgent > summary::before { content: "!"; background: var(--alerte); }
+.alertes.urgent > summary::after { color: var(--alerte); }
+
+.alerte {
+  display: grid; grid-template-columns: auto 1fr auto;
+  gap: var(--space-3); align-items: start;
+  padding: var(--space-3) 0 var(--space-3) var(--space-3);
+  border-top: 1px solid var(--line-soft);
+}
+.alerte:first-of-type { margin-top: var(--space-2); }
+.alerte .pill { margin-top: 2px; }
+.alerte-titre { font-size: var(--fs-sm); }
+.alerte-detail { font-size: var(--fs-xs); color: var(--muted); line-height: 1.6; margin-top: 2px; }
+.alerte-action { align-self: center; }
+@media (max-width: 620px) {
+  .alerte { grid-template-columns: auto 1fr; padding-left: 0; }
+  .alerte-action { grid-column: 2; }
+}
+
+/* ==========================================================================
+   Contrôles
+   ========================================================================== */
+
+.btn {
+  background: var(--card); border: 1px solid var(--border-strong); color: var(--text);
+  padding: 7px var(--space-3); border-radius: var(--radius-s); cursor: pointer;
+  font-size: var(--fs-sm);
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+              transform var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn:active { transform: translateY(1px); }
+/* Bouton plein : surface foncée dédiée, pas la couleur de texte d'action.
+   Voir la note dans tokens.css — les confondre rendait le libellé illisible
+   sur le thème sombre. */
+.btn.primary {
+  background: var(--action-surface); border-color: var(--action-surface);
+  color: var(--on-action-surface);
+}
+.btn.primary:hover {
+  background: var(--action-surface-hover); border-color: var(--action-surface-hover);
+  color: var(--on-action-surface);
+}
+.btn.danger { color: var(--red); border-color: var(--line); }
+.btn.danger:hover { border-color: var(--red); color: var(--red); background: var(--perte-bg); }
+.btn.small { padding: 4px 10px; font-size: var(--fs-xs); }
+.btn.big { padding: 9px var(--space-4); font-size: var(--fs-base); }
+.btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+
+.btn.busy { pointer-events: none; opacity: .7; }
+.btn.busy::before {
+  content: ""; display: inline-block; width: 11px; height: 11px;
+  margin-right: 7px; vertical-align: -1px;
+  border: 2px solid currentColor; border-right-color: transparent;
+  border-radius: 50%; animation: spin 700ms linear infinite;
+}
+
+input[type=text], input[type=number], input[type=date], input[type=month],
+input[type=search], input[type=password], select, textarea {
+  background: var(--bg-surface); border: 1px solid var(--border-strong);
+  color: var(--text);
+  border-radius: var(--radius-s); padding: 7px 10px; width: 100%;
+  font-size: var(--fs-sm);
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+input:hover, select:hover, textarea:hover { border-color: var(--accent); }
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
+}
+input[type=number], input[type=date], input[type=month] { font-family: var(--font-mono); }
+textarea { font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.6; resize: vertical; }
+select[multiple] { padding: 4px; }
+.actions input[type=search] { width: 200px; }
+.actions select { width: auto; }
+
+.checkline {
+  display: inline-flex; align-items: center; gap: 7px;
+  color: var(--text-2); font-size: var(--fs-sm); cursor: pointer;
+  transition: color var(--t-fast) var(--ease);
+}
+.checkline:hover { color: var(--text); }
+.checkline input { width: auto; }
+input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
+
+/* ==========================================================================
+   Tableaux
+   ========================================================================== */
+
+.table-wrap { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; }
+.table th {
+  position: sticky; top: 0; z-index: 1;
+  text-align: left; font-weight: var(--weight-medium); font-size: var(--fs-xs);
+  color: var(--muted); padding: 8px 12px 10px; white-space: nowrap;
+  background: var(--card); border-bottom: 1px solid var(--line);
+}
+.table td { padding: 10px 12px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
+.table tbody tr { transition: background var(--t-fast) var(--ease); }
+.table tbody tr:last-child td { border-bottom: 0; }
+.table tbody tr:hover { background: var(--card-2); }
+.table .right, th.right { text-align: right; }
+.table .empty { color: var(--muted); text-align: center; padding: var(--space-6); }
+.table select { padding: 4px 8px; font-size: var(--fs-sm); }
+
+.num, .montant {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  letter-spacing: -.01em;
+}
+.pos { color: var(--gain); }
+.neg { color: var(--perte); }
+.muted { color: var(--muted); }
+.nowrap { white-space: nowrap; }
+.ell { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: 5px; font-size: var(--fs-micro); line-height: 1.7;
+  background: var(--card-2); border: 1px solid var(--line); color: var(--text-2);
+}
+.pill.accent { color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); background: var(--info-bg); }
+.pill.warn { color: var(--alerte); border-color: color-mix(in srgb, var(--alerte) 40%, transparent); background: var(--alerte-bg); }
+.pill.ok, .pill.live { color: var(--gain); border-color: color-mix(in srgb, var(--gain) 40%, transparent); background: var(--gain-bg); }
+.pill.live::before {
+  content: ""; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--gain); animation: pulse 2s var(--ease) infinite;
+}
+
+/* ==========================================================================
+   Graphiques
+   ========================================================================== */
+
+.chart-wrap { position: relative; height: 250px; }
+.chart-wrap.tall { height: 320px; }
+
+/* ==========================================================================
+   Agrandissement d'un graphique, sur place
+
+   La carte prend toute la largeur de sa grille et pousse les autres. Le
+   déplacement est animé en FLIP (voir App.flip) : la mise en page change
+   d'un coup, puis chaque carte est ramenée visuellement à sa position
+   d'avant et rejoue le trajet. C'est ce qui permet d'animer un changement de
+   grille, qu'aucune transition CSS ne sait interpoler.
+   ========================================================================== */
+
+/* Flèche d'angle : une cible, pas une phrase. */
+.zoom-btn {
+  position: absolute; top: var(--space-3); right: var(--space-3);
+  width: 26px; height: 26px; border-radius: var(--radius-sm);
+  background: none; border: 1px solid transparent; cursor: pointer;
+  color: var(--muted); line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease),
+              border-color var(--t-fast) var(--ease);
+}
+.zoom-btn::before { content: "⤢"; font-size: 14px; }
+.card.expanded .zoom-btn::before { content: "⤡"; }
+.zoom-btn:hover { color: var(--accent); border-color: var(--line); background: var(--card-2); }
+.card { position: relative; }
+.card > h3 { padding-right: var(--space-6); }
+
+.grid-2 > .card.expanded { grid-column: 1 / -1; }
+.card-extra:empty { display: none; }
+.card-extra { margin-top: var(--space-4); }
+
+/* Agrandie, la carte devient elle-même une grille : graphique à gauche,
+   détail à droite. Placer les éléments par le CSS évite de les déplacer dans
+   le document — la remise à plat se réduit alors à retirer une classe. */
+.card.expanded {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(300px, 1.05fr);
+  column-gap: var(--space-5);
+  align-items: start;
+}
+.card.expanded > h3,
+.card.expanded > .note { grid-column: 1 / -1; }
+.card.expanded > .chart-wrap { grid-column: 1; height: min(56vh, 500px); }
+.card.expanded > .card-extra { grid-column: 2; margin-top: 0; }
+@media (max-width: 900px) {
+  .card.expanded { grid-template-columns: 1fr; }
+  .card.expanded > .chart-wrap,
+  .card.expanded > .card-extra { grid-column: 1; }
+  .card.expanded > .card-extra { margin-top: var(--space-4); }
+}
+
+/* Filtres par type d'actif : la courbe ne montre que ce qui est coché, et
+   l'échelle se recalcule sur les seules séries visibles. */
+.filtres {
+  display: flex; flex-direction: column; gap: 2px;
+  max-height: min(56vh, 500px); overflow-y: auto;
+}
+.filtre {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: 6px var(--space-2); border-radius: var(--radius-sm);
+  cursor: pointer; font-size: var(--fs-sm);
+  transition: background var(--t-fast) var(--ease);
+}
+.filtre:hover { background: var(--card-2); }
+.filtre input { width: auto; flex: none; }
+.filtre .puce { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.filtre .montant { margin-left: auto; color: var(--muted); font-size: var(--fs-xs); }
+
+/* ==========================================================================
+   Explications repliables — présentes sans encombrer
+   ========================================================================== */
+
+.note {
+  margin-top: var(--space-4); font-size: var(--fs-xs);
+  color: var(--muted); line-height: 1.6;
+}
+.note > summary {
+  cursor: pointer; color: var(--text-2); list-style: none;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: color var(--t-fast) var(--ease);
+}
+.note > summary::-webkit-details-marker { display: none; }
+.note > summary::before {
+  content: "＋"; font-size: 11px; color: var(--muted);
+  transition: transform var(--t) var(--ease);
+}
+.note[open] > summary::before { content: "－"; }
+.note > summary:hover { color: var(--accent); }
+.note[open] > summary { margin-bottom: 8px; }
+
+.hint { font-size: var(--fs-xs); color: var(--muted); line-height: 1.6; margin: 0; }
+
+.callout {
+  border: 1px solid color-mix(in srgb, var(--alerte) 45%, transparent);
+  background: var(--alerte-bg); color: var(--text);
+  border-radius: var(--radius-s); padding: var(--space-3) var(--space-4);
+  font-size: var(--fs-xs); line-height: 1.65;
+}
+.callout.info {
+  border-color: color-mix(in srgb, var(--info) 45%, transparent);
+  background: var(--info-bg);
+}
+
+/* ==========================================================================
+   Bandeau d'action
+   ========================================================================== */
+
+.banner {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-4); flex-wrap: wrap;
+  background: var(--card-2); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: var(--space-4) var(--space-5);
+}
+.banner .banner-text { min-width: 260px; flex: 1; }
+.banner .banner-text h3 { margin-bottom: 3px; }
+.banner .sub { display: block; }
+
+/* ==========================================================================
+   Répartition cible / réelle
+   ========================================================================== */
+
+.repartition { display: flex; flex-direction: column; gap: var(--space-4); }
+.rep-row .rep-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: var(--fs-sm); margin-bottom: 7px; gap: var(--space-3);
+}
+.rep-bars {
+  position: relative; height: 8px; border-radius: 99px;
+  background: var(--card-2); overflow: visible;
+}
+.rep-real {
+  position: absolute; inset: 0 auto 0 0; height: 8px;
+  background: var(--accent); border-radius: 99px;
+  transform-origin: left;
+  animation: grow-x var(--t-slow) var(--ease) both;
+  transition: width var(--t-slow) var(--ease);
+}
+.rep-target {
+  position: absolute; top: -4px; bottom: -4px; width: 2px;
+  background: var(--text); opacity: .55; border-radius: 2px;
+  transition: left var(--t-slow) var(--ease);
+}
+.rep-legend {
+  display: flex; gap: var(--space-4); flex-wrap: wrap;
+  font-size: var(--fs-xs); color: var(--muted);
+}
+
+/* ==========================================================================
+   Groupes d'actifs
+   ========================================================================== */
+
+.group { border-bottom: 1px solid var(--line-soft); }
+.group:last-child { border-bottom: 0; }
+.group-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  padding: var(--space-3) 2px; cursor: pointer; user-select: none;
+  transition: color var(--t-fast) var(--ease);
+}
+.group-head:hover { color: var(--accent); }
+.group-head .g-left { display: flex; align-items: center; gap: 9px; }
+.group-head .caret {
+  color: var(--muted); display: inline-block; font-size: var(--fs-xs);
+  transition: transform var(--t) var(--ease), color var(--t) var(--ease);
+}
+.group.open .caret { transform: rotate(90deg); color: var(--accent); }
+
+.group-body {
+  display: grid; grid-template-rows: 0fr;
+  transition: grid-template-rows var(--t) var(--ease);
+}
+.group.open .group-body { grid-template-rows: 1fr; }
+.group-body > .group-inner { overflow: hidden; }
+
+.asset-row {
+  display: grid; grid-template-columns: 1fr 150px 140px 120px 88px;
+  gap: var(--space-3); align-items: center;
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5);
+  border-top: 1px solid var(--line-soft);
+  transition: background var(--t-fast) var(--ease);
+}
+.asset-row:hover { background: var(--card-2); }
+.asset-row .a-name { font-weight: var(--weight-medium); }
+.asset-row .a-meta { font-size: var(--fs-micro); color: var(--muted); margin-top: 2px; }
+
+/* ==========================================================================
+   Listes de métriques
+   ========================================================================== */
+
+.metric-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0 var(--space-6); }
+.metric-row {
+  display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3);
+  padding: 10px 0; border-bottom: 1px solid var(--line-soft);
+}
+.metric-row .m-label { color: var(--muted); font-size: var(--fs-sm); }
+.metric-row .m-value {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-medium); text-align: right;
+}
+
+/* ==========================================================================
+   Modale
+   ========================================================================== */
+
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  background: var(--scrim);
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: var(--space-7) var(--space-4); overflow-y: auto;
+  animation: fade var(--t) var(--ease);
+}
+.modal-backdrop[hidden] { display: none; }
+.modal {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); width: min(840px, 100%);
+  box-shadow: var(--shadow-3);
+  display: flex; flex-direction: column; max-height: calc(100vh - 96px);
+  animation: pop var(--t) var(--ease);
+}
+.modal.wide { width: min(1140px, 100%); }
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--line);
+}
+.modal-head h2 { font-size: var(--fs-md); }
+.modal-body { padding: var(--space-5); overflow-y: auto; }
+.modal-foot {
+  display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2);
+  padding: var(--space-3) var(--space-5); border-top: 1px solid var(--line);
+}
+.modal-foot:empty { display: none; }
+
+/* ==========================================================================
+   Formulaires
+   ========================================================================== */
+
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-4); }
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field label { font-size: var(--fs-xs); color: var(--text-2); font-weight: var(--weight-medium); }
+.field.full { grid-column: 1 / -1; }
+.field .hint { margin-top: 1px; }
+
+.section-title {
+  font-size: var(--fs-sm); font-weight: var(--weight-medium); color: var(--text);
+  margin: var(--space-6) 0 var(--space-3);
+  padding-bottom: var(--space-2); border-bottom: 1px solid var(--line);
+}
+.section-title:first-child { margin-top: 0; }
+
+.tabs-inline {
+  display: flex; gap: var(--space-1); margin-bottom: var(--space-5);
+  flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 0;
+}
+.tabs-inline button {
+  position: relative; background: none; border: 0; color: var(--muted);
+  padding: 8px var(--space-3) 10px; cursor: pointer; font-size: var(--fs-sm);
+  transition: color var(--t-fast) var(--ease);
+}
+.tabs-inline button::after {
+  content: ""; position: absolute; left: var(--space-3); right: var(--space-3); bottom: -1px;
+  height: 2px; background: var(--accent); border-radius: 2px 2px 0 0;
+  transform: scaleX(0); transition: transform var(--t) var(--ease);
+}
+.tabs-inline button:hover { color: var(--text); }
+.tabs-inline button.active { color: var(--text); font-weight: var(--weight-medium); }
+.tabs-inline button.active::after { transform: scaleX(1); }
+.subpanel { display: none; }
+.subpanel.active { display: block; animation: fade var(--t) var(--ease); }
+
+/* ==========================================================================
+   Recherche d'instrument
+   ========================================================================== */
+
+.search-results {
+  margin-top: var(--space-3);
+  max-height: 340px; overflow-y: auto;
+  display: flex; flex-direction: column;
+}
+.search-item {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  width: 100%; text-align: left; cursor: pointer;
+  background: none; border: 0; border-bottom: 1px solid var(--line-soft);
+  padding: var(--space-3) var(--space-2);
+  transition: background var(--t-fast) var(--ease), padding-left var(--t-fast) var(--ease);
+}
+.search-item:hover { background: var(--card-2); padding-left: var(--space-3); }
+
+/* ==========================================================================
+   Choix de ce qu'on ajoute — point d'entrée unique du patrimoine
+   ========================================================================== */
+
+.choice-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-2);
+}
+.choice {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-3); width: 100%; text-align: left; cursor: pointer;
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius-s); padding: var(--space-3) var(--space-4);
+  transition: border-color var(--t-fast) var(--ease),
+              background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+}
+.choice:hover { border-color: var(--accent); background: var(--action-subtle); }
+.choice:active { transform: scale(.995); }
+.choice-title { font-size: var(--fs-base); color: var(--text); }
+.choice-sub { font-size: var(--fs-xs); color: var(--muted); margin-top: 2px; }
+.choice-go {
+  color: var(--muted); flex: none;
+  transition: transform var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.choice:hover .choice-go { color: var(--accent); transform: translateX(3px); }
+
+/* ==========================================================================
+   Saisie rapide du patrimoine existant
+   ========================================================================== */
+
+.quick-grid { display: flex; flex-direction: column; }
+.quick-row {
+  display: grid; grid-template-columns: 1fr 150px 118px;
+  gap: var(--space-2); align-items: center;
+  padding: 5px 0;
+}
+.quick-row .quick-amount input,
+.quick-row .quick-rate input { text-align: right; font-family: var(--font-mono); }
+.quick-row .quick-amount input:not(:placeholder-shown) {
+  border-color: var(--accent); background: var(--action-subtle);
+}
+@media (max-width: 620px) {
+  .quick-row { grid-template-columns: 1fr 110px; }
+  .quick-row .quick-rate { grid-column: 2; }
+}
+
+/* ==========================================================================
+   États vides
+   ========================================================================== */
+
+.empty-cta { text-align: center; padding: var(--space-7) var(--space-4); }
+.empty-cta p { color: var(--muted); margin: 0 0 var(--space-4); }
+
+/* ==========================================================================
+   Notifications
+   ========================================================================== */
+
+#toast-host {
+  position: fixed; bottom: var(--space-5); right: var(--space-5); z-index: 200;
+  display: flex; flex-direction: column; gap: var(--space-2); align-items: flex-end;
+}
+.toast {
+  background: var(--card); border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-s); padding: 11px var(--space-4);
+  box-shadow: var(--shadow-2); max-width: 380px; font-size: var(--fs-sm);
+  animation: slide-in-right var(--t) var(--ease);
+  transition: opacity var(--t) var(--ease), transform var(--t) var(--ease);
+}
+.toast.leaving { opacity: 0; transform: translateX(12px); }
+.toast.error { border-left-color: var(--perte); }
+.toast.success { border-left-color: var(--gain); }
+.toast a { color: var(--accent); text-decoration: underline; cursor: pointer; }
+
+.loading { color: var(--muted); padding: var(--space-5); text-align: center; }
+.scroll-y { max-height: 400px; overflow-y: auto; }
+
+/* ==========================================================================
+   Écrans étroits
+   ========================================================================== */
+
+@media (max-width: 900px) {
+  .topbar { height: auto; flex-wrap: wrap; padding: var(--space-3) var(--space-4); gap: var(--space-3); }
+  .tabs { order: 3; width: 100%; overflow-x: auto; height: 40px; }
+  .topbar-right { order: 2; }
+}
+@media (max-width: 620px) {
+  main { padding: var(--space-4) var(--space-3) var(--space-6); }
+  .hero-value { font-size: 30px; }
+  .asset-row { grid-template-columns: 1fr 120px; row-gap: 6px; padding-left: var(--space-3); }
+  .modal-backdrop { padding: var(--space-4) var(--space-2); }
+}

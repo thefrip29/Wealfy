@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 378 289" width="378" height="289"
+     role="img" aria-label="Symbole Wealfy : un W tracé d'un seul trait, achevé par un point">
+  <!-- Monogramme W en un seul geste : le trait descend, remonte à mi-hauteur,
+       redescend, puis s'élève jusqu'au point. La bosse centrale est
+       volontairement plus basse que les deux montants — c'est elle qui fait
+       lire un W plutôt qu'une simple ondulation.
+
+       Deux couleurs, pas une de plus : l'olive porte le trait, le bronze marque
+       le sommet atteint. Les mêmes valeurs se retrouvent dans icon.svg,
+       splash.html, index.html et build_exe.py — ce sont des constantes de
+       marque, pas des jetons de thème : elles ne changent pas avec le mode
+       clair ou sombre. -->
+  <path d="M 28 33 C 21 143 33 263 88 263 C 138 263 153 158 178 158
+           C 205 158 221 248 258 248 C 295 248 309 143 328 53"
+        fill="none" stroke="#7D9440" stroke-width="44"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="332" cy="46" r="42" fill="#DD8C10"/>
+</svg>

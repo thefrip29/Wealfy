@@ -1,0 +1,26 @@
+# Fins de ligne normalisees en LF dans le depot.
+#
+# Sans cela, un fichier ecrit sous Windows (CRLF) puis touche sous macOS (LF)
+# apparait comme entierement reecrit : le diff affiche cinq cents lignes
+# modifiees la ou une seule l'a ete. Le depot stocke donc du LF, et chaque
+# machine retrouve la convention de son systeme a la sortie.
+* text=auto eol=lf
+
+# Fichiers binaires : jamais de conversion, elle les corromprait.
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.ico   binary
+*.icns  binary
+*.png   binary
+*.jpg   binary
+*.db    binary
+*.exe   binary
+*.dmg   binary
+
+# Scripts shell : LF obligatoire meme sur Windows, sinon le shebang casse
+# (`/usr/bin/env bash\r` est introuvable) — vaut pour ci/smoke.sh.
+*.sh text eol=lf
+
+# L'installateur Inno Setup se lit sous Windows uniquement.
+*.iss text eol=crlf
