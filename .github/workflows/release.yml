@@ -35,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # 3.13 et non 3.14 : les roues pyobjc et Pillow y sont sures pour les
           # deux architectures macOS. Le code n'emploie aucune syntaxe 3.14.
