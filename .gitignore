@@ -46,6 +46,20 @@ __pycache__/
 # Filet de securite local pour le changement de police, sans interet public.
 avant-geist-pixel/
 
+# Sources de marque brutes : le zip de la police (3,5 Mo), la video de
+# l'animation (1 Mo), les variantes du logo, des maquettes. 4,6 Mo de fichiers
+# qui ont servi a PRODUIRE ce qui est dans app/static/, et que le depot n'a pas
+# besoin de porter — l'application embarque deja les versions finales.
+#
+# Le PNG qui s'y trouve serait de toute facon refuse par la verification
+# automatique (.github/workflows/ci.yml), qui interdit les images : une capture
+# de l'application montre des montants reels, et distinguer une capture d'un
+# logo demanderait de regarder chaque fichier.
+#
+# A publier un jour ? Alors dans un depot separe, ou en assouplissant le
+# controle des images — c'est une decision, pas un oubli.
+assets/
+
 # ---- Environnements Python ----
 .venv/
 venv/

@@ -1,0 +1,33 @@
+# Surveillance des dependances.
+#
+# Une faille dans Flask ou waitress est une faille de Wealfy : le serveur tourne
+# sur la machine de l'utilisateur, avec ses donnees. Mieux vaut l'apprendre par
+# une proposition automatique que par un article six mois plus tard.
+#
+# Les actions GitHub sont surveillees aussi, et c'est au moins aussi important :
+# une action compromise s'execute dans la chaine qui CONSTRUIT les binaires
+# publies. C'est le chemin par lequel un logiciel se retrouve corrompu sans que
+# son code source ait change d'une ligne.
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    labels:
+      - dépendances
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    labels:
+      - dépendances
+      - sécurité

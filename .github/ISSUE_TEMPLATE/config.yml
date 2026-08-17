@@ -1,0 +1,17 @@
+# `blank_issues_enabled: false` force le passage par un modele. Les deux
+# modeles portent l'avertissement sur les donnees personnelles ; une issue
+# vierge permettrait de le contourner sans l'avoir lu.
+blank_issues_enabled: false
+
+contact_links:
+  - name: 🔒 Signaler une faille de sécurité
+    url: https://github.com/thefrip29/Wealfy/security/advisories/new
+    about: >
+      En privé, jamais par une issue publique. Une faille annoncée
+      publiquement est exploitable avant d'être corrigée.
+
+  - name: 💬 Poser une question
+    url: https://github.com/thefrip29/Wealfy/discussions
+    about: >
+      Pour un usage, une installation, un doute. Les issues sont réservées
+      aux problèmes identifiés et aux propositions.

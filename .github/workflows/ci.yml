@@ -1,0 +1,110 @@
+# Verification de chaque proposition de modification.
+#
+# SECURITE — ce fichier est le point d'entree d'un inconnu dans le depot. Trois
+# regles le gouvernent :
+#
+#   1. `pull_request` et JAMAIS `pull_request_target`. Le second executerait le
+#      code de la branche de base avec les secrets du depot et un jeton en
+#      ecriture, tout en checkoutant du code etranger : c'est la faille classique
+#      qui permet a n'importe qui d'exfiltrer les secrets d'un projet par une
+#      simple proposition de modification.
+#   2. `permissions: contents: read` et rien d'autre. Meme si une etape etait
+#      detournee, le jeton ne peut rien ecrire.
+#   3. Aucun secret n'est utilise ici. Rien a voler.
+#
+# La construction des binaires publies vit dans release.yml, declenchee par un
+# tag — que seule une personne ayant les droits d'ecriture peut poser. Une
+# proposition de modification ne peut donc pas produire de binaire publie.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  fuite-de-donnees:
+    name: Aucune donnee personnelle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Le .gitignore protege celui qui l'a. Un contributeur peut travailler
+      # depuis un ancien clone, forcer un ajout, ou renommer un fichier. Ce
+      # controle est la derniere barriere avant que des releves bancaires
+      # n'entrent dans un historique public — d'ou son echec BLOQUANT.
+      - name: Bases, sauvegardes et journaux
+        run: |
+          INTERDITS=$(git ls-files | grep -Ei '\.(db|sqlite|sqlite3)$|^sauvegarde/|(^|/)erreur\.log$' || true)
+          if [ -n "$INTERDITS" ]; then
+            echo "::error::Des fichiers de donnees personnelles sont suivis par git :"
+            echo "$INTERDITS"
+            echo "Retirez-les avec 'git rm --cached <fichier>' et verifiez .gitignore."
+            exit 1
+          fi
+          echo "Aucun fichier de donnees personnelles suivi."
+
+      # Une capture d'ecran de l'application montre des montants reels. Elles
+      # n'ont donc rien a faire dans le depot, meme pour illustrer une
+      # proposition — les images d'une issue vivent chez GitHub, pas ici.
+      - name: Captures d'ecran
+        run: |
+          IMAGES=$(git ls-files | grep -Ei '\.(png|jpg|jpeg|gif|webp)$' || true)
+          if [ -n "$IMAGES" ]; then
+            echo "::error::Images ajoutees au depot :"
+            echo "$IMAGES"
+            echo "Une capture de l'application montre des montants reels."
+            echo "Joignez-la a l'issue plutot qu'au depot."
+            exit 1
+          fi
+          echo "Aucune image dans le depot."
+
+  tests:
+    name: Tests ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      # Sur Linux, pywebview reclame GTK ; inutile ici, aucun test n'ouvre de
+      # fenetre. On installe donc le strict necessaire au serveur.
+      - name: Dependances
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install Flask waitress pillow
+
+      - name: Tests
+        run: python -m unittest discover -s tests -t . -v
+
+  durcissement:
+    name: Garde-fous reseau
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install Flask waitress
+
+      # Ces trois protections sont la raison d'etre du durcissement : si l'une
+      # saute sans qu'on s'en apercoive, une page web malveillante peut lire la
+      # base entiere. Elles sont donc verifiees separement et nommement.
+      - name: DNS rebinding, origine croisee, cle API
+        run: |
+          python -m unittest -v \
+            tests.test_api.TestDurcissement.test_hote_etranger_refuse \
+            tests.test_api.TestDurcissement.test_origine_etrangere_refusee \
+            tests.test_api.TestDurcissement.test_cle_api_jamais_renvoyee

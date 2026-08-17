@@ -1,0 +1,88 @@
+name: Signaler un problème
+description: Quelque chose ne fonctionne pas comme prévu
+labels: ["problème"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### ⚠️ Avant de continuer — vos données
+
+        Cette issue sera **publique et indexée par les moteurs de recherche**.
+        Un fichier joint reste accessible par son URL même après suppression.
+
+        Ne joignez **jamais** votre `patrimoine.db`, le dossier `sauvegarde/`,
+        `erreur.log`, ni une capture d'écran montrant des montants réels.
+
+        Pour illustrer : `python run.py --debug` ouvre l'application, où vous
+        pouvez saisir deux ou trois montants inventés. Le bouton en forme d'œil,
+        en haut à droite, masque aussi les montants.
+
+        **Une faille de sécurité ne se signale pas ici** mais en privé :
+        voir [SECURITY.md](../blob/main/SECURITY.md).
+
+  - type: checkboxes
+    id: donnees
+    attributes:
+      label: Confidentialité
+      options:
+        - label: Ce signalement ne contient aucune donnée financière réelle.
+          required: true
+
+  - type: textarea
+    id: attendu
+    attributes:
+      label: Ce que vous attendiez
+    validations:
+      required: true
+
+  - type: textarea
+    id: obtenu
+    attributes:
+      label: Ce qui s'est passé
+      description: Le message d'erreur exact, s'il y en a un.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduire
+    attributes:
+      label: Comment le reproduire
+      placeholder: |
+        1. Ouvrir l'onglet Patrimoine
+        2. Cliquer sur « + Ajouter »
+        3. …
+    validations:
+      required: true
+
+  - type: dropdown
+    id: systeme
+    attributes:
+      label: Système
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version de Wealfy
+      description: Visible dans Paramètres, ou le nom du fichier téléchargé.
+      placeholder: 1.0.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Mode de lancement
+      options:
+        - Installateur
+        - Exécutable portable
+        - Depuis les sources (python run.py)
+    validations:
+      required: true

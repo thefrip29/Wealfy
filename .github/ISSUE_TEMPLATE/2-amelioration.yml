@@ -1,0 +1,50 @@
+name: Proposer une amélioration
+description: Une idée, une fonctionnalité, une simplification
+labels: ["amélioration"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Les idées sont bienvenues, y compris « ce truc m'a fait trébucher ».
+
+        ⚠️ Cette issue est **publique** : aucune capture d'écran ni aucun
+        fichier contenant vos montants réels.
+
+  - type: checkboxes
+    id: donnees
+    attributes:
+      label: Confidentialité
+      options:
+        - label: Cette proposition ne contient aucune donnée financière réelle.
+          required: true
+
+  - type: textarea
+    id: besoin
+    attributes:
+      label: Le besoin
+      description: >
+        Que cherchiez-vous à faire ? Décrire la situation aide davantage que
+        décrire la solution — il existe souvent une réponse plus simple que
+        celle qu'on avait en tête.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idee
+    attributes:
+      label: Ce que vous imaginez
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: reseau
+    attributes:
+      label: Réseau
+      description: >
+        Wealfy tient une promesse : aucune donnée ne quitte la machine, hors
+        rafraîchissement des cours désactivé par défaut. Une proposition qui
+        appelle un service distant reste recevable, mais elle demande une
+        discussion en amont.
+      options:
+        - label: Cette proposition impliquerait un accès réseau.
+          required: false
