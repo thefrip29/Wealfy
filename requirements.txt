@@ -8,9 +8,9 @@ waitress>=3.0
 #   Windows : WebView2, deja present avec Edge — rien a installer.
 #   macOS   : Cocoa et WKWebView, via pyobjc.
 #   Linux   : GTK et WebKit2 (le paquet systeme gir1.2-webkit2-4.1 reste requis).
-pywebview>=6.2
-pywebview[cocoa]>=6.2 ; sys_platform == "darwin"
-pywebview[gtk]>=6.2 ; sys_platform == "linux"
+pywebview>=6.2.1
+pywebview[cocoa]>=6.2.1 ; sys_platform == "darwin"
+pywebview[gtk]>=6.2.1 ; sys_platform == "linux"
 
 # Dessin de l'icone applicative, a la construction uniquement.
 pillow>=10
