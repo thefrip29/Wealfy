@@ -117,7 +117,7 @@ jobs:
           path: artefacts
           merge-multiple: true
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: artefacts/**
           # Brouillon : on relit les notes et on verifie les fichiers avant que
