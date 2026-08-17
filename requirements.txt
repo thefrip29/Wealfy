@@ -13,4 +13,4 @@ pywebview[cocoa]>=6.2 ; sys_platform == "darwin"
 pywebview[gtk]>=6.2 ; sys_platform == "linux"
 
 # Dessin de l'icone applicative, a la construction uniquement.
-pillow>=10
+pillow>=12.3.0
