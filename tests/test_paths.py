@@ -68,12 +68,21 @@ class TestDossierDonnees(unittest.TestCase):
             os.path.join("/Users/x", "Library", "Application Support", "Wealfy"))
 
     def test_windows_conserve_le_mode_portable(self):
-        """Non-regression : le comportement Windows ne doit pas avoir bouge."""
-        pres_exe = r"D:\Cle USB"
+        """Non-regression : le comportement Windows ne doit pas avoir bouge.
+
+        Le chemin est construit avec `os.path.join` et non ecrit en dur a la
+        windows : `os.path` suit les regles de la machine QUI EXECUTE le test.
+        Un « D:\\Cle USB\\Wealfy.exe » n'a aucun separateur aux yeux d'un macOS,
+        dont le `dirname` renvoie alors une chaine vide — et `abspath('')` vaut
+        le dossier courant. Le test echouait donc sur les runners sans que le
+        code ait le moindre defaut.
+        """
+        exe = os.path.join(os.path.abspath(os.sep), "faux", "Cle USB", "Wealfy.exe")
+        pres_exe = os.path.dirname(exe)
         with mock.patch.object(sys, "platform", "win32"), \
              mock.patch.object(sys, "frozen", True, create=True), \
-             mock.patch.object(sys, "_MEIPASS", r"C:\Temp\_MEI123", create=True), \
-             mock.patch.object(sys, "executable", pres_exe + r"\Wealfy.exe"), \
+             mock.patch.object(sys, "_MEIPASS", os.path.join(os.sep, "tmp", "_MEI"), create=True), \
+             mock.patch.object(sys, "executable", exe), \
              mock.patch.object(os.path, "exists", return_value=False), \
              mock.patch.object(paths, "_is_writable", return_value=True), \
              mock.patch.object(os, "makedirs"):
