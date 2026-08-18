@@ -30,7 +30,7 @@ jobs:
     name: Aucune donnee personnelle
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Le .gitignore protege celui qui l'a. Un contributeur peut travailler
       # depuis un ancien clone, forcer un ajout, ou renommer un fichier. Ce
@@ -70,7 +70,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
@@ -92,7 +92,7 @@ jobs:
     name: Garde-fous reseau
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
