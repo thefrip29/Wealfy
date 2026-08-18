@@ -1,7 +1,7 @@
 # Sécurité
 
 Wealfy manipule des relevés bancaires. Ce document dit comment signaler une
-faille, et surtout ce que le logiciel protège — et ce qu'il ne protège pas.
+faille, et ce que le logiciel protège ou non.
 
 ## Signaler une faille
 
@@ -13,8 +13,8 @@ Le rapport reste privé entre vous et le mainteneur jusqu'à la publication du
 correctif.
 
 Décrivez si possible : la version, le système, la manipulation qui déclenche le
-problème, et ce qu'un attaquant pourrait en tirer. **N'joignez jamais votre base
-`patrimoine.db` ni un export CSV** — ils contiennent vos transactions réelles.
+problème, et ce qu'un attaquant pourrait en tirer. **Ne joignez jamais votre base
+`patrimoine.db` ni un export CSV** : ils contiennent vos transactions réelles.
 Une base reconstruite avec des montants inventés suffit toujours à démontrer une
 faille.
 
@@ -67,7 +67,7 @@ personne : la clé de déchiffrement devrait vivre à côté de la base.
 **Les sauvegardes sont des CSV en clair.**
 
 **Les exécutables ne sont pas signés**, ni sur Windows ni sur macOS. Rien ne
-prouve cryptographiquement qu'un fichier téléchargé vient bien de ce dépôt — un
+prouve cryptographiquement qu'un fichier téléchargé vient bien de ce dépôt. Un
 certificat Apple coûte 99 $ par an, un certificat Windows davantage. Vérifiez
 que vous téléchargez depuis
 [la page des versions de ce dépôt](../../releases) et nulle part ailleurs.
@@ -94,5 +94,5 @@ malveillante de compromettre les binaires publiés :
 - **Les dépendances sont surveillées** par Dependabot
   (`.github/dependabot.yml`).
 
-Si vous repérez une faiblesse dans cette chaîne — pas seulement dans
-l'application — elle relève du même signalement privé.
+Une faiblesse dans cette chaîne, et pas seulement dans l'application, relève du
+même signalement privé.

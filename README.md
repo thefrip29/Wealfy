@@ -22,8 +22,8 @@ n'écoute que sur `127.0.0.1` et tout tient dans un unique fichier SQLite
 (`patrimoine.db`, emplacement précisé plus bas).
 
 Une seule fonction peut sortir sur le réseau : le rafraîchissement des cours de
-marché, **désactivé par défaut** — voir la section qui lui est consacrée. Tant
-qu'il n'est pas activé, aucune donnée ne quitte la machine.
+marché, **désactivé par défaut**. Tant qu'il n'est pas activé, aucune donnée ne
+quitte la machine.
 
 
 ## Installation
@@ -32,9 +32,9 @@ Les fichiers sont dans [la dernière version publiée](../../releases/latest).
 
 ### Windows
 
-`Wealfy-<version>-Setup.exe` — raccourcis menu Démarrer et Bureau,
-désinstallation propre. `Wealfy-<version>-portable.exe` fonctionne aussi seul,
-sans installation, y compris depuis une clé USB.
+`Wealfy-<version>-Setup.exe` installe l'application, avec raccourcis et
+désinstallation propre. `Wealfy-<version>-portable.exe` fonctionne seul, y
+compris depuis une clé USB.
 
 SmartScreen peut afficher un avertissement au premier lancement : l'application
 n'est pas signée par un certificat d'éditeur. « Informations complémentaires »
@@ -45,15 +45,13 @@ portable.
 
 ### macOS
 
-`Wealfy-<version>-arm64.dmg` pour les Mac Apple Silicon (M1 à M4),
-`Wealfy-<version>-x86_64.dmg` pour les Mac Intel. Ouvrez l'image et glissez
-**Wealfy** dans **Applications**.
+`Wealfy-<version>-arm64.dmg`, pour les Mac Apple Silicon (M1 à M4). Ouvrez
+l'image et glissez **Wealfy** dans **Applications**.
 
-**Au premier lancement, macOS refusera d'ouvrir l'application** — un message
-annonce que le développeur n'est pas identifié, ou, sur Apple Silicon, que
-l'application « est endommagée ». Elle ne l'est pas. Wealfy n'est pas signée par
-un certificat Apple, qui coûte 99 $ par an ; macOS bloque par défaut tout
-logiciel qui n'en a pas, quel qu'il soit.
+**Au premier lancement, macOS refusera d'ouvrir l'application.** Le message
+annonce un développeur non identifié, ou une application « endommagée ». Elle ne
+l'est pas : Wealfy n'est pas signée par un certificat Apple, qui coûte 99 $ par
+an. macOS bloque par défaut tout logiciel qui n'en a pas.
 
 Pour l'autoriser une fois pour toutes, ouvrez le **Terminal**
 (Applications → Utilitaires) et collez :
@@ -74,15 +72,15 @@ Vos données vont dans `~/Bibliothèque/Application Support/Wealfy`.
 
 ### Linux
 
-Aucun paquet n'est fourni — il n'existe pas de format unique. L'application
-fonctionne depuis les sources (voir ci-dessous) ; il faut le paquet système
+Aucun paquet n'est fourni, faute de format unique. L'application fonctionne
+depuis les sources (voir ci-dessous) ; il faut le paquet système
 `gir1.2-webkit2-4.1` en plus des dépendances Python. Les données vont dans
-`~/.local/share/wealfy`.
+`~/.local/share/wealfy`. Les Mac Intel passent par la même voie.
 
 
 ## Lancement
 
-L'application s'ouvre dans sa propre fenêtre — ni console, ni navigateur, ni
+L'application s'ouvre dans sa propre fenêtre : ni console, ni navigateur, ni
 adresse à retenir. La fermer arrête l'application.
 
 En mode développement :
@@ -137,37 +135,26 @@ existante, pour le seul bénéfice d'un nom de dossier que personne ne voit. mac
 et Linux n'ayant aucune installation antérieure à ménager, le nom actuel y est
 employé directement.
 
-### Ce contre quoi l'application protège, et ce contre quoi elle ne protège pas
+### Ce contre quoi l'application protège
 
 Autant l'écrire franchement, puisque le logiciel manipule des données bancaires.
 
-**Ce qui est tenu.** Le serveur n'écoute que sur `127.0.0.1` : il est
-injoignable depuis le réseau local comme depuis Internet. Les requêtes dont
-l'en-tête `Host` n'est pas une adresse locale sont refusées, ce qui ferme
-l'attaque par *DNS rebinding* — un site malveillant qui ferait pointer son
-domaine vers `127.0.0.1` pour lire votre base à travers votre navigateur. Les
-requêtes provenant d'une autre origine sont refusées également. La clé API des
-cours n'est jamais renvoyée par l'API, seulement l'information qu'elle est
-renseignée ou non. Les sauvegardes ne l'exportent pas non plus.
+**Tenu.** Le serveur n'écoute que sur `127.0.0.1`, donc injoignable depuis le
+réseau. L'en-tête `Host` est vérifié, ce qui ferme l'attaque par *DNS
+rebinding* : un site malveillant qui ferait pointer son domaine vers
+`127.0.0.1` pour lire votre base à travers votre navigateur. L'`Origin` est
+vérifié aussi. La clé API des cours n'est jamais renvoyée par l'API ni exportée
+dans les sauvegardes.
 
-**Ce qui ne l'est pas.** Il n'y a **aucune authentification** : toute personne
-ayant accès à votre session Windows ou macOS ouverte a accès à vos données. La
-base SQLite n'est **pas chiffrée**, et la clé API des cours y est stockée en
-clair — sur une application locale sans mot de passe maître, un chiffrement
-n'arrêterait de toute façon personne, puisque la clé de déchiffrement devrait
-vivre à côté. Les sauvegardes sont des CSV en clair. Enfin, les exécutables ne
-sont signés ni sur Windows ni sur macOS : rien ne prouve
-cryptographiquement qu'un fichier téléchargé vient bien de ce dépôt.
+**Pas tenu.** Aucune authentification : qui accède à votre session ouverte
+accède à vos données. La base n'est pas chiffrée, les sauvegardes sont des CSV
+en clair, et les exécutables ne sont signés sur aucune plateforme.
 
-**En clair** : le chiffrement du disque de votre machine (BitLocker, FileVault)
-est votre véritable protection au repos. Wealfy protège vos données du réseau,
-pas de quelqu'un devant votre écran déverrouillé.
+Le chiffrement du disque de votre machine (BitLocker, FileVault) est donc votre
+véritable protection au repos. Wealfy protège vos données du réseau, pas de
+quelqu'un assis devant votre écran déverrouillé.
 
-Une seule fonction peut faire sortir des données de la machine, le
-rafraîchissement des cours, **désactivé par défaut** : il transmet au
-fournisseur les symboles interrogés et votre clé API. Vos montants, quantités et
-transactions ne sortent jamais — mais une liste de tickers renseigne déjà sur la
-composition d'un portefeuille.
+Détail complet dans [SECURITY.md](SECURITY.md).
 
 Base de développement et base de l'exe restent **distinctes** : l'exe embarque
 une copie figée du code, il ne voit pas les données de la version
@@ -258,32 +245,31 @@ build suffit à ce que Windows reconnaisse une mise à jour.
 
 | | |
 |---|---|
-| [**Interface**](docs/interface.md) | Comment l'application se présente : les quatre onglets, les graphiques, l'ajout d'un élément, le masquage des montants |
-| [**Données**](docs/donnees.md) | Import de relevés, déclaration du patrimoine existant, virements internes, classification, cours de marché |
-| [**Architecture**](docs/architecture.md) | Stack, structure du code, calculs, modèle de données, et pourquoi rien n'est figé dans un snapshot |
-| [**Sécurité**](SECURITY.md) | Modèle de menace complet, signalement d'une faille, intégrité de la chaîne de construction |
-| [**Contribuer**](CONTRIBUTING.md) | Mettre en route, ce que le projet attend d'un changement |
-| [**Composants tiers**](THIRD-PARTY.md) | Geist Pixel, Chart.js et les dépendances Python |
+| [**Interface**](docs/interface.md) | Les quatre onglets, les graphiques, la saisie |
+| [**Données**](docs/donnees.md) | Import de relevés, virements internes, classification, cours de marché |
+| [**Architecture**](docs/architecture.md) | Stack, structure du code, calculs, modèle de données |
+| [**Sécurité**](SECURITY.md) | Modèle de menace, signalement d'une faille |
+| [**Contribuer**](CONTRIBUTING.md) | Mettre en route, ce qu'un changement doit respecter |
+| [**Composants tiers**](THIRD-PARTY.md) | Geist Pixel, Chart.js, dépendances Python |
 
 
 ## Contribuer
 
-Les propositions sont bienvenues — correction, idée, ou simple signalement de ce
-qui vous a fait trébucher. Voir [CONTRIBUTING.md](CONTRIBUTING.md).
+Correction, idée, ou simple signalement de ce qui vous a fait trébucher : tout
+est bienvenu. Voir [CONTRIBUTING.md](CONTRIBUTING.md).
 
-**Un rappel qui vaut d'être lu avant d'ouvrir une issue :** ce logiciel manipule
-vos relevés bancaires réels, et une issue GitHub est publique et indexée. Ne
-joignez jamais votre base `patrimoine.db`, le dossier `sauvegarde/`, ni une
-capture d'écran montrant des montants. `python run.py --debug` ouvre
-l'application sur une base vide où saisir des montants inventés.
+**Avant d'ouvrir une issue :** elle sera publique et indexée. Ne joignez jamais
+votre base `patrimoine.db`, le dossier `sauvegarde/`, ni une capture montrant
+des montants. `python run.py --debug` ouvre l'application sur une base vide où
+saisir des montants inventés.
 
-**Une faille de sécurité ne se signale pas par une issue** mais en privé :
+**Une faille de sécurité se signale en privé**, jamais par une issue :
 voir [SECURITY.md](SECURITY.md).
 
 
 ## Licence
 
-Wealfy est distribué sous **GNU Affero General Public License v3.0** — texte
+Wealfy est distribué sous **GNU Affero General Public License v3.0**, texte
 intégral dans [`LICENSE`](LICENSE).
 
 ```

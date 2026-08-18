@@ -33,8 +33,8 @@ Le bouton « masquer les montants » (l'œil, en haut à droite) floute aussi
 l'affichage si c'est plus rapide.
 
 Le dépôt refuse automatiquement toute base, sauvegarde ou image ajoutée par une
-proposition (`.github/workflows/ci.yml`) — mais ce garde-fou est un filet, pas
-une permission de ne pas faire attention.
+proposition (`.github/workflows/ci.yml`). Ce garde-fou est un filet, pas une
+permission de ne pas faire attention.
 
 **Une faille de sécurité ne se signale pas par une issue :** voir
 [SECURITY.md](SECURITY.md).
@@ -46,7 +46,7 @@ une permission de ne pas faire attention.
 Ouvrez une [issue](../../issues/new/choose). Les modèles proposés vous guident.
 
 Ce qui aide vraiment : ce que vous attendiez, ce qui s'est produit, et comment le
-reproduire. Le système et la version aussi — un problème d'affichage macOS n'a
+reproduire. Le système et la version aussi : un problème d'affichage macOS n'a
 souvent rien à voir avec le même symptôme sous Windows.
 
 ---
@@ -86,7 +86,7 @@ bash ci/smoke.sh python run.py
 
 **Les commentaires expliquent POURQUOI, pas quoi.** Le code dit déjà ce qu'il
 fait. Ce qu'il ne dit pas, c'est ce qui a été essayé avant, ou quel piège la
-ligne évite. Le dépôt en est rempli — lisez `app/paths.py` ou
+ligne évite. Le dépôt en est rempli : lisez `app/paths.py` ou
 `app/static/splash.html` pour le ton.
 
 **Aucune couleur en dur** hors `app/static/css/tokens.css`. Les seules
@@ -112,7 +112,7 @@ une erreur est silencieuse.
 Une idée par proposition. Un titre qui dit ce que ça change. Dans le corps :
 pourquoi, et ce que vous avez vérifié.
 
-Si c'est un gros changement, ouvrez une issue d'abord — autant discuter de
+Si c'est un gros changement, ouvrez une issue d'abord : autant discuter de
 l'approche avant d'y passer une soirée.
 
 ---
