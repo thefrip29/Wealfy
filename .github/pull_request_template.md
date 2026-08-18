@@ -28,7 +28,7 @@
 - [ ] `python -m unittest discover -s tests -t .` passe
 - [ ] Aucun nouvel accès réseau, ou alors désactivé par défaut, annoncé dans
       l'interface et documenté dans `SECURITY.md`
-- [ ] Aucune ressource chargée depuis un CDN — police, bibliothèque et icône
+- [ ] Aucune ressource chargée depuis un CDN : police, bibliothèque et icône
       vivent dans le dépôt
 - [ ] Un changement de comportement s'accompagne d'un test, en particulier s'il
       touche aux chemins de fichiers ou au durcissement réseau

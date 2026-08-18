@@ -27,10 +27,8 @@ jobs:
         include:
           - os: windows-latest
             label: windows-x64
-          - os: macos-14        # Apple Silicon
+          - os: macos-14
             label: macos-arm64
-          - os: macos-13        # dernier runner Intel
-            label: macos-x86_64
 
     steps:
       - uses: actions/checkout@v4
@@ -127,29 +125,29 @@ jobs:
           body: |
             ## Windows
 
-            Telechargez `Wealfy-*-Setup.exe` et lancez-le. SmartScreen peut
-            afficher un avertissement, l'application n'etant pas signee :
-            « Informations complementaires » puis « Executer quand meme ».
+            `Wealfy-*-Setup.exe` pour installer, `Wealfy-*-portable.exe` pour
+            lancer sans installation.
 
-            `Wealfy-*-portable.exe` fonctionne sans installation, y compris
-            depuis une cle USB.
+            SmartScreen affiche un avertissement au premier lancement,
+            l'application n'etant pas signee. « Informations complementaires »
+            puis « Executer quand meme ».
 
             ## macOS
 
-            `arm64` pour les Mac Apple Silicon (M1 a M4), `x86_64` pour les Mac
-            Intel. Ouvrez l'image disque et glissez Wealfy dans Applications.
+            `Wealfy-*-arm64.dmg`, pour les Mac Apple Silicon (M1 a M4). Ouvrez
+            l'image et glissez Wealfy dans Applications.
 
-            **macOS refusera de l'ouvrir la premiere fois**, avec un message
-            annoncant que le developpeur n'est pas identifie ou que
-            l'application « est endommagee ». Elle ne l'est pas : Wealfy n'est
-            pas signee par un certificat Apple. Dans le Terminal :
+            macOS refuse de l'ouvrir la premiere fois : l'application n'est pas
+            signee par un certificat Apple. Dans le Terminal :
 
                 xattr -dr com.apple.quarantine /Applications/Wealfy.app
 
-            Details et methode sans Terminal dans le README.
+            Methode sans Terminal dans le README.
+
+            Les Mac Intel ne sont pas fournis en binaire. Ils fonctionnent
+            depuis les sources.
 
             ## Vos donnees
 
             Tout reste sur votre machine. Le serveur n'ecoute que sur la boucle
-            locale et la seule fonction reseau, le rafraichissement des cours,
-            est desactivee par defaut.
+            locale, et le rafraichissement des cours est desactive par defaut.

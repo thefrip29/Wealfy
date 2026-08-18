@@ -24,7 +24,7 @@ body:
       label: Le besoin
       description: >
         Que cherchiez-vous à faire ? Décrire la situation aide davantage que
-        décrire la solution — il existe souvent une réponse plus simple que
+        décrire la solution : il existe souvent une réponse plus simple que
         celle qu'on avait en tête.
     validations:
       required: true

@@ -4,16 +4,16 @@ Wealfy embarque les composants ci-dessous. Ils gardent leur licence d'origine,
 qui n'est pas celle du reste du projet (AGPL-3.0) : une licence s'applique à une
 œuvre, pas à un dépôt.
 
-Tout est **embarqué**, rien n'est chargé depuis le réseau à l'exécution — c'est
-la condition pour qu'une application censée ne rien laisser sortir tienne
-réellement sa promesse, y compris hors ligne.
+Tout est **embarqué**, rien n'est chargé depuis le réseau à l'exécution. C'est
+la condition pour qu'une application censée ne rien laisser sortir tienne sa
+promesse, y compris hors ligne.
 
 ---
 
 ## Geist Pixel
 
 - **Fichier** : `app/static/fonts/geist-pixel.woff`
-- **Licence** : SIL Open Font License 1.1 — texte intégral dans
+- **Licence** : SIL Open Font License 1.1, texte intégral dans
   `app/static/fonts/OFL.txt`, conservé auprès de la police comme l'OFL l'exige
 - **Copyright** : 2026 The Geist Project Authors
 - **Source** : https://github.com/vercel/geist-font
@@ -27,7 +27,7 @@ copyright de l'OFL fournie ne déclare **aucun** *Reserved Font Name*, la clause
 qui aurait imposé un renommage.
 
 Emploi dans l'interface : le nom de la marque et l'intitulé qui coiffe le
-chiffre principal. Jamais un montant ni un tableau — voir la note en fin de
+chiffre principal. Jamais un montant ni un tableau. Voir la note en fin de
 `app/static/css/tokens.css`.
 
 ---
