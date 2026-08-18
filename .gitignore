@@ -65,3 +65,10 @@ assets/
 venv/
 env/
 .python-version
+
+# Interpreteur Python installe DANS le dossier du projet (169 Mo). C'est un
+# outil local, pas une source : chaque machine a le sien, et l'embarquer
+# figerait une version et une architecture.
+#
+# Sans cette ligne, `git add -A` l'emporte en entier — 2744 fichiers.
+Python/

@@ -5,10 +5,11 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import backup, create_app  # noqa: E402
+from app import backup, create_app, paths  # noqa: E402
 
 
 class BackupTestCase(unittest.TestCase):
@@ -17,17 +18,33 @@ class BackupTestCase(unittest.TestCase):
         self.db_path = os.path.join(self.dossier, "patrimoine.db")
         # `data_dir()` sert de racine aux sauvegardes : on l'isole pour ne pas
         # écrire dans le vrai dossier de l'utilisateur pendant les tests.
-        os.environ["LOCALAPPDATA"] = self.dossier
+        #
+        # On remplace `appdata_dir` lui-même, et non la variable d'environnement
+        # LOCALAPPDATA : celle-ci n'est lue que sur Windows depuis que le
+        # dossier de données suit la convention de chaque système. Sur macOS et
+        # sous Linux, l'isolation sautait donc en silence — les tests écrivaient
+        # dans ~/Library/Application Support/Wealfy, s'y accumulaient d'un test
+        # à l'autre, et polluaient les vraies sauvegardes de l'utilisateur.
+        self._appdata = mock.patch.object(
+            paths, "appdata_dir", return_value=self.dossier)
+        self._appdata.start()
         self._frozen = getattr(sys, "frozen", None)
         sys.frozen = True                       # force le mode « données isolées »
         self.app = create_app(self.db_path)
         self.client = self.app.test_client()
+        # Filet : si l'isolation cassait de nouveau, l'échec le dirait tout de
+        # suite plutôt que par un compte de sauvegardes inattendu trois tests
+        # plus loin.
+        self.assertTrue(
+            backup.backup_root().startswith(self.dossier),
+            "les sauvegardes de test doivent rester dans le dossier temporaire")
 
     def tearDown(self):
         if self._frozen is None:
             del sys.frozen
         else:
             sys.frozen = self._frozen
+        self._appdata.stop()
         shutil.rmtree(self.dossier, ignore_errors=True)
 
     def post(self, url, payload=None):
