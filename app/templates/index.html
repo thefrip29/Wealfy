@@ -8,14 +8,24 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/icon.svg') }}">
 <script>
-  /* Pose le thème avant le premier rendu pour éviter tout flash :
-     choix mémorisé si l'utilisateur en a fait un, réglage système sinon. */
+  /* Thème posé AVANT le premier rendu, pour éviter le flash blanc.
+
+     Trois états, et « système » par défaut. La version précédente n'en avait
+     que deux, et elle GELAIT la préférence système dès le premier lancement :
+     `app.js` appelait `setTheme` au démarrage, or `setTheme` écrit dans le
+     stockage. L'application lisait donc le système une seule fois dans sa vie,
+     puis n'y revenait plus jamais.
+
+     La clé a changé de nom pour cette raison. L'ancienne valeur avait été
+     écrite par ce défaut et non choisie : la reprendre reconduirait le
+     problème, l'abandonner remet tout le monde sur le suivi automatique. */
   (function () {
-    var saved = null;
-    try { saved = localStorage.getItem('patrimoine.theme'); } catch (e) { /* ignore */ }
-    var dark = saved ? saved === 'dark'
+    var choix = null;
+    try { choix = localStorage.getItem('wealfy.theme'); } catch (e) { /* ignore */ }
+    var sombre = choix === 'sombre' ? true
+      : choix === 'clair' ? false
       : window.matchMedia('(prefers-color-scheme: dark)').matches;
-    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme', sombre ? 'dark' : 'light');
   })();
 
   /* Richesse des animations, décidée AVANT le premier rendu — la première
@@ -27,21 +37,19 @@
      du mouvement (déplacements, opacités) est traité par le compositeur et ne
      pèse quasiment rien.
 
-     Choix explicite d'abord, puis estimation d'après la machine. `app.js`
-     mesure ensuite la fluidité réelle et corrige si l'estimation était
-     optimiste. Pour forcer :
-       localStorage.setItem('patrimoine.animations', 'economes')  // ou 'completes' */
+     COMPLET PAR DÉFAUT, économe seulement si l'utilisateur le demande depuis
+     les réglages. La version précédente estimait la puissance de la machine
+     avec `navigator.deviceMemory`, une API que WebKit n'implémente pas : elle
+     valait `undefined`, le repli donnait 4, et le test était `<= 4`. Tout Mac
+     tombait donc en mode économe, un M5 comme le reste, sans aucun moyen d'en
+     sortir.
+
+     `prefers-reduced-motion` reste prioritaire : c'est une préférence système
+     explicite, posée par quelqu'un que le mouvement gêne. */
   (function () {
-    var force = null;
-    try { force = localStorage.getItem('patrimoine.animations'); } catch (e) { /* ignore */ }
-    var econome;
-    if (force === 'economes' || force === 'completes') {
-      econome = force === 'economes';
-    } else {
-      var coeurs = navigator.hardwareConcurrency || 4;
-      var memoire = navigator.deviceMemory || 4;
-      econome = coeurs <= 4 || memoire <= 4;
-    }
+    var choix = null;
+    try { choix = localStorage.getItem('wealfy.animations'); } catch (e) { /* ignore */ }
+    var econome = choix === 'economes';
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) econome = true;
     document.documentElement.setAttribute('data-anim', econome ? 'econome' : 'complet');
   })();
@@ -93,7 +101,8 @@
   <div class="topbar-right">
     <div class="month-picker">
       <button class="icon-btn" id="month-prev" title="Mois précédent">&#8249;</button>
-      <input type="month" id="month-input">
+      <input type="text" id="month-input" readonly autocomplete="off"
+             aria-label="Mois affiché">
       <button class="icon-btn" id="month-next" title="Mois suivant">&#8250;</button>
     </div>
     <button class="icon-btn" id="toggle-privacy"

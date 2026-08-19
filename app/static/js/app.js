@@ -178,42 +178,35 @@ App.revealOrder = function (panneau) {
 };
 
 /* Richesse des animations : le mode est posé dans l'en-tête du document, à
-   partir du nombre de cœurs et de la mémoire. C'est une estimation, et elle peut
-   se tromper — un processeur récent avec un affichage intégré modeste passe pour
-   une bonne machine.
+   partir du seul réglage de l'utilisateur (voir la section Apparence des
+   paramètres) et de `prefers-reduced-motion`.
 
-   On mesure donc la fluidité RÉELLE pendant la première animation, et on
-   rétrograde si elle n'y est pas. La décision est mémorisée : elle vaut pour la
-   machine, pas pour la session. Un choix explicite de l'utilisateur n'est jamais
-   écrasé. */
-App.CLE_ANIM = 'patrimoine.animations';
+   IL N'Y A PLUS DE DÉTECTION AUTOMATIQUE, et c'est délibéré. Deux mécanismes
+   décidaient à la place de l'utilisateur :
 
-App.mesurerFluidite = function () {
-  const racine = document.documentElement;
-  if (racine.dataset.anim !== 'complet') return;      // déjà économe
-  try {
-    if (localStorage.getItem(App.CLE_ANIM)) return;   // choix explicite, on n'y touche pas
-  } catch (e) { return; }
+   - une estimation d'après `navigator.hardwareConcurrency` et
+     `navigator.deviceMemory`. Cette seconde API n'existe pas dans WebKit :
+     elle valait `undefined`, le repli donnait 4, et le test était `<= 4`. Tout
+     Mac basculait donc en mode économe, quel que soit son processeur ;
+   - une mesure de fluidité sur les 32 premières images, qui rétrogradait puis
+     MÉMORISAIT sa décision. Une machine momentanément occupée se retrouvait
+     durablement en mode dégradé, sans que rien ne le signale ni ne permette
+     d'en sortir.
 
-  const intervalles = [];
-  let precedent = performance.now();
-  let restant = 32;                                   // environ une demi-seconde
+   Le mode complet est désormais le défaut partout, et le mode économe un choix
+   assumé. Une machine qui peine, c'est à son propriétaire de le constater. */
+App.CLE_ANIM = 'wealfy.animations';
 
-  const image = (t) => {
-    intervalles.push(t - precedent);
-    precedent = t;
-    if (--restant > 0) { requestAnimationFrame(image); return; }
+App.animationsEconomes = function () {
+  try { return localStorage.getItem(App.CLE_ANIM) === 'economes'; } catch (e) { return false; }
+};
 
-    // Médiane plutôt que moyenne : une seule image longue (un ramasse-miettes,
-    // une fenêtre qui prend le focus) ne doit pas condamner la machine.
-    intervalles.sort((a, b) => a - b);
-    const mediane = intervalles[intervalles.length >> 1];
-    if (mediane > 22) {                               // moins de ~45 images/s
-      racine.dataset.anim = 'econome';
-      try { localStorage.setItem(App.CLE_ANIM, 'economes'); } catch (e) { /* ignore */ }
-    }
-  };
-  requestAnimationFrame(image);
+App.setAnimations = function (economes) {
+  try { localStorage.setItem(App.CLE_ANIM, economes ? 'economes' : 'completes'); } catch (e) { /* ignore */ }
+  // `prefers-reduced-motion` reste prioritaire : une préférence système
+  // explicite ne se laisse pas contredire par un réglage applicatif.
+  const force = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  document.documentElement.dataset.anim = (economes || force) ? 'econome' : 'complet';
 };
 
 /* Place le trait de navigation sous l'onglet actif.
@@ -311,11 +304,18 @@ App.refreshOthers = async function () {
   await App.loadRefs();
 };
 
+/* Le champ du mois est en lecture seule depuis qu'il n'est plus un
+   `<input type="month">` : celui-ci s'affichait en mm/aaaa ou aaaa-mm selon
+   le format regional du systeme. Il ne porte plus que le libelle. */
+App.setMonthLabel = function (ym) {
+  App.el('#month-input').value = App.fmt.month(ym);
+};
+
 /* `sens` vaut 'next', 'prev', ou rien quand le mois est choisi directement
    dans le sélecteur — aucun sens de déplacement à représenter dans ce cas. */
 App.setMonth = async function (ym, sens) {
   App.state.month = ym;
-  App.el('#month-input').value = ym;
+  App.setMonthLabel(ym);
   localStorage.setItem('patrimoine.month', ym);
 
   // `sens || null` et non `sens` : passer `undefined` laisserait showTab
@@ -327,7 +327,7 @@ App.setMonth = async function (ym, sens) {
    rendu, pour n'avoir qu'une seule transition au lieu de deux enchaînées. */
 App.goToMonth = async function (ym) {
   App.state.month = ym;
-  App.el('#month-input').value = ym;
+  App.setMonthLabel(ym);
   localStorage.setItem('patrimoine.month', ym);
   await App.showTab('expenses');
 };
@@ -362,7 +362,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   const monthInput = App.el('#month-input');
-  monthInput.addEventListener('change', () => App.setMonth(monthInput.value));
+  monthInput.addEventListener('click', () => App.calendrier({
+    ancre: monthInput, iso: App.state.month, mode: 'mois',
+    onPick: (ym) => App.setMonth(ym),
+  }));
   App.el('#month-prev').addEventListener('click',
     () => App.setMonth(App.shiftMonth(App.state.month, -1), 'prev'));
   App.el('#month-next').addEventListener('click',
@@ -374,7 +377,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   App.el('#toggle-privacy').addEventListener('click',
     () => App.setPrivacy(!App.privacyOn()));
   App.el('#toggle-theme').addEventListener('click', async () => {
-    App.setTheme(App.currentTheme() === 'dark' ? 'light' : 'dark');
+    // Cycle système -> clair -> sombre -> système. Passer par « système »
+    // à chaque tour est ce qui permet de revenir au suivi automatique ;
+    // l'ancien bouton à deux positions l'interdisait définitivement.
+    const suivant = App.THEMES[(App.THEMES.indexOf(App.themeChoisi()) + 1) % App.THEMES.length];
+    App.setTheme(suivant);
     // Les graphiques lisent leurs couleurs au moment du rendu : on les refait.
     await App.showTab(App.currentTab);
   });
@@ -390,8 +397,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   App.el('#we-archived').addEventListener('change', () => App.tabs.wealth.load());
 
   App.state.month = localStorage.getItem('patrimoine.month') || App.monthISO();
-  monthInput.value = App.state.month;
-  App.setTheme(App.currentTheme());
+  App.setMonthLabel(App.state.month);
+  // `false` : on repeint l'icône et la palette sans RIEN mémoriser. Écrire ici
+  // était le défaut d'origine — la préférence système, lue une fois au premier
+  // lancement, devenait un choix figé que plus rien ne remettait en question.
+  App.setTheme(App.themeChoisi(), false);
+  App.suivreThemeSysteme();
   // Masquage actif par defaut : seul un « 0 » explicitement memorise le leve.
   App.setPrivacy(localStorage.getItem('patrimoine.privacy') !== '0');
 
@@ -399,9 +410,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     await App.loadMeta();
     await App.loadRefs();
     await App.showTab('overview');
-    // Pendant la toute première apparition : c'est le moment le plus chargé de
-    // la session, donc le plus révélateur de ce que la machine encaisse.
-    App.mesurerFluidite();
     // Volontairement après le premier rendu, et sans await : l'interface
     // s'affiche immédiatement depuis le cache, les cours arrivent ensuite.
     App.autoRefreshQuotes();

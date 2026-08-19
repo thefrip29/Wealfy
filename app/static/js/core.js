@@ -219,12 +219,60 @@ App.readPalette = function () {
   return App.chartColors;
 };
 
-App.setTheme = function (theme) {
-  document.documentElement.setAttribute('data-theme', theme);
-  try { localStorage.setItem('patrimoine.theme', theme); } catch (e) { /* ignore */ }
+/* Thème : trois choix, « système » compris.
+
+   `App.THEMES` est l'ordre du cycle du bouton. La valeur mémorisée est le
+   CHOIX (clair / sombre / systeme), pas l'apparence obtenue : sans cette
+   distinction, « système » serait indiscernable d'un choix figé, et c'est
+   exactement ce qui rendait l'ancienne version incapable de suivre l'OS. */
+App.CLE_THEME = 'wealfy.theme';
+App.THEMES = ['systeme', 'clair', 'sombre'];
+
+App.themeChoisi = function () {
+  try {
+    const v = localStorage.getItem(App.CLE_THEME);
+    if (App.THEMES.includes(v)) return v;
+  } catch (e) { /* ignore */ }
+  return 'systeme';
+};
+
+App.systemeEnSombre = () => window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+/* Applique un choix. `memoriser` est faux quand l'appel vient du système qui
+   change d'avis : on repeint sans transformer un suivi automatique en choix
+   figé. C'est la précaution qui manquait — `setTheme` écrivait à chaque
+   démarrage, donc la première lecture du système devenait définitive. */
+App.setTheme = function (choix, memoriser = true) {
+  const sombre = choix === 'sombre' || (choix === 'systeme' && App.systemeEnSombre());
+  document.documentElement.setAttribute('data-theme', sombre ? 'dark' : 'light');
+  if (memoriser) {
+    try { localStorage.setItem(App.CLE_THEME, choix); } catch (e) { /* ignore */ }
+  }
   App.readPalette();
+
   const btn = App.el('#toggle-theme');
-  if (btn) btn.innerHTML = theme === 'dark' ? '&#9788;' : '&#9789;';
+  if (btn) {
+    const etats = {
+      systeme: ['&#9681;', 'Thème : système'],      // cercle mi-plein
+      clair: ['&#9788;', 'Thème : clair'],          // soleil
+      sombre: ['&#9789;', 'Thème : sombre'],        // lune
+    };
+    const [icone, titre] = etats[choix] || etats.systeme;
+    btn.innerHTML = icone;
+    btn.title = `${titre} (cliquer pour changer)`;
+    btn.dataset.choix = choix;
+  }
+};
+
+/* Suit l'OS en direct, mais seulement tant que le choix est « système ». Sans
+   cet écouteur, la bascule jour/nuit de macOS ne se voyait qu'au redémarrage. */
+App.suivreThemeSysteme = function () {
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  const reagir = () => {
+    if (App.themeChoisi() === 'systeme') App.setTheme('systeme', false);
+  };
+  if (mq.addEventListener) mq.addEventListener('change', reagir);
+  else if (mq.addListener) mq.addListener(reagir);       // WebKit ancien
 };
 
 App.currentTheme = () => document.documentElement.getAttribute('data-theme') || 'light';

@@ -9,17 +9,13 @@ Distinction essentielle :
   surtout PAS atterrir dans ce dossier temporaire, sinon la base disparait a
   chaque fermeture.
 
-En .exe, deux situations se presentent :
+En .exe, la base va par defaut dans le dossier de donnees de l'utilisateur
+(%LOCALAPPDATA%\\Patrimoine, ~/Library/Application Support/Wealfy,
+~/.local/share/wealfy), ou elle survit aux mises a jour et aux desinstallations.
 
-- **portable** — l'exe est pose dans un dossier inscriptible (Bureau, cle USB,
-  dossier synchronise) : la base vit a cote de lui, tout se deplace ensemble ;
-- **installe** — l'exe est dans Program Files, non inscriptible sans droits
-  admin : la base va dans %LOCALAPPDATA%\\Patrimoine, ou elle survit aux
-  mises a jour et aux desinstallations.
-
-Le choix est automatique : on teste reellement l'ecriture plutot que de deviner
-d'apres le chemin, car les droits Windows ne se lisent pas dans un nom de
-dossier.
+Le mode **portable**, ou la base vit a cote de l'executable pour tout deplacer
+ensemble sur une cle USB, se DEMANDE en posant un fichier `portable.txt` a cote
+de l'exe. Il ne se declenche plus tout seul : voir MARQUEUR_PORTABLE.
 """
 import os
 import sys
@@ -35,6 +31,20 @@ APP_DIR_NAME = "Patrimoine"
 # du logiciel y est donc utilise directement.
 APP_DIR_NAME_UNIX = "Wealfy"
 
+# Fichier temoin qui reclame le mode portable : la base vit alors a cote de
+# l'executable, et tout se deplace ensemble sur une cle USB.
+#
+# Il FAUT le demander. Auparavant le mode portable se declenchait tout seul des
+# que le dossier de l'exe etait inscriptible, ce qui est le cas du dossier des
+# telechargements : la base atterrissait la, et la version suivante lancee
+# depuis un autre dossier repartait d'une base vide. L'utilisateur y voyait une
+# perte de ses reglages, alors que ses donnees etaient intactes quelques
+# dossiers plus loin.
+#
+# Le filet %LOCALAPPDATA% n'aidait pas : il n'est consulte que si une base s'y
+# trouve deja, or en mode portable il ne s'en cree jamais.
+MARQUEUR_PORTABLE = "portable.txt"
+
 
 def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
@@ -46,22 +56,6 @@ def resource_path(*parts) -> str:
     if not base:
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, *parts)
-
-
-def _is_writable(path) -> bool:
-    """Le dossier accepte-t-il reellement une ecriture ?
-
-    `os.access(..., W_OK)` ment sous Windows (UAC, virtualisation) : on ecrit
-    un fichier temoin, puis on l'efface.
-    """
-    temoin = os.path.join(path, ".ecriture_test")
-    try:
-        with open(temoin, "w") as f:
-            f.write("")
-        os.remove(temoin)
-        return True
-    except OSError:
-        return False
 
 
 def appdata_dir() -> str:
@@ -111,8 +105,8 @@ def data_dir() -> str:
             # Base historique : on ne repart jamais d'une base vide alors que
             # les donnees de l'utilisateur existent ailleurs.
             path = appdata
-        elif _is_writable(pres_de_l_exe):
-            # Premiere ouverture dans un dossier inscriptible : mode portable.
+        elif os.path.exists(os.path.join(pres_de_l_exe, MARQUEUR_PORTABLE)):
+            # Mode portable DEMANDE : un fichier temoin pose a cote de l'exe.
             path = pres_de_l_exe
         else:
             path = appdata
