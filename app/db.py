@@ -69,6 +69,11 @@ DEFAULT_SETTINGS = {
     "categories_charges_fixes": [
         "Logement", "Assurances", "Abonnements", "Remboursement pret", "Impots",
     ],
+    # Jour de capitalisation des produits a taux, au format 'MM-JJ'. Le 31
+    # decembre pour le Livret A, le LDDS, le LEP, le Livret Jeune, le PEL et le
+    # CEL. Reglable parce qu'un depot a terme peut crediter a sa date
+    # anniversaire, et parce qu'un decret peut toujours changer la regle.
+    "date_credit_interets": "12-31",
     "mois_precaution_cible": 4,      # mois de depenses couverts par les livrets
     "seuil_concentration": 40,       # % des actifs financiers sur une seule ligne
     "seuil_crypto": 10,              # % du patrimoine net

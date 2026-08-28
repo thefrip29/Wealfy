@@ -781,17 +781,47 @@ def market_value(asset, movements, securities, prices, at_date=None):
     return None
 
 
-def rate_value(asset, movements, at_date=None):
-    """Livrets et dépôts à terme : capital + intérêts courus au taux saisi."""
-    meta = asset.get("metadata") or {}
-    taux = meta.get("taux_annuel")
+def taux_du_produit(asset):
+    """Taux annuel saisi sur l'actif, ou None s'il est absent ou illisible."""
+    taux = (asset.get("metadata") or {}).get("taux_annuel")
     if taux in (None, ""):
         return None
     try:
-        taux = float(taux)
+        return float(taux)
     except (TypeError, ValueError):
         return None
-    return finance.valeur_livret(asset, movements, taux, at_date)
+
+
+def date_credit_interets():
+    """Jour de capitalisation configure, au format 'MM-JJ'.
+
+    Lu ici et non dans `finance` : ce module-la est du calcul pur, sans acces a
+    la base. Le reglage lui est passe en argument, comme le taux.
+    """
+    return get_setting("date_credit_interets", finance.CREDIT_PAR_DEFAUT) \
+        or finance.CREDIT_PAR_DEFAUT
+
+
+def rate_value(asset, movements, at_date=None):
+    """Livrets et dépôts à terme : le capital, intérêts déjà crédités inclus.
+
+    Les intérêts de l'exercice en cours n'y sont pas — ils ne sont pas acquis,
+    et le relevé bancaire ne les montre pas non plus. Voir `rate_interests`.
+    """
+    taux = taux_du_produit(asset)
+    if taux is None:
+        return None
+    return finance.valeur_livret(asset, movements, taux, at_date,
+                                 date_credit_interets())
+
+
+def rate_interests(asset, movements, at_date=None):
+    """Interets qui tomberont a la prochaine echeance de capitalisation."""
+    taux = taux_du_produit(asset)
+    if taux is None:
+        return None
+    return finance.interets_prevus(asset, movements, taux, at_date,
+                                   date_credit_interets())
 
 
 def indexed_value(asset, at_date=None):

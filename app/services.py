@@ -158,6 +158,15 @@ def asset_detail(asset, movements, at_date=None, ctx=None):
     detail["plus_value"] = round(value - invested, 2)
     detail["plus_value_pct"] = round((value - invested) / invested, 6) if invested else None
     detail["nb_mouvements"] = len(movements)
+
+    # Un livret n'a pas de plus-value : il a un taux et des interets a venir.
+    # La plus-value reste calculee ci-dessus pour les agregats, mais c'est ce
+    # bloc que la fiche affiche — un pourcentage de rendement partiel et non
+    # annualise ne veut rien dire sur un produit a taux.
+    if source == "taux":
+        detail["taux_annuel"] = market.taux_du_produit(asset)
+        detail["interets_prevus"] = market.rate_interests(asset, movements, at_date)
+        detail["date_credit"] = market.date_credit_interets()
     return detail
 
 

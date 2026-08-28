@@ -129,10 +129,7 @@ App.tabs.wealth = {
           App.h('div', { class: 'right' },
             App.h('div', { class: 'num' }, App.fmt.eur(a.valeur)),
             App.tabs.wealth.sourceBadge(a)),
-          App.h('div', { class: `right num ${pvClass}` },
-            App.fmt.signed(a.plus_value),
-            a.plus_value_pct !== null
-              ? App.h('div', { class: 'a-meta' }, App.fmt.ratio(a.plus_value_pct)) : null),
+          App.tabs.wealth.gainCell(a, pvClass),
           App.h('div', { class: 'right sub' }, `investi ${App.fmt.eur(a.investi, true)}`),
           App.h('div', { class: 'right' },
             App.h('button', {
@@ -145,17 +142,46 @@ App.tabs.wealth = {
     }
   },
 
+  /* Colonne de droite : plus-value pour un actif coté, intérêts pour un
+     produit à taux.
+
+     Un livret n'a pas de plus-value. Ce qui s'y affichait — la valeur moins le
+     capital investi, en euros et en pourcentage — n'était que les intérêts
+     courus présentés comme un rendement partiel non annualisé : un « +0,1 % »
+     que rien ne permettait d'interpréter. Le taux annuel, lui, dit quelque
+     chose. */
+  gainCell(a, pvClass) {
+    if (a.valeur_source === 'taux') {
+      const prevus = a.interets_prevus || 0;
+      return App.h('div', { class: `right num ${prevus > 0 ? 'pos' : 'muted'}` },
+        prevus ? App.fmt.signed(prevus) : '—',
+        App.h('div', { class: 'a-meta' },
+          prevus ? `prévus au ${App.fmt.jourMois(a.date_credit)}` : 'aucun intérêt'),
+        a.taux_annuel
+          ? App.h('div', { class: 'a-meta' }, `${App.fmt.num(a.taux_annuel, 2)} %/an`) : null);
+    }
+    return App.h('div', { class: `right num ${pvClass}` },
+      App.fmt.signed(a.plus_value),
+      a.plus_value_pct !== null
+        ? App.h('div', { class: 'a-meta' }, App.fmt.ratio(a.plus_value_pct)) : null);
+  },
+
   /* D'où vient la valeur affichée : cours de marché, taux, indice, ou saisie. */
   sourceBadge(asset) {
     const map = {
       marche: ['live', 'cours de marché'],
-      taux: ['ok', 'intérêts calculés'],
+      // « intérêts calculés » laissait croire que les intérêts de l'année
+      // étaient dans le chiffre. C'est le capital, celui du relevé bancaire.
+      taux: ['ok', 'capital'],
       indice: ['accent', 'estimation indicielle'],
     };
     const badge = map[asset.valeur_source];
     if (!badge) return null;
-    const title = asset.valeur_saisie !== undefined && asset.valeur_saisie !== null
-      ? `Valeur saisie : ${App.fmt.eur(asset.valeur_saisie)}` : '';
+    const title = asset.valeur_source === 'taux'
+      ? 'Capital, intérêts des années passées inclus. Ceux de l’année en cours '
+        + 'seront crédités à l’échéance.'
+      : (asset.valeur_saisie !== undefined && asset.valeur_saisie !== null
+        ? `Valeur saisie : ${App.fmt.eur(asset.valeur_saisie)}` : '');
     return App.h('div', { class: 'a-meta' },
       App.h('span', { class: `pill ${badge[0]}`, title }, badge[1]));
   },
@@ -999,29 +1025,66 @@ App.tabs.wealth = {
     });
   },
 
+  /* Libellés des champs de `metadata`, qui s'affichaient jusqu'ici sous leur
+     clé technique — la fiche portait littéralement « taux_annuel  2.4 ». Une
+     clé absente de cette table reste masquée : mieux vaut ne rien montrer
+     qu'un identifiant de code. */
+  META_LABELS: {
+    taux_annuel: ['Taux annuel', (v) => `${App.fmt.num(v, 2)} %`],
+    taux_revalorisation_annuel: ['Revalorisation annuelle', (v) => `${App.fmt.num(v, 2)} %`],
+    indice_insee: ['Indice INSEE', String],
+    coingecko_id: ['Identifiant CoinGecko', String],
+    quantite: ['Quantité détenue', (v) => App.fmt.num(v, 6)],
+    isin: ['ISIN', String],
+    surface: ['Surface', (v) => `${App.fmt.num(v, 0)} m²`],
+    loyer_mensuel: ['Loyer mensuel', (v) => App.fmt.eur(v)],
+    charges_annuelles: ['Charges annuelles', (v) => App.fmt.eur(v)],
+  },
+
   panelSummary(data) {
     const a = data.asset;
-    const rows = [
-      ['Valeur actuelle', App.fmt.eur(a.valeur)],
-      ['Capital investi', App.fmt.eur(a.investi)],
-      ['Plus-value latente', `${App.fmt.signed(a.plus_value)}${a.plus_value_pct !== null ? ` (${App.fmt.ratio(a.plus_value_pct)})` : ''}`],
-      ["Date d'acquisition", App.fmt.date(a.date_acquisition)],
-      ["Valeur d'acquisition", App.fmt.eur(a.valeur_acquisition)],
-      ['Valeur saisie manuellement', a.valeur_actuelle === null ? 'non (reconstituée)' : App.fmt.eur(a.valeur_actuelle)],
-      ['Mouvements enregistrés', String(a.nb_mouvements)],
-    ];
+    // Un produit à taux ne se lit pas comme un actif coté : pas de plus-value,
+    // et « capital investi » ferait doublon avec la valeur d'acquisition.
+    const rows = a.valeur_source === 'taux'
+      ? [
+        ['Capital', App.fmt.eur(a.valeur)],
+        [`Intérêts prévus au ${App.fmt.jourMois(a.date_credit)}`,
+          a.interets_prevus ? App.fmt.signed(a.interets_prevus) : '—'],
+        ['Taux annuel', a.taux_annuel ? `${App.fmt.num(a.taux_annuel, 2)} %` : 'non renseigné'],
+        ['Ouvert le', App.fmt.date(a.date_acquisition)],
+        ['Mouvements enregistrés', String(a.nb_mouvements)],
+      ]
+      : [
+        ['Valeur actuelle', App.fmt.eur(a.valeur)],
+        ['Capital investi', App.fmt.eur(a.investi)],
+        ['Plus-value latente', `${App.fmt.signed(a.plus_value)}${a.plus_value_pct !== null ? ` (${App.fmt.ratio(a.plus_value_pct)})` : ''}`],
+        ["Date d'acquisition", App.fmt.date(a.date_acquisition)],
+        ["Valeur d'acquisition", App.fmt.eur(a.valeur_acquisition)],
+        ['Valeur saisie manuellement', a.valeur_actuelle === null ? 'non (reconstituée)' : App.fmt.eur(a.valeur_actuelle)],
+        ['Mouvements enregistrés', String(a.nb_mouvements)],
+      ];
     const list = App.h('div', { class: 'metric-list' });
     for (const [l, v] of rows) {
       list.append(App.h('div', { class: 'metric-row' },
         App.h('span', { class: 'm-label' }, l), App.h('span', { class: 'm-value' }, v)));
     }
-    const metaEntries = Object.entries(a.metadata || {});
+
+    // Le taux est déjà dans le tableau ci-dessus pour un produit à taux : le
+    // répéter dans « Champs spécifiques » ferait doublon.
+    const dejaVus = a.valeur_source === 'taux' ? ['taux_annuel'] : [];
+    const metaEntries = Object.entries(a.metadata || {})
+      .filter(([k, v]) => App.tabs.wealth.META_LABELS[k] && !dejaVus.includes(k)
+        && v !== null && v !== '');
+
     return App.h('div', {}, list,
       metaEntries.length ? App.h('div', { class: 'section-title' }, 'Champs spécifiques') : null,
       metaEntries.length ? App.h('div', { class: 'metric-list' },
-        ...metaEntries.map(([k, v]) => App.h('div', { class: 'metric-row' },
-          App.h('span', { class: 'm-label' }, k),
-          App.h('span', { class: 'm-value' }, String(v))))) : null,
+        ...metaEntries.map(([k, v]) => {
+          const [label, fmt] = App.tabs.wealth.META_LABELS[k];
+          return App.h('div', { class: 'metric-row' },
+            App.h('span', { class: 'm-label' }, label),
+            App.h('span', { class: 'm-value' }, fmt(v)));
+        })) : null,
       data.transactions.length ? App.h('div', { class: 'section-title' }, 'Transactions rattachées') : null,
       data.transactions.length ? App.tabs.wealth.txTable(data.transactions) : null);
   },

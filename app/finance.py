@@ -204,7 +204,14 @@ def asset_value_at(asset, movements, at_date=None, use_manual_current=True) -> f
 # Les livrets ne se cotent pas : leurs interets se calculent, selon la regle
 # francaise des quinzaines. Un versement porte interet a partir du 1er ou du 16
 # qui suit ; un retrait cesse d'en produire a partir du 1er ou du 16 qui
-# precede ; les interets sont capitalises le 31 decembre.
+# precede ; les interets sont capitalises a la date de credit (le 31 decembre
+# pour tous les produits reglementes).
+#
+# Le solde renvoye est le CAPITAL, celui du releve bancaire : les interets de
+# l'exercice en cours ne sont pas encore credites et n'y figurent donc pas.
+# `interets_prevus` dit separement ce qui tombera a la prochaine echeance.
+
+CREDIT_PAR_DEFAUT = "12-31"
 
 
 def _quinzaine(d: date) -> int:
@@ -212,11 +219,44 @@ def _quinzaine(d: date) -> int:
     return d.year * 24 + (d.month - 1) * 2 + (0 if d.day <= 15 else 1)
 
 
-def valeur_livret(asset, movements, taux_annuel, at_date=None) -> float:
-    """Capital + interets courus d'un livret a une date donnee.
+def _quinzaine_revolue(d: date) -> bool:
+    """Vrai si `d` est le dernier jour de sa quinzaine (le 15, ou fin de mois).
+
+    Une quinzaine ne paie qu'une fois ecoulee. Sans ce controle, la quinzaine
+    en cours etait creditee d'avance : un livret declare le jour meme affichait
+    aussitot une quinzaine d'interets, soit +0,1 % au taux du Livret A, et une
+    plus-value sortie de nulle part.
+    """
+    return d.day == 15 or d.day == calendar.monthrange(d.year, d.month)[1]
+
+
+def _jour_credit(credit):
+    """'MM-JJ' -> (mois, jour). Retombe sur le 31 decembre si illisible."""
+    try:
+        mois, jour = str(credit or CREDIT_PAR_DEFAUT).split("-")
+        mois, jour = int(mois), int(jour)
+        date(2000, mois, min(jour, calendar.monthrange(2000, mois)[1]))
+        return mois, jour
+    except (ValueError, TypeError):
+        return 12, 31
+
+
+def _quinzaine_credit(annee_quinzaine, mois, jour):
+    """Quinzaine ou tombe la capitalisation, pour une annee donnee."""
+    jour = min(jour, calendar.monthrange(annee_quinzaine, mois)[1])
+    return _quinzaine(date(annee_quinzaine, mois, jour))
+
+
+def valeur_livret(asset, movements, taux_annuel, at_date=None, credit=None) -> float:
+    """Capital d'un livret a une date donnee, interets deja credites inclus.
 
     Calcul pur, sans reseau, recalcule a chaque appel : une correction sur un
     versement passe se repercute immediatement.
+
+    Ce que la fonction ne renvoie PAS : les interets de l'exercice en cours.
+    Ils ne sont pas encore acquis, la banque ne les affiche pas non plus, et les
+    ajouter faisait diverger l'application du releve toute l'annee. Voir
+    `interets_prevus`.
     """
     at_date = parse_date(at_date) or date.today()
     acq = parse_date(asset["date_acquisition"])
@@ -242,22 +282,46 @@ def valeur_livret(asset, movements, taux_annuel, at_date=None) -> float:
             events.append((_quinzaine(d) - 1, -abs(montant)))
     events.sort()
 
+    mois_credit, jour_credit = _jour_credit(credit)
     rate = (taux_annuel or 0.0) / 100.0 / 24.0
     start_q, end_q = _quinzaine(base_date), _quinzaine(at_date)
+    # La quinzaine en cours n'entre dans le calcul que le jour ou elle s'acheve.
+    borne = end_q + 1 if _quinzaine_revolue(at_date) else end_q
     balance = accrued = 0.0
     i = 0
-    for q in range(start_q, end_q + 1):
+    for q in range(start_q, borne):
         while i < len(events) and events[i][0] <= q:
             balance += events[i][1]
             i += 1
         accrued += max(balance, 0.0) * rate
-        if q % 24 == 23:  # derniere quinzaine de decembre : capitalisation
+        if q == _quinzaine_credit(q // 24, mois_credit, jour_credit):
             balance += accrued
             accrued = 0.0
     while i < len(events):  # evenements posterieurs a la derniere quinzaine
         balance += events[i][1]
         i += 1
-    return round(balance + accrued, 2)
+    return round(balance, 2)
+
+
+def interets_prevus(asset, movements, taux_annuel, at_date=None, credit=None):
+    """Interets qui seront credités a la prochaine echeance, a solde constant.
+
+    Repond a « combien la banque me versera au 31 decembre ». C'est la
+    difference entre le capital a cette echeance et le capital d'aujourd'hui :
+    le moteur de `valeur_livret` sert deux fois plutot que d'etre reecrit.
+    """
+    at_date = parse_date(at_date) or date.today()
+    if not taux_annuel:
+        return 0.0
+    mois, jour = _jour_credit(credit)
+    echeance = date(at_date.year, mois, min(jour, calendar.monthrange(at_date.year, mois)[1]))
+    if echeance < at_date:
+        # L'echeance de l'annee est passee : la prochaine est l'an prochain.
+        an = at_date.year + 1
+        echeance = date(an, mois, min(jour, calendar.monthrange(an, mois)[1]))
+    futur = valeur_livret(asset, movements, taux_annuel, echeance, credit)
+    actuel = valeur_livret(asset, movements, taux_annuel, at_date, credit)
+    return round(max(futur - actuel, 0.0), 2)
 
 
 def valeur_capitalisee(flux, taux_annuel, at_date=None):

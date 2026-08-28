@@ -188,7 +188,7 @@ Trois règles tenues par le code :
 | PEA, CTO, AV, PER | Twelve Data ou Yahoo | Σ quantité × cours, ligne par ligne, converti en EUR |
 | Support non coté (fonds euro…) | calcul local | capital + intérêts au taux saisi, **sans réseau** |
 | Crypto | CoinGecko | quantité × cours, coté directement en EUR, sans clé |
-| Livret, LDDS, LEP, Livret Jeune, PEL, CEL, dépôt à terme | calcul local | intérêts par quinzaines au taux saisi, **sans réseau ni réglage** |
+| Livret, LDDS, LEP, Livret Jeune, PEL, CEL, dépôt à terme | calcul local | capital, intérêts crédités au 31 décembre, **sans réseau** |
 | Immobilier, SCPI | indice INSEE | réévaluation du prix d'acquisition, ou taux annuel manuel |
 | Tout le reste | saisie manuelle | inchangé |
 
@@ -231,6 +231,33 @@ Les cryptos saisies avant ce changement continuent de fonctionner.
 
 Le bouton « Saisir un symbole à la main » reste disponible quand vous êtes hors
 ligne ou sans clé API.
+
+### Livrets : le capital, et les intérêts à venir
+
+**La valeur affichée d'un livret est son capital**, celui de votre relevé
+bancaire. Les intérêts de l'année en cours ne sont pas encore acquis : votre
+banque ne les affiche pas, l'application non plus. Ils figurent à côté, sous la
+forme **« +72 € prévus au 31 décembre »**, avec le taux annuel.
+
+Une version précédente ajoutait ces intérêts au capital en continu. L'application
+affichait donc, toute l'année, plus que le relevé — et une « plus-value » sur un
+livret, qui n'en a pas : ce chiffre n'était rien d'autre que les intérêts courus,
+présentés comme un rendement partiel non annualisé.
+
+Le calcul suit la règle française des quinzaines : un versement porte intérêt au
+1er ou au 16 qui suit, un retrait cesse d'en produire au 1er ou au 16 qui
+précède, et **une quinzaine ne paie qu'une fois révolue**. Un livret déclaré
+aujourd'hui vaut donc exactement ce que vous avez saisi, sans un centime de plus.
+
+**La date de crédit se règle** dans *Paramètres → Objectifs et frais → Produits à
+taux*. Le 31 décembre par défaut, ce qui vaut pour le Livret A, le LDDS, le LEP,
+le Livret Jeune, le PEL et le CEL. À changer si vous détenez un dépôt à terme
+qui crédite à sa date anniversaire.
+
+Enfin, **« Valeur aujourd'hui » recale le calcul** : la saisir pose une
+valorisation datée, et les intérêts repartent de là. Auparavant ce champ n'avait
+aucun effet sur un produit à taux, et le montant affiché ignorait ce que vous
+aviez inscrit.
 
 ### Ce qu'aucune place ne cote : fonds euro et supports non cotés
 

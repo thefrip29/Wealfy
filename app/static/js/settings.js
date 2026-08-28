@@ -19,6 +19,8 @@ App.settings = {
         App.settings.panelRules(rules, settings))],
       ['Objectifs et frais', App.h('div', {},
         App.settings.panelRepartition(settings),
+        App.h('div', { class: 'section-title' }, 'Produits à taux'),
+        App.settings.panelTaux(settings),
         App.h('div', { class: 'section-title' }, 'Frais annuels'),
         App.settings.panelFees(settings))],
       ['Cours de marché', App.h('div', {},
@@ -340,6 +342,40 @@ App.settings = {
   },
 
   /* ---------- frais annuels ---------- */
+  /* Date de capitalisation des livrets et depots a terme. */
+  panelTaux(settings) {
+    const courant = String(settings.date_credit_interets || '12-31');
+    const [mm, jj] = courant.split('-');
+    const jourIn = App.input('jour', { type: 'number', min: 1, max: 31, value: Number(jj) || 31 });
+    const moisIn = App.select('mois', [
+      ['01', 'janvier'], ['02', 'février'], ['03', 'mars'], ['04', 'avril'],
+      ['05', 'mai'], ['06', 'juin'], ['07', 'juillet'], ['08', 'août'],
+      ['09', 'septembre'], ['10', 'octobre'], ['11', 'novembre'], ['12', 'décembre'],
+    ], mm || '12');
+
+    const save = async () => {
+      const j = Math.min(31, Math.max(1, parseInt(jourIn.value, 10) || 31));
+      const valeur = `${moisIn.value}-${String(j).padStart(2, '0')}`;
+      await App.settings.save({ date_credit_interets: valeur },
+        'Date de crédit enregistrée');
+    };
+
+    return App.h('div', {},
+      App.h('p', { class: 'hint' },
+        'Le jour où vos intérêts sont versés sur le capital. C’est le '
+        + '31 décembre pour le Livret A, le LDDS, le LEP, le Livret Jeune, le PEL et '
+        + 'le CEL — à changer seulement si vous détenez un dépôt à terme qui '
+        + 'crédite à sa date anniversaire.'),
+      App.h('p', { class: 'hint' },
+        'Jusqu’à cette date, la valeur affichée reste le capital, celui de votre '
+        + 'relevé bancaire. Les intérêts à venir sont indiqués à côté.'),
+      App.h('div', { class: 'form-grid', style: 'margin-top:12px' },
+        App.field('Jour', jourIn),
+        App.field('Mois', moisIn)),
+      App.h('div', { class: 'actions', style: 'margin:12px 0' },
+        App.h('button', { class: 'btn primary', onclick: save }, 'Enregistrer')));
+  },
+
   panelFees(settings) {
     const fees = Object.assign({}, settings.frais_annuels || {});
     const year = String(new Date().getFullYear());

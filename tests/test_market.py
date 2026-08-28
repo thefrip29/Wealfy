@@ -499,6 +499,73 @@ class TestLivretInterest(unittest.TestCase):
     def test_before_acquisition_is_zero(self):
         self.assertEqual(finance.valeur_livret(self._asset(), [], 3.0, "2023-06-01"), 0.0)
 
+    # --- la quinzaine en cours ne paie qu'une fois revolue ------------------
+
+    def test_le_jour_de_la_saisie_ne_rapporte_rien(self):
+        """Le bug signale : 8 000 EUR devenaient 8 008 EUR le jour meme.
+
+        Au taux du Livret A, cette quinzaine offerte d'avance valait +0,1 %, et
+        faisait apparaitre une plus-value sur un livret tout juste declare.
+        """
+        actif = {"date_acquisition": "2026-08-28", "valeur_acquisition": 8000,
+                 "valeur_actuelle": None}
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-08-28"), 8000.0)
+
+    def test_la_quinzaine_paie_le_jour_ou_elle_s_acheve(self):
+        """Credit cale sur la fin de quinzaine : rien le 30, huit euros le 31."""
+        actif = {"date_acquisition": "2026-08-28", "valeur_acquisition": 8000,
+                 "valeur_actuelle": None}
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-08-30", "08-31"), 8000.0)
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-08-31", "08-31"), 8008.0)
+
+    def test_le_15_cloture_aussi_une_quinzaine(self):
+        """Le mois compte deux quinzaines : le 15 en ferme une, comme le 30 ou le 31."""
+        actif = {"date_acquisition": "2026-09-01", "valeur_acquisition": 8000,
+                 "valeur_actuelle": None}
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-09-14", "09-15"), 8000.0)
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-09-15", "09-15"), 8008.0)
+
+    # --- le capital, et non le capital plus les interets courus -------------
+
+    def test_le_capital_exclut_les_interets_non_credites(self):
+        """Ce que montre le releve bancaire : les interets tombent au 31/12."""
+        actif = {"date_acquisition": "2026-01-01", "valeur_acquisition": 10000,
+                 "valeur_actuelle": None}
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-09-30"), 10000.0)
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-12-30"), 10000.0)
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-12-31"), 10240.0)
+
+    def test_interets_prevus_a_la_prochaine_echeance(self):
+        actif = {"date_acquisition": "2026-01-01", "valeur_acquisition": 10000,
+                 "valeur_actuelle": None}
+        self.assertEqual(finance.interets_prevus(actif, [], 2.4, "2026-09-30"), 240.0)
+        # Une fois credites, la projection repart sur l'annee suivante.
+        self.assertEqual(finance.interets_prevus(actif, [], 2.4, "2026-12-31"), 0.0)
+        self.assertEqual(finance.interets_prevus(actif, [], 2.4, "2027-01-01"), 245.76)
+
+    def test_sans_taux_aucun_interet_prevu(self):
+        actif = {"date_acquisition": "2026-01-01", "valeur_acquisition": 10000,
+                 "valeur_actuelle": None}
+        self.assertEqual(finance.interets_prevus(actif, [], None, "2026-09-30"), 0.0)
+
+    # --- date de credit configurable ---------------------------------------
+
+    def test_la_date_de_credit_se_deplace(self):
+        actif = {"date_acquisition": "2026-01-01", "valeur_acquisition": 10000,
+                 "valeur_actuelle": None}
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-06-29", "06-30"), 10000.0)
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-06-30", "06-30"), 10120.0)
+        # Et plus rien au 31 decembre, qui n'est plus l'echeance.
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-12-31", "06-30"), 10120.0)
+
+    def test_une_date_de_credit_illisible_retombe_sur_le_31_decembre(self):
+        """Un reglage corrompu ne doit pas faire disparaitre les interets."""
+        actif = {"date_acquisition": "2026-01-01", "valeur_acquisition": 10000,
+                 "valeur_actuelle": None}
+        for valeur in ("n'importe quoi", "", None, "13-45"):
+            self.assertEqual(
+                finance.valeur_livret(actif, [], 2.4, "2026-12-31", valeur), 10240.0)
+
 
 class TestLivretThroughApi(MarketTestCase):
     def test_rate_asset_uses_computed_interest(self):
@@ -532,6 +599,55 @@ class TestLivretThroughApi(MarketTestCase):
         detail = self.get(f"/api/assets/{bien['id']}?date=2025-01-01")
         self.assertEqual(detail["asset"]["valeur_source"], "indice")
         self.assertAlmostEqual(detail["asset"]["valeur"], 110408.0, delta=200.0)
+
+    def test_la_valeur_saisie_recale_le_livret(self):
+        """« Valeur aujourd'hui » etait lettre morte sur un produit a taux.
+
+        Elle n'ecrivait que `assets.valeur_actuelle`, que le calcul d'interets
+        ignore : il ne se recale que sur un mouvement de valorisation. Saisir
+        8 000 EUR laissait donc afficher un tout autre chiffre.
+        """
+        livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A", "date_acquisition": "2020-01-01",
+            "valeur_acquisition": 5000, "metadata": {"taux_annuel": 2.4},
+        })
+        self.client.put(f"/api/assets/{livret['id']}", json={"valeur_actuelle": 8000})
+        detail = self.get(f"/api/assets/{livret['id']}")
+        self.assertEqual(detail["asset"]["valeur_source"], "taux")
+        self.assertEqual(detail["asset"]["valeur"], 8000.0)
+
+    def test_un_livret_declare_aujourd_hui_n_a_aucune_plus_value(self):
+        """`docs/donnees.md` le promet : la plus-value demarre a zero."""
+        livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A",
+            "date_acquisition": date.today().isoformat(),
+            "valeur_acquisition": 8000, "valeur_actuelle": 8000,
+            "metadata": {"taux_annuel": 2.4},
+        })
+        asset = self.get(f"/api/assets/{livret['id']}")["asset"]
+        self.assertEqual(asset["valeur"], 8000.0)
+        self.assertEqual(asset["plus_value"], 0.0)
+
+    def test_la_fiche_expose_taux_interets_et_date_de_credit(self):
+        livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A", "date_acquisition": "2026-01-01",
+            "valeur_acquisition": 10000, "metadata": {"taux_annuel": 2.4},
+        })
+        asset = self.get(f"/api/assets/{livret['id']}?date=2026-09-30")["asset"]
+        self.assertEqual(asset["taux_annuel"], 2.4)
+        self.assertEqual(asset["interets_prevus"], 240.0)
+        self.assertEqual(asset["date_credit"], "12-31")
+
+    def test_le_reglage_de_date_de_credit_est_pris_en_compte(self):
+        self.client.put("/api/settings", json={"date_credit_interets": "06-30"})
+        livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A", "date_acquisition": "2026-01-01",
+            "valeur_acquisition": 10000, "metadata": {"taux_annuel": 2.4},
+        })
+        avant = self.get(f"/api/assets/{livret['id']}?date=2026-06-29")["asset"]
+        apres = self.get(f"/api/assets/{livret['id']}?date=2026-06-30")["asset"]
+        self.assertEqual(avant["valeur"], 10000.0)
+        self.assertEqual(apres["valeur"], 10120.0)
 
     def test_without_rate_falls_back_to_manual(self):
         self.enable_market()

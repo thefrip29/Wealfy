@@ -84,6 +84,14 @@ App.fmt = {
     if (v === null || v === undefined) return '—';
     return (v > 0 ? '+' : '') + App.fmt.eur(v);
   },
+  /* 'MM-JJ' -> « 31 décembre ». La date de crédit des intérêts n'a pas
+     d'année : elle revient tous les ans. */
+  jourMois(md) {
+    const m = /^(\d{2})-(\d{2})$/.exec(String(md || ''));
+    if (!m) return '—';
+    return new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long' })
+      .format(new Date(2001, Number(m[1]) - 1, Number(m[2])));
+  },
   /* Les familles d'actifs sont des clés sans accent (`ASSET_TYPES` dans
      app/db.py), aussi lues par advisor.py et par les réglages enregistrés :
      les accentuer à la source casserait ces correspondances. On les habille

@@ -4,7 +4,7 @@ from datetime import date
 
 from flask import jsonify, request
 
-from .. import finance, services
+from .. import finance, market, services
 from ..db import execute, new_id, query, row_to_dict
 from ._blueprint import bp
 from ._helpers import as_date, as_float, body, fail
@@ -108,7 +108,8 @@ def create_assets_batch():
 
 @bp.put("/api/assets/<aid>")
 def update_asset(aid):
-    if not services.get_asset(aid):
+    asset = services.get_asset(aid)
+    if not asset:
         return fail("Actif introuvable.", 404)
     data = body()
     fields, args = [], []
@@ -135,6 +136,24 @@ def update_asset(aid):
         return fail("Rien a modifier.")
     args.append(aid)
     execute(f"UPDATE assets SET {', '.join(fields)} WHERE id = ?", args)
+
+    # Sur un produit a taux, `valeur_actuelle` seule ne servait a rien :
+    # `finance.valeur_livret` ne se recale que sur un mouvement de valorisation
+    # et continuait a composer depuis la valeur d'acquisition. Le champ etait
+    # donc lettre morte — saisir 8 000 EUR laissait afficher un tout autre
+    # chiffre. On pose la valorisation datee qui manquait.
+    nouvelle = as_float(data.get("valeur_actuelle"), None) if "valeur_actuelle" in data else None
+    type_actif = (data.get("type") or asset["type"] or "").strip()
+    if nouvelle is not None and type_actif in market.RATE_ASSET_TYPES:
+        # `services.get_asset` rend deja `metadata` sous forme de dict.
+        meta = data["metadata"] if "metadata" in data else (asset["metadata"] or {})
+        if (meta or {}).get("taux_annuel") not in (None, ""):
+            execute(
+                "INSERT INTO asset_movements(id, asset_id, date, montant, type, note) "
+                "VALUES (?,?,?,?,'valorisation',?)",
+                (new_id(), aid, date.today().isoformat(), round(nouvelle, 2),
+                 "Valeur saisie depuis la fiche"),
+            )
     return jsonify(row_to_dict(query("SELECT * FROM assets WHERE id = ?", (aid,), one=True)))
 
 
