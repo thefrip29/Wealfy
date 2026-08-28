@@ -96,7 +96,13 @@ CREATE TABLE IF NOT EXISTS securities (
     label            TEXT,
     benchmark_symbol TEXT,
     benchmark_label  TEXT,
-    kind             TEXT NOT NULL DEFAULT 'titre',  -- titre | crypto
+    -- 'non_cote' couvre ce qu'aucune place ne cote : fonds euro d'une
+    -- assurance vie, SCPI logee en unite de compte, support en attente
+    -- d'arbitrage. Ces lignes sont valorisees en local, jamais par le reseau.
+    kind             TEXT NOT NULL DEFAULT 'titre',  -- titre | crypto | non_cote
+    -- Taux de rendement d'une ligne non cotee, en pourcentage. Vide = valeur
+    -- nominale : un taux invente produirait une valorisation fausse en silence.
+    taux_annuel      REAL,
     created_at       TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

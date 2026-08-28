@@ -235,15 +235,26 @@ App.tabs.wealth = {
           App.h('div', { class: 'a-meta' },
             App.h('code', {}, ligne.ticker),
             ligne.symbole && ligne.symbole !== ligne.ticker ? ` · ${ligne.symbole}` : '')),
-        App.h('td', { class: 'right num' }, App.fmt.num(ligne.quantite, 6)),
+        // Un fonds euro se tient en euros, pas en parts : afficher « 0 » ferait
+        // croire à une ligne vide.
+        App.h('td', { class: 'right num' },
+          ligne.kind === 'non_cote' ? '—' : App.fmt.num(ligne.quantite, 6)),
         App.h('td', { class: 'right num' },
           ligne.pru == null ? '—' : App.fmt.eur(ligne.pru)),
         App.h('td', { class: 'right num' },
-          ligne.cours == null
-            ? App.h('span', { class: 'pill warn' }, 'non coté')
-            : App.fmt.eur(ligne.cours),
-          ligne.cours_date
-            ? App.h('div', { class: 'a-meta' }, App.fmt.date(ligne.cours_date)) : null),
+          // Un support hors cote n'est pas un cours manquant : c'est une ligne
+          // qui n'a jamais eu vocation à être cotée. La pastille d'alerte
+          // laissait croire à une configuration ratée.
+          ligne.kind === 'non_cote'
+            ? App.h('span', { class: 'pill' }, 'hors cote')
+            : (ligne.cours == null
+              ? App.h('span', { class: 'pill warn' }, 'non coté')
+              : App.fmt.eur(ligne.cours)),
+          ligne.kind === 'non_cote'
+            ? App.h('div', { class: 'a-meta' }, ligne.taux_annuel
+              ? `${App.fmt.num(ligne.taux_annuel, 2)} %/an` : 'valeur saisie')
+            : (ligne.cours_date
+              ? App.h('div', { class: 'a-meta' }, App.fmt.date(ligne.cours_date)) : null)),
         App.h('td', { class: 'right num' },
           ligne.valeur == null ? '—' : App.fmt.eur(ligne.valeur)),
         App.h('td', {
@@ -319,6 +330,13 @@ App.tabs.wealth = {
           class: 'btn primary',
           onclick: () => App.tabs.wealth.openInstrumentSearch(asset, host),
         }, kind === 'crypto' ? '+ Ajouter une crypto' : '+ Ajouter un support'),
+        // Aucune place ne cote un fonds euro : c'est l'actif général de
+        // l'assureur. Il ne peut donc pas venir d'une recherche, d'où ce
+        // second bouton — qui ne touche jamais au réseau.
+        kind === 'crypto' ? null : App.h('button', {
+          class: 'btn',
+          onclick: () => App.tabs.wealth.openNonCoteForm(asset, host),
+        }, '+ Support non coté'),
         App.h('button', {
           class: 'btn',
           onclick: () => App.tabs.wealth.openMovementImport(asset),
@@ -370,6 +388,12 @@ App.tabs.wealth = {
           return;
         }
         for (const item of res.resultats) {
+          // `type` et `isin` étaient déjà renvoyés par le serveur sans jamais
+          // être affichés. Ce sont pourtant eux qui permettent de distinguer
+          // une action d'un certificat portant le même nom.
+          const meta = [item.code, item.type, item.exchange, item.pays,
+            item.currency, item.isin, item.rang ? `#${item.rang}` : null];
+          const autres = (item.autres_places || []).length;
           results.append(App.h('button', {
             class: 'search-item',
             onclick: () => {
@@ -378,9 +402,9 @@ App.tabs.wealth = {
           },
           App.h('div', {},
             App.h('div', {}, item.label || item.ticker),
-            App.h('div', { class: 'a-meta' },
-              [item.code, item.exchange, item.pays, item.currency,
-                item.rang ? `#${item.rang}` : null].filter(Boolean).join(' · '))),
+            App.h('div', { class: 'a-meta' }, meta.filter(Boolean).join(' · ')),
+            autres ? App.h('div', { class: 'a-meta' },
+              `cotée sur ${autres} autre${autres > 1 ? 's' : ''} place${autres > 1 ? 's' : ''}`) : null),
           App.h('span', { class: 'pill accent' }, 'Choisir')));
         }
       } catch (e) {
@@ -410,6 +434,59 @@ App.tabs.wealth = {
     setTimeout(() => input.focus(), 50);
   },
 
+  /* --- support non coté : fonds euro, SCPI en UC, support en arbitrage ---
+     Aucun réseau, donc disponible même cours de marché désactivés. Un fonds
+     euro se tient en euros et non en parts : ni quantité, ni prix unitaire. */
+  openNonCoteForm(asset, host) {
+    const form = App.h('form', { onsubmit: (e) => e.preventDefault() },
+      App.h('div', { class: 'form-grid' },
+        App.field('Nom du support', App.input('label', {
+          placeholder: 'Fonds euro', required: true,
+        }), { full: true }),
+        App.field('Montant (€)', App.input('montant', {
+          type: 'number', step: '0.01', required: true,
+        }), { hint: 'Ce que vous avez dessus' }),
+        App.field('Taux annuel (%)', App.input('taux_annuel', {
+          type: 'number', step: '0.01', placeholder: 'facultatif',
+        }), { hint: 'Vide : la valeur reste celle que vous saisissez' }),
+        App.field('Date', App.dateField('date', { value: App.todayISO() }))));
+
+    const save = async () => {
+      const v = App.formValues(form);
+      const label = (v.label || '').trim();
+      if (!label) return App.toast('Nom du support requis', 'error');
+      if (!v.montant) return App.toast('Montant requis', 'error');
+      try {
+        await App.api.post(`/api/assets/${asset.id}/positions`, {
+          ...v,
+          kind: 'non_cote',
+          // Le libellé sert de clé : un fonds euro n'a ni ticker ni ISIN à
+          // recopier, et en inventer un serait pire que de s'en passer.
+          ticker: label,
+          symbol: label,
+        });
+        App.modal.close();
+        App.toast('Support ajouté', 'success');
+        await App.tabs.wealth.renderPositions(host, asset);
+        await App.refreshOthers();
+      } catch (e) { App.toast(e.message, 'error'); }
+    };
+
+    App.modal.open({
+      title: 'Ajouter un support non coté',
+      body: App.h('div', {},
+        App.h('p', { class: 'hint' },
+          'Pour ce qu’aucune place ne cote : fonds euro, SCPI logée en unité de '
+          + 'compte, support en attente d’arbitrage. La valeur est calculée sur '
+          + 'votre machine, sans aucun appel réseau.'),
+        form),
+      footer: [
+        App.h('button', { class: 'btn', onclick: () => App.modal.close() }, 'Annuler'),
+        App.h('button', { class: 'btn primary', onclick: save }, 'Ajouter'),
+      ],
+    });
+  },
+
   /* --- saisie de la quantité pour l'instrument choisi ---
      Quand l'instrument vient de la recherche, tout est déjà connu : on ne
      demande que combien et à quel prix. Les champs techniques (place, devise,
@@ -419,21 +496,26 @@ App.tabs.wealth = {
     const item = instrument || {};
     const choisi = !!item.ticker;
 
+    // « Nom affiché » vit ici et non dans les détails repliés : les
+    // référentiels ne connaissent que les raisons sociales, jamais les marques
+    // — SpaceX s'y appelle « Space Exploration Technologies Corp. Class A ».
+    // Cacher le champ derrière un accordéon fermé revenait à imposer ce nom.
     const principal = App.h('div', { class: 'form-grid' },
+      App.field('Nom affiché', App.input('label', { value: item.label || '' }),
+        { full: true, hint: 'Le nom du référentiel. Remplacez-le par le vôtre.' }),
       App.field('Quantité', App.input('quantite', {
         type: 'number', step: '0.00000001', required: true,
       })),
       App.field('Prix unitaire (€)', App.input('prix_unitaire', {
         type: 'number', step: '0.0001',
       }), { hint: 'Sert au PRU et au TRI' }),
-      App.field('Date', App.input('date', { type: 'date', value: App.todayISO() })));
+      App.field('Date', App.dateField('date', { value: App.todayISO() })));
 
     const avance = App.h('div', { class: 'form-grid' },
       App.field('Instrument', App.input('ticker', {
         value: item.ticker || '',
         placeholder: kind === 'crypto' ? 'bitcoin' : 'CW8 ou ISIN',
       })),
-      App.field('Nom affiché', App.input('label', { value: item.label || '' })),
       kind === 'crypto' ? null : App.field('Place', App.input('exchange', {
         value: item.exchange || '', placeholder: 'Euronext',
       })),
@@ -464,6 +546,9 @@ App.tabs.wealth = {
           ticker,
           symbol: item.symbol || ticker,
           currency: v.currency || item.currency || 'EUR',
+          // La colonne `securities.isin` existait mais restait toujours NULL :
+          // le formulaire ne l'envoyait jamais.
+          isin: item.isin || '',
         });
         App.modal.close();
         App.toast('Position ajoutée', 'success');
@@ -569,8 +654,8 @@ App.tabs.wealth = {
       App.field('Montant aujourd’hui (€)', App.input('valeur_actuelle', {
         type: 'number', step: '0.01', required: true,
       })),
-      App.field('Depuis le', App.input('date_acquisition', {
-        type: 'date', value: App.todayISO(),
+      App.field('Depuis le', App.dateField('date_acquisition', {
+        value: App.todayISO(),
       })),
       avecTaux ? App.field('Taux annuel (%)', App.input('taux_annuel', {
         type: 'number', step: '0.01',
@@ -645,7 +730,7 @@ App.tabs.wealth = {
 
   openQuickAdd() {
     const lignes = [];
-    const dateIn = App.input('date', { type: 'date', value: App.todayISO() });
+    const dateIn = App.dateField('date', { value: App.todayISO() });
     const totalNode = App.h('strong', {}, App.fmt.eur(0));
 
     const updateTotal = () => {
@@ -798,8 +883,8 @@ App.tabs.wealth = {
         App.field('Valeur aujourd’hui (€)', App.input('valeur_actuelle', {
           type: 'number', step: '0.01', value: (asset && asset.valeur_actuelle) ?? '',
         }), { hint: 'Le montant que vous avez dessus maintenant' }),
-        App.field('Depuis le', App.input('date_acquisition', {
-          type: 'date', value: (asset && asset.date_acquisition) || App.todayISO(),
+        App.field('Depuis le', App.dateField('date_acquisition', {
+          value: (asset && asset.date_acquisition) || App.todayISO(),
         }), { hint: 'Ouverture, achat, ou simplement aujourd’hui' }),
         App.field('Montant investi (€)', App.input('valeur_acquisition', {
           type: 'number', step: '0.01',
@@ -989,7 +1074,7 @@ App.tabs.wealth = {
 
     const isMarket = App.tabs.wealth.MARKET.includes(a.type);
     const form = App.h('form', { class: 'form-grid', onsubmit: (e) => e.preventDefault() },
-      App.field('Date', App.input('date', { type: 'date', value: App.todayISO() })),
+      App.field('Date', App.dateField('date', { value: App.todayISO() })),
       App.field('Type', App.select('type', [['versement', 'Versement / achat'], ['retrait', 'Retrait / vente'], ['valorisation', 'Valorisation']], 'versement')),
       App.field('Montant (€)', App.input('montant', { type: 'number', step: '0.01' })),
       isMarket ? App.field('Ticker / ISIN', App.input('ticker')) : null,
@@ -1061,7 +1146,7 @@ App.tabs.wealth = {
       setTimeout(() => App.chart(canvasId, {
         type: 'line',
         data: {
-          labels: ligne.serie_ligne.map((p) => p.date),
+          labels: ligne.serie_ligne.map((p) => App.fmt.date(p.date)),
           datasets: [
             {
               label: ligne.symbole, data: ligne.serie_ligne.map((p) => p.valeur),
@@ -1168,7 +1253,7 @@ App.tabs.wealth = {
   /* ---------- valorisation ---------- */
   openRevalue(asset) {
     const form = App.h('form', { class: 'form-grid', onsubmit: (e) => e.preventDefault() },
-      App.field('Date de valorisation', App.input('date', { type: 'date', value: App.todayISO() })),
+      App.field('Date de valorisation', App.dateField('date', { value: App.todayISO() })),
       App.field('Valeur totale (€)', App.input('valeur', {
         type: 'number', step: '0.01', value: asset.valeur_actuelle ?? '',
       })),
@@ -1310,8 +1395,8 @@ App.tabs.wealth = {
       App.field('Durée (mois)', App.input('duree_mois', {
         type: 'number', step: '1', value: liab ? liab.duree_mois : '',
       })),
-      App.field('Date de début', App.input('date_debut', {
-        type: 'date', value: (liab && liab.date_debut) || App.todayISO(),
+      App.field('Date de début', App.dateField('date_debut', {
+        value: (liab && liab.date_debut) || App.todayISO(),
       })),
       App.field('Assurance mensuelle (€)', App.input('assurance_mensuelle', {
         type: 'number', step: '0.01', value: liab ? liab.assurance_mensuelle : 0,

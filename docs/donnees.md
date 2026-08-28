@@ -185,7 +185,8 @@ Trois règles tenues par le code :
 
 | Type | Source | Détail |
 |---|---|---|
-| PEA, CTO, AV, PER | Twelve Data | Σ quantité × cours, ligne par ligne, converti en EUR |
+| PEA, CTO, AV, PER | Twelve Data ou Yahoo | Σ quantité × cours, ligne par ligne, converti en EUR |
+| Support non coté (fonds euro…) | calcul local | capital + intérêts au taux saisi, **sans réseau** |
 | Crypto | CoinGecko | quantité × cours, coté directement en EUR, sans clé |
 | Livret, LDDS, LEP, Livret Jeune, PEL, CEL, dépôt à terme | calcul local | intérêts par quinzaines au taux saisi, **sans réseau ni réglage** |
 | Immobilier, SCPI | indice INSEE | réévaluation du prix d'acquisition, ou taux annuel manuel |
@@ -231,6 +232,33 @@ Les cryptos saisies avant ce changement continuent de fonctionner.
 Le bouton « Saisir un symbole à la main » reste disponible quand vous êtes hors
 ligne ou sans clé API.
 
+### Ce qu'aucune place ne cote : fonds euro et supports non cotés
+
+Un fonds euro n'a ni ticker, ni ISIN, ni cours : ce n'est pas un instrument
+coté, c'est l'actif général de l'assureur. **Aucune API ne le renverra jamais**,
+et le chercher chez un fournisseur est une impasse. Le bouton
+**« + Support non coté »** de l'onglet *Mes supports* existe pour lui, et pour
+tout ce qui est dans le même cas : SCPI logée en unité de compte, UC introuvable
+chez le fournisseur, support en attente d'arbitrage.
+
+Vous saisissez un nom, un montant, et **un taux annuel facultatif**. Sans taux,
+la valeur reste celle que vous avez inscrite. Avec, les intérêts sont calculés
+au prorata et crédités au 31 décembre — le rythme réel d'un fonds euro, dont la
+participation aux bénéfices tombe une fois l'an, là où un livret réglementé
+compte par quinzaines. Comme pour les livrets, le taux est laissé vide par
+défaut : un taux inventé produirait une valorisation fausse en silence.
+
+Deux conséquences à connaître :
+
+- **Aucun appel réseau** n'est fait pour ces lignes, ni à la saisie ni au
+  rafraîchissement. Elles sont donc saisissables **cours de marché désactivés**,
+  exactement comme les livrets.
+- **Elles ne cassent plus la valorisation de l'enveloppe.** Une ligne sans cours
+  fait normalement retomber tout le compte sur sa valeur saisie — mieux vaut une
+  valeur assumée qu'un total partiel présenté comme complet. Un support non coté
+  n'entre pas dans ce cas : il fournit toujours une valeur, donc une assurance
+  vie « fonds euro + ETF » garde sa valorisation de marché.
+
 ### Vérifier la couverture avant de s'y fier
 
 C'est le point de vigilance du cahier des charges : les offres gratuites
@@ -240,10 +268,10 @@ symbole à la fois, en symbole court puis en ISIN. **À faire pour chacune de vo
 lignes avant de vous fier aux montants affichés.**
 
 > Cette vérification n'a pas pu être faite pendant le développement : elle
-> demande votre clé API. Si Twelve Data ne cote pas vos ETF Euronext, le repli
-> sérieux est Yahoo Finance (excellente couverture `.PA`, sans clé, mais API non
-> officielle) — l'abstraction `Provider` de `app/market.py` rend le basculement
-> peu coûteux.
+> demande votre clé API. Si Twelve Data ne cote pas vos ETF Euronext,
+> **Yahoo Finance est désormais disponible** dans le même écran : bonne
+> couverture `.PA`, aucune clé à saisir, mais API non officielle, susceptible
+> de changer sans préavis. Twelve Data reste le choix par défaut.
 
 Vos mouvements portent souvent un ISIN, que le fournisseur n'accepte pas tel
 quel : la table `securities` fait la correspondance ISIN → symbole, place,

@@ -139,6 +139,23 @@
         </details>
       </div>
       <div class="card">
+        <h3>Répartition du patrimoine <span class="sub" id="ov-pat-total"></span></h3>
+        <button class="zoom-btn" data-zoom="patrimoine" title="Agrandir" aria-label="Agrandir"></button>
+        <div class="chart-wrap"><canvas id="chart-patrimoine"></canvas></div>
+        <div class="card-extra" id="extra-patrimoine"></div>
+      </div>
+    </div>
+
+    <!-- Les dépenses ont leur propre rangée : la courbe donne la tendance sur
+         l'année, le camembert la ventilation du mois affiché. -->
+    <div class="grid-2">
+      <div class="card">
+        <h3>Dépenses — 12 mois</h3>
+        <button class="zoom-btn" data-zoom="depenses" title="Agrandir" aria-label="Agrandir"></button>
+        <div class="chart-wrap"><canvas id="chart-depenses"></canvas></div>
+        <div class="card-extra" id="extra-depenses"></div>
+      </div>
+      <div class="card">
         <h3>Dépenses par catégorie <span class="sub" id="ov-cat-month"></span></h3>
         <button class="zoom-btn" data-zoom="categories" title="Agrandir" aria-label="Agrandir"></button>
         <div class="chart-wrap"><canvas id="chart-categories"></canvas></div>

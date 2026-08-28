@@ -49,6 +49,26 @@ indiquant si elle est renseignée. Les sauvegardes CSV l'excluent également.
 **Aucune donnée ne part sur le réseau par défaut.** La seule fonction sortante,
 le rafraîchissement des cours, est désactivée à l'installation.
 
+**Les hôtes contactés, une fois les cours activés**, et rien d'autre :
+
+| Hôte | Quand | Ce qui sort |
+|---|---|---|
+| `api.twelvedata.com` | fournisseur par défaut | symboles interrogés, clé API |
+| `query2.finance.yahoo.com` | fournisseur alternatif, au choix | symboles interrogés |
+| `api.coingecko.com` | cryptomonnaies | identifiants de pièces |
+| `api.frankfurter.app` | conversion de devise | codes devise (`USD`, `EUR`) |
+| `bdm.insee.fr` | réévaluation immobilière | identifiant de série |
+
+Yahoo Finance ne demande **aucune clé**, mais son API n'est pas officielle :
+elle n'est couverte par aucun contrat et peut changer sans préavis. Twelve Data
+reste le choix par défaut. Aucun montant, aucune quantité, aucune transaction ne
+sort par l'un ou l'autre — une liste de symboles renseigne malgré tout sur la
+composition du portefeuille.
+
+**Un support non coté ne déclenche aucun appel.** Un fonds euro n'est coté par
+personne : sa valeur est calculée sur votre machine, comme les intérêts d'un
+livret. Un test le vérifie en comptant les appels d'un fournisseur espion.
+
 Ces protections sont couvertes par des tests automatisés, exécutés à chaque
 proposition de modification (`.github/workflows/ci.yml`, tâche
 « Garde-fous reseau »).

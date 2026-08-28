@@ -84,6 +84,22 @@ App.fmt = {
     if (v === null || v === undefined) return '—';
     return (v > 0 ? '+' : '') + App.fmt.eur(v);
   },
+  /* Les familles d'actifs sont des clés sans accent (`ASSET_TYPES` dans
+     app/db.py), aussi lues par advisor.py et par les réglages enregistrés :
+     les accentuer à la source casserait ces correspondances. On les habille
+     donc à l'affichage seulement. Une famille venue d'un type personnalisé
+     n'est pas dans la table et ressort telle quelle. */
+  famille(nom) {
+    return {
+      'Liquidites': 'Liquidités',
+      'Epargne reglementee': 'Épargne réglementée',
+      'Marches financiers': 'Marchés financiers',
+      'Immobilier': 'Immobilier',
+      'Crypto': 'Crypto',
+      'Biens': 'Biens',
+      'Autre': 'Autre',
+    }[nom] || nom;
+  },
 };
 
 /* ---------- DOM ---------- */
@@ -201,6 +217,270 @@ App.formValues = function (form) {
     out[el.name] = el.type === 'checkbox' ? el.checked : el.value;
   }
   return out;
+};
+
+/* ---------- champ de date ----------
+
+   `<input type="date">` n'affiche pas le format qu'on lui demande : Chromium
+   ignore `<html lang="fr">` pour ce widget et suit le format regional du
+   systeme. Sur un Windows configure en anglais, les neuf champs de saisie
+   passaient en MM/JJ/AAAA pendant que tout le reste de l'application sortait
+   deja de `App.fmt.date`, en fr-FR. Forcer la langue du moteur ne change rien
+   non plus : c'est un defaut connu de WebView2, sans autre contournement
+   qu'un champ maison.
+
+   La valeur ISO part dans un `<input type="hidden">` qui porte le `name` :
+   `App.formValues` ne lit que les elements nommes, donc pas un seul appelant
+   n'a eu a changer sa fonction d'enregistrement. */
+
+const JOURS_COURTS = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+const moisCourtFmt = new Intl.DateTimeFormat('fr-FR', { month: 'short' });
+
+/* ISO vers JJ/MM/AAAA par decoupage de chaine : passer par `Date` ferait
+   entrer un fuseau horaire dans une conversion qui n'en a pas besoin. */
+function isoVersFR(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : '';
+}
+
+function isoDepuis(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/* JJ/MM/AAAA vers ISO : l'inverse de `App.fmt.date`, qui manquait. */
+App.parseDateFR = function (texte) {
+  const brut = String(texte || '').trim();
+  if (!brut) return null;
+  let a; let m; let j;
+  // Une date ISO collee depuis un tableur doit passer aussi.
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(brut);
+  const fr = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/.exec(brut);
+  const nu = /^(\d{2})(\d{2})(\d{2}|\d{4})$/.exec(brut);   // 18082026, ou 180826
+  if (iso) [, a, m, j] = iso;
+  else if (fr) [, j, m, a] = fr;
+  else if (nu) [, j, m, a] = nu;
+  else return null;
+
+  a = Number(a); m = Number(m); j = Number(j);
+  // Deux chiffres : le siecle courant. Un patrimoine ne se saisit pas en 1926.
+  if (a < 100) a += 2000;
+  if (m < 1 || m > 12 || j < 1 || a < 1000) return null;
+  const d = new Date(a, m - 1, j);
+  // Sans ce controle, un 31 fevrier ressortirait en 3 mars sans un mot.
+  if (d.getFullYear() !== a || d.getMonth() !== m - 1 || d.getDate() !== j) return null;
+  return isoDepuis(d);
+};
+
+/* ---------- calendrier ----------
+   Attache au `<body>` en position fixe, et non dans le champ : la modale et
+   les panneaux defilants ont des `overflow` qui rognaient la fenetre des
+   qu'elle depassait d'un bord. */
+
+let calendrierOuvert = null;
+
+function clicHorsCalendrier(e) {
+  if (!calendrierOuvert) return;
+  if (calendrierOuvert.contains(e.target)) return;
+  if (calendrierOuvert.ancre && calendrierOuvert.ancre.contains(e.target)) return;
+  App.fermerCalendrier();
+}
+
+App.fermerCalendrier = function () {
+  if (!calendrierOuvert) return;
+  const pop = calendrierOuvert;
+  calendrierOuvert = null;
+  document.removeEventListener('mousedown', clicHorsCalendrier, true);
+  window.removeEventListener('resize', App.fermerCalendrier);
+  window.removeEventListener('scroll', App.fermerCalendrier, true);
+  pop.classList.add('sortant');
+  setTimeout(() => pop.remove(), 120);
+};
+
+/* `mode` vaut 'jour' ou 'mois'. `onPick` recoit un ISO complet en mode jour,
+   un 'AAAA-MM' en mode mois. */
+App.calendrier = function ({ ancre, iso, mode = 'jour', onPick }) {
+  const memeAncre = calendrierOuvert && calendrierOuvert.ancre === ancre;
+  App.fermerCalendrier();
+  if (memeAncre) return;          // second clic sur le meme bouton : on referme
+
+  const pop = App.h('div', {
+    class: 'calendrier', role: 'dialog', 'aria-label': 'Choisir une date',
+  });
+  pop.ancre = ancre;
+
+  const choisi = /^\d{4}-\d{2}-\d{2}$/.test(iso || '') ? iso : null;
+  const ancrage = choisi || (/^\d{4}-\d{2}$/.test(iso || '') ? `${iso}-01` : null);
+  const depart = ancrage ? new Date(`${ancrage}T00:00:00`) : new Date();
+  let curseur = new Date(depart.getFullYear(), depart.getMonth(), 1);
+  let vue = mode;
+
+  const rendre = () => {
+    App.clear(pop);
+    const annee = curseur.getFullYear();
+    const mois = curseur.getMonth();
+    const pas = vue === 'mois' ? 12 : 1;
+    const titre = vue === 'mois' ? String(annee)
+      : App.fmt.month(`${annee}-${String(mois + 1).padStart(2, '0')}`);
+
+    pop.append(App.h('div', { class: 'cal-tete' },
+      App.h('button', {
+        type: 'button', class: 'cal-nav', 'aria-label': 'Précédent',
+        onclick: () => { curseur.setMonth(mois - pas); rendre(); },
+      }, '‹'),
+      App.h('button', {
+        type: 'button', class: 'cal-titre',
+        // Le titre est un bouton : il passe aux mois, puis revient aux jours.
+        // Remonter a mars 2019 demandait sinon quatre-vingts clics.
+        onclick: () => { vue = vue === 'mois' ? 'jour' : 'mois'; rendre(); },
+        disabled: mode === 'mois' || null,
+      }, titre),
+      App.h('button', {
+        type: 'button', class: 'cal-nav', 'aria-label': 'Suivant',
+        onclick: () => { curseur.setMonth(mois + pas); rendre(); },
+      }, '›')));
+
+    if (vue === 'mois') {
+      const grilleMois = App.h('div', { class: 'cal-mois' });
+      for (let i = 0; i < 12; i += 1) {
+        const ym = `${annee}-${String(i + 1).padStart(2, '0')}`;
+        grilleMois.append(App.h('button', {
+          type: 'button',
+          class: `cal-case${(iso || '').slice(0, 7) === ym ? ' choisi' : ''}`,
+          onclick: () => {
+            if (mode === 'mois') { onPick(ym); App.fermerCalendrier(); return; }
+            curseur = new Date(annee, i, 1); vue = 'jour'; rendre();
+          },
+        }, moisCourtFmt.format(new Date(annee, i, 1)).replace('.', '')));
+      }
+      pop.append(grilleMois);
+      return;
+    }
+
+    const semaine = App.h('div', { class: 'cal-semaine' });
+    for (const j of JOURS_COURTS) semaine.append(App.h('span', {}, j));
+    pop.append(semaine);
+
+    const grille = App.h('div', { class: 'cal-jours' });
+    const premier = new Date(annee, mois, 1);
+    // `getDay()` compte a partir de dimanche ; en France la semaine ouvre le
+    // lundi, d'ou le decalage.
+    const decalage = (premier.getDay() + 6) % 7;
+    const aujourdhui = App.todayISO();
+    for (let i = 0; i < 42; i += 1) {
+      const jour = new Date(annee, mois, 1 + i - decalage);
+      const isoJour = isoDepuis(jour);
+      const dehors = jour.getMonth() !== mois;
+      grille.append(App.h('button', {
+        type: 'button',
+        class: `cal-case${dehors ? ' hors' : ''}${isoJour === choisi ? ' choisi' : ''}`
+          + `${isoJour === aujourdhui ? ' aujourdhui' : ''}`,
+        onclick: () => { onPick(isoJour); App.fermerCalendrier(); },
+      }, String(jour.getDate())));
+    }
+    pop.append(grille);
+
+    pop.append(App.h('div', { class: 'cal-pied' },
+      App.h('button', {
+        type: 'button', class: 'cal-lien',
+        onclick: () => { onPick(aujourdhui); App.fermerCalendrier(); },
+      }, 'Aujourd’hui')));
+  };
+
+  const placer = () => {
+    const r = ancre.getBoundingClientRect();
+    const h = pop.offsetHeight;
+    const l = pop.offsetWidth;
+    // Bascule au-dessus quand le bas de la fenetre est trop proche, et rentre
+    // le bord droit : dans une modale etroite, le calendrier sortait a droite.
+    const enHaut = r.bottom + h + 8 > window.innerHeight && r.top - h - 8 > 0;
+    pop.style.top = `${enHaut ? r.top - h - 6 : r.bottom + 6}px`;
+    pop.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - l - 8))}px`;
+  };
+
+  // `stopPropagation` : sans lui, Echap fermait la modale entiere derriere le
+  // calendrier, et la saisie en cours avec elle.
+  pop.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    e.stopPropagation();
+    App.fermerCalendrier();
+    ancre.focus();
+  });
+
+  rendre();
+  document.body.append(pop);
+  placer();
+  calendrierOuvert = pop;
+  document.addEventListener('mousedown', clicHorsCalendrier, true);
+  window.addEventListener('resize', App.fermerCalendrier);
+  window.addEventListener('scroll', App.fermerCalendrier, true);
+  const cible = pop.querySelector('.choisi') || pop.querySelector('.cal-case:not(.hors)');
+  if (cible) cible.focus();
+};
+
+const ICONE_CAL = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"'
+  + ' fill="none" stroke="currentColor" stroke-width="1.4">'
+  + '<rect x="1.7" y="3" width="12.6" height="11.3" rx="1.6"/>'
+  + '<path d="M1.7 6.6h12.6M5 1.7v2.6M11 1.7v2.6"/></svg>';
+
+/* Champ de date : saisie masquee JJ/MM/AAAA, plus un calendrier. Se pose la
+   ou on ecrivait `App.input(nom, { type: 'date' })`. */
+App.dateField = function (name, attrs = {}) {
+  const cache = App.h('input', { type: 'hidden', name, value: attrs.value || '' });
+  const texte = App.h('input', {
+    type: 'text', class: 'date-saisie', inputmode: 'numeric', maxlength: '10',
+    placeholder: 'JJ/MM/AAAA', autocomplete: 'off', spellcheck: 'false',
+    value: isoVersFR(attrs.value), required: attrs.required || null,
+  });
+  const bouton = App.h('button', {
+    type: 'button', class: 'date-cal', tabindex: '-1',
+    'aria-label': 'Ouvrir le calendrier', html: ICONE_CAL,
+  });
+
+  const controler = () => {
+    const iso = App.parseDateFR(texte.value);
+    cache.value = iso || '';
+    const vide = !texte.value.trim();
+    if (vide) texte.setCustomValidity(attrs.required ? 'Saisissez une date.' : '');
+    else texte.setCustomValidity(iso ? '' : 'Date invalide. Format attendu : JJ/MM/AAAA.');
+    texte.classList.toggle('invalide', !vide && !iso);
+    if (attrs.onpick) attrs.onpick(cache.value);
+  };
+
+  texte.addEventListener('input', () => {
+    // On ne replace les barres obliques que si le curseur est en fin de champ :
+    // sinon corriger un chiffre au milieu le renvoyait a la fin a chaque
+    // frappe. Une saisie retouchee est normalisee au `blur`.
+    if (texte.selectionStart === texte.value.length) {
+      const chiffres = texte.value.replace(/\D/g, '').slice(0, 8);
+      let out = chiffres.slice(0, 2);
+      if (chiffres.length > 2) out += `/${chiffres.slice(2, 4)}`;
+      if (chiffres.length > 4) out += `/${chiffres.slice(4, 8)}`;
+      texte.value = out;
+    }
+    controler();
+  });
+  texte.addEventListener('blur', () => {
+    const iso = App.parseDateFR(texte.value);
+    if (iso) texte.value = isoVersFR(iso);
+    controler();
+  });
+  bouton.addEventListener('click', () => App.calendrier({
+    ancre: bouton, iso: cache.value, mode: 'jour',
+    onPick: (iso) => { texte.value = isoVersFR(iso); controler(); texte.focus(); },
+  }));
+
+  controler();
+  // L'ordre compte : `App.modal.open` donne le focus au premier `input` venu,
+  // et le champ cache le capterait s'il passait devant.
+  const hote = App.h('div', { class: 'date-field' }, texte, bouton, cache);
+
+  // Le champ natif se lisait en `.value`, et des appelants le font encore
+  // (`openQuickAdd`). Le conteneur repond donc comme un input, en ISO.
+  Object.defineProperty(hote, 'value', {
+    get: () => cache.value,
+    set: (iso) => { texte.value = isoVersFR(iso); controler(); },
+  });
+  return hote;
 };
 
 /* ---------- graphiques ---------- */
@@ -395,8 +675,12 @@ App.deepMerge = function (a, b) {
 };
 
 /* ---------- divers ---------- */
-App.todayISO = () => new Date().toISOString().slice(0, 10);
-App.monthISO = () => new Date().toISOString().slice(0, 7);
+/* Date locale, et non `toISOString()` qui convertit en UTC : en France, entre
+   minuit et deux heures, celui-ci renvoyait la veille. Toutes les dates par
+   defaut des formulaires etaient alors fausses d'un jour, et en desaccord
+   avec le serveur qui, lui, lit `date.today()` a l'heure locale. */
+App.todayISO = () => isoDepuis(new Date());
+App.monthISO = () => App.todayISO().slice(0, 7);
 
 App.shiftMonth = function (ym, delta) {
   const [y, m] = ym.split('-').map(Number);

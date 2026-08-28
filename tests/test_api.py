@@ -411,8 +411,30 @@ class TestAnalytics(ApiTestCase):
         self.assertEqual(data["mois"]["epargne"], 400.0)
         self.assertAlmostEqual(data["mois"]["taux_epargne"], 0.2, places=6)
         self.assertEqual(len(data["patrimoine_serie"]), 12)
-        self.assertEqual(len(data["depenses_serie"]), 6)
+        # Douze mois depuis l'ajout de la courbe de depenses ; l'histogramme
+        # des flux n'en affiche que les six derniers, cote interface.
+        self.assertEqual(len(data["depenses_serie"]), 12)
         self.assertEqual(data["metrics"]["patrimoine_net"], 6400.0)
+
+    def test_repartition_par_famille(self):
+        """Le camembert du patrimoine : actifs regroupes par famille."""
+        self.seed()
+        data = self.get(f"/api/overview?month={month_key()}")
+        familles = {f["famille"]: f["montant"] for f in data["patrimoine_par_famille"]}
+        self.assertEqual(familles["Epargne reglementee"], 6000.0)
+        self.assertEqual(familles["Marches financiers"], 400.0)
+        # La plus grosse famille d'abord : le camembert se lit dans cet ordre.
+        self.assertEqual(data["patrimoine_par_famille"][0]["famille"], "Epargne reglementee")
+
+    def test_une_famille_a_zero_ne_fait_pas_de_part(self):
+        """Une part de camembert nulle n'apprend rien et brouille la legende."""
+        self.post("/api/assets", {
+            "type": "CompteCourant", "label": "Compte vide",
+            "date_acquisition": "2023-01-01", "valeur_acquisition": 0,
+            "valeur_actuelle": 0,
+        })
+        data = self.get(f"/api/overview?month={month_key()}")
+        self.assertEqual(data["patrimoine_par_famille"], [])
 
     def test_savings_transfer_is_not_an_expense(self):
         self.post("/api/transactions", {

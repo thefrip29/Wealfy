@@ -125,7 +125,9 @@ App.tabs.expenses = {
     const liabs = [['', '— aucun —'], ...(App.state.liabilities || []).map((l) => [l.id, l.label || l.type])];
 
     const form = App.h('form', { class: 'form-grid', onsubmit: (e) => e.preventDefault() },
-      App.field('Date', App.input('date', { type: 'date', value: (tx && tx.date) || App.todayISO(), required: true })),
+      App.field('Date', App.dateField('date', {
+        value: (tx && tx.date) || App.todayISO(), required: true,
+      })),
       App.field('Montant (€)', App.input('amount', {
         type: 'number', step: '0.01', value: tx ? tx.amount : '', required: true,
       }), { hint: 'Négatif = dépense, positif = revenu' }),

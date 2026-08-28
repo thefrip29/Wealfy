@@ -357,13 +357,16 @@ code { font-family: var(--font-mono); font-size: var(--fs-xs); }
   transition: background var(--t) var(--ease);
 }
 .month-picker:focus-within { background: color-mix(in srgb, var(--text-on-brand) 16%, transparent); }
+/* En lecture seule : le mois se choisit dans le calendrier maison, jamais au
+   clavier. Le champ ne sert plus qu'a afficher « aout 2026 » et a ouvrir la
+   fenetre. */
 .month-picker input {
   background: none; border: 0; padding: 3px 4px; width: 122px;
-  color: var(--text-on-brand); text-align: center;
+  color: var(--text-on-brand); text-align: center; cursor: pointer;
   font-family: var(--font-mono); font-size: var(--fs-xs);
+  text-transform: capitalize;
 }
 .month-picker input:focus { outline: none; }
-.month-picker input::-webkit-calendar-picker-indicator { filter: invert(1); opacity: .55; cursor: pointer; }
 
 .icon-btn {
   background: transparent; border: 1px solid transparent; color: var(--muted);
@@ -757,7 +760,7 @@ body.privacy .metric-row .m-value {
   border-radius: 50%; animation: spin 700ms linear infinite;
 }
 
-input[type=text], input[type=number], input[type=date], input[type=month],
+input[type=text], input[type=number],
 input[type=search], input[type=password], select, textarea {
   background: var(--bg-surface); border: 1px solid var(--border-strong);
   color: var(--text);
@@ -769,8 +772,72 @@ input:hover, select:hover, textarea:hover { border-color: var(--accent); }
 input:focus, select:focus, textarea:focus {
   outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
 }
-input[type=number], input[type=date], input[type=month] { font-family: var(--font-mono); }
+input[type=number], .date-saisie { font-family: var(--font-mono); }
 textarea { font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.6; resize: vertical; }
+
+/* ---------- champ de date et calendrier ----------
+   Le champ natif suivait le format regional du systeme : voir le commentaire
+   en tete de `App.dateField`. Ce qui suit habille son remplacant. */
+.date-field { position: relative; display: block; }
+.date-saisie { padding-right: 32px; }
+.date-saisie.invalide { border-color: var(--red); }
+.date-saisie.invalide:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 22%, transparent); }
+.date-cal {
+  position: absolute; right: 1px; top: 1px; bottom: 1px; width: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: 0; border-radius: 0 var(--radius-s) var(--radius-s) 0;
+  color: var(--muted); cursor: pointer;
+  transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.date-cal:hover { color: var(--accent); background: var(--accent-soft); }
+
+.calendrier {
+  position: fixed; z-index: 90; width: 252px; padding: var(--space-2);
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius-s); box-shadow: var(--shadow-2);
+  animation: cal-entree var(--t-fast) var(--ease);
+}
+.calendrier.sortant { opacity: 0; transition: opacity var(--t-fast) var(--ease); }
+@keyframes cal-entree { from { opacity: 0; transform: translateY(-4px); } }
+
+.cal-tete { display: flex; align-items: center; gap: var(--space-1); margin-bottom: var(--space-2); }
+.cal-nav, .cal-titre, .cal-lien {
+  background: none; border: 0; color: var(--text); cursor: pointer;
+  border-radius: var(--radius-s); font-size: var(--fs-sm);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.cal-nav { width: 26px; height: 26px; font-size: var(--fs-md); line-height: 1; }
+.cal-titre { flex: 1; padding: 4px 6px; font-weight: 500; text-transform: capitalize; }
+.cal-titre:disabled { cursor: default; }
+.cal-nav:hover, .cal-titre:not(:disabled):hover, .cal-lien:hover {
+  background: var(--accent-soft); color: var(--accent);
+}
+
+.cal-semaine, .cal-jours { display: grid; grid-template-columns: repeat(7, 1fr); }
+.cal-mois { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
+.cal-semaine span {
+  text-align: center; padding: 2px 0;
+  color: var(--muted); font-size: var(--fs-micro);
+}
+/* Chiffres tabulaires : sans eux, les colonnes du calendrier ondulent selon
+   la largeur des chiffres du jour. */
+.cal-case {
+  background: none; border: 0; border-radius: var(--radius-s);
+  color: var(--text); cursor: pointer;
+  padding: 5px 0; font-family: var(--font-mono); font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.cal-mois .cal-case { padding: 7px 0; text-transform: capitalize; }
+.cal-case:hover { background: var(--accent-soft); color: var(--accent); }
+.cal-case.hors { color: var(--muted); opacity: .55; }
+.cal-case.aujourdhui { box-shadow: inset 0 0 0 1px var(--line); }
+.cal-case.choisi {
+  background: var(--action-surface); color: var(--on-action-surface); font-weight: 500;
+}
+.cal-case:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.cal-pied { margin-top: var(--space-2); text-align: center; }
+.cal-lien { padding: 4px 10px; font-size: var(--fs-xs); }
 select[multiple] { padding: 4px; }
 .actions input[type=search] { width: 200px; }
 .actions select { width: auto; }

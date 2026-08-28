@@ -4,7 +4,7 @@ Tout est recalcule a la volee : aucun de ces resultats n'est destine a etre
 stocke en base (cf. cahier des charges, section 6 et 9).
 """
 import calendar
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 # --- utilitaires de dates -------------------------------------------------
 
@@ -258,6 +258,44 @@ def valeur_livret(asset, movements, taux_annuel, at_date=None) -> float:
         balance += events[i][1]
         i += 1
     return round(balance + accrued, 2)
+
+
+def valeur_capitalisee(flux, taux_annuel, at_date=None):
+    """Capital place a taux fixe, interets credites en fin d'exercice.
+
+    C'est le rythme d'un fonds euro : la participation aux benefices tombe une
+    fois l'an, au 31 decembre. Un livret reglemente, lui, compte par quinzaines
+    — d'ou deux fonctions et non une seule (cf. `valeur_livret`).
+
+    `flux` est une liste de (date, montant), le montant signe : positif pour un
+    versement, negatif pour un rachat. Calcul pur, sans reseau.
+    """
+    flux = sorted((d, m) for d, m in ((parse_date(d), float(m or 0)) for d, m in flux) if d)
+    if not flux:
+        return None
+    at_date = parse_date(at_date) or date.today()
+    if at_date < flux[0][0]:
+        return 0.0
+
+    taux = (taux_annuel or 0.0) / 100.0
+    solde = 0.0
+    curseur = flux[0][0]
+    i = 0
+    while curseur <= at_date:
+        # Un exercice va jusqu'au 31 decembre, ou jusqu'a la date demandee si
+        # elle tombe avant : le dernier exercice est alors partiel.
+        fin = min(date(curseur.year, 12, 31), at_date)
+        # Prorata temporis : un versement de novembre ne rapporte pas une annee
+        # pleine. Le « +1 » compte le jour du versement lui-meme.
+        base = solde * ((fin - curseur).days + 1)
+        while i < len(flux) and flux[i][0] <= fin:
+            jour, montant = flux[i]
+            solde += montant
+            base += montant * ((fin - max(jour, curseur)).days + 1)
+            i += 1
+        solde += taux * base / 365.0
+        curseur = fin + timedelta(days=1)
+    return round(solde, 2)
 
 
 def invested_amount(asset, movements) -> float:

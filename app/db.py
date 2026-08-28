@@ -171,7 +171,8 @@ def _migrate_columns(con):
     colonne ajoutee au schema doit donc etre appliquee explicitement.
     """
     wanted = {
-        "securities": [("kind", "TEXT NOT NULL DEFAULT 'titre'")],
+        "securities": [("kind", "TEXT NOT NULL DEFAULT 'titre'"),
+                       ("taux_annuel", "REAL")],
         "asset_movements": [("dedup_hash", "TEXT")],
     }
     for table, columns in wanted.items():

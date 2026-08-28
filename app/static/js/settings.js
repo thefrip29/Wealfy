@@ -534,8 +534,10 @@ App.settings = {
   panelMarket(settings, status) {
     const enabled = App.h('input', { type: 'checkbox' });
     enabled.checked = !!settings.market_enabled;
-    const providerSel = App.select('market_provider',
-      [['twelvedata', 'Twelve Data (titres, clé requise)']], settings.market_provider);
+    const providerSel = App.select('market_provider', [
+      ['twelvedata', 'Twelve Data (titres, clé requise)'],
+      ['yahoo', 'Yahoo Finance (sans clé, API non officielle)'],
+    ], settings.market_provider);
     /* La clé n'est plus renvoyée par l'API : le serveur n'expose qu'un booléen
        (voir CLES_SECRETES dans app/routes/settings.py). Le champ part donc
        toujours vide, et son texte d'invite dit l'état plutôt que la valeur. */
@@ -586,7 +588,8 @@ App.settings = {
         testOut.append(res.ok
           ? App.h('span', { class: 'pill ok' },
             `${res.symbole} : ${App.fmt.num(res.price, 4)} ${res.currency}`
-            + (res.exchange ? ` · ${res.exchange}` : '') + ` · ${res.date}`)
+            + (res.exchange ? ` · ${res.exchange}` : '')
+            + ` · ${App.fmt.date(res.date)}`)
           : App.h('span', { class: 'pill warn' }, `${res.symbole} : ${res.erreur}`));
       } catch (e) {
         App.clear(testOut);
@@ -605,13 +608,14 @@ App.settings = {
       ])].sort();
       App.clear(tbody);
       if (!tickers.length) {
-        tbody.append(App.h('tr', {}, App.h('td', { colspan: 6, class: 'empty' },
+        tbody.append(App.h('tr', {}, App.h('td', { colspan: 7, class: 'empty' },
           'Aucun ticker dans vos mouvements. Renseignez le ticker ou l’ISIN '
           + 'de vos achats pour pouvoir les coter.')));
         return;
       }
       for (const ticker of tickers) {
         const sec = bySymbol[ticker] || {};
+        const label = App.input('l', { value: sec.label || '', placeholder: 'nom affiché' });
         const symbol = App.input('s', { value: sec.symbol || '', placeholder: 'symbole' });
         const exchange = App.input('e', { value: sec.exchange || '', placeholder: 'place' });
         const currency = App.input('c', { value: sec.currency || 'EUR' });
@@ -621,13 +625,14 @@ App.settings = {
         const persist = async () => {
           await App.api.post('/api/securities', {
             ticker,
+            label: label.value.trim(),
             symbol: symbol.value.trim(),
             exchange: exchange.value.trim(),
             currency: currency.value.trim().toUpperCase() || 'EUR',
             benchmark_symbol: bench.value.trim(),
           });
         };
-        for (const input of [symbol, exchange, currency, bench]) {
+        for (const input of [label, symbol, exchange, currency, bench]) {
           input.addEventListener('change', async () => {
             try { await persist(); App.toast('Correspondance enregistrée', 'success'); }
             catch (e) { App.toast(e.message, 'error'); }
@@ -635,6 +640,7 @@ App.settings = {
         }
         tbody.append(App.h('tr', {},
           App.h('td', {}, App.h('code', {}, ticker)),
+          App.h('td', {}, label),
           App.h('td', {}, symbol),
           App.h('td', {}, exchange),
           App.h('td', {}, currency),
@@ -726,7 +732,8 @@ App.settings = {
       App.h('div', { class: 'table-wrap scroll-y', style: 'margin-top:10px' },
         App.h('table', { class: 'table' },
           App.h('thead', {}, App.h('tr', {},
-            App.h('th', {}, 'Ticker / ISIN'), App.h('th', {}, 'Symbole fournisseur'),
+            App.h('th', {}, 'Ticker / ISIN'), App.h('th', {}, 'Nom affiché'),
+            App.h('th', {}, 'Symbole fournisseur'),
             App.h('th', {}, 'Place'), App.h('th', {}, 'Devise'),
             App.h('th', {}, 'Indice de réf.'), App.h('th', { class: 'right' }, 'État'))),
           tbody)),

@@ -17,7 +17,7 @@ def list_positions(aid):
     at = as_date(request.args.get("date"), date.today().isoformat())
     ctx = services.market_context(at)
     movements = services.get_movements(aid)
-    lignes = market.line_values(movements, ctx["securities"], ctx["prices"])
+    lignes = market.line_values(movements, ctx["securities"], ctx["prices"], at)
     valorisees = [l for l in lignes if l["valeur"] is not None]
     return jsonify({
         "lignes": lignes,
@@ -43,28 +43,43 @@ def add_position(aid):
     if not ticker:
         return fail("Instrument requis.")
 
+    # Un support non cote n'a ni quantite ni prix unitaire : un fonds euro se
+    # tient en euros, pas en parts. Seul son montant compte.
+    non_cote = (data.get("kind") or "").strip() == market.NON_COTE
+
     quantite = as_float(data.get("quantite"))
     prix = as_float(data.get("prix_unitaire"))
     montant = as_float(data.get("montant"))
     if montant is None and quantite is not None and prix is not None:
         montant = quantite * prix
     if montant is None:
-        return fail("Indiquez au moins une quantite et un prix unitaire.")
-    if not quantite:
+        return fail("Indiquez un montant." if non_cote
+                    else "Indiquez au moins une quantite et un prix unitaire.")
+    if not non_cote and not quantite:
         return fail("La quantite est necessaire pour valoriser la ligne.")
 
-    kind = "crypto" if asset["type"] in market.CRYPTO_ASSET_TYPES else "titre"
-    market.upsert_security(
-        ticker,
-        symbol=(data.get("symbol") or ticker).strip(),
-        exchange=(data.get("exchange") or "").strip() or None,
-        currency=(data.get("currency") or "EUR").strip().upper(),
-        label=(data.get("label") or "").strip() or None,
-        isin=(data.get("isin") or "").strip() or None,
-        benchmark_symbol=(data.get("benchmark_symbol") or "").strip() or None,
-        benchmark_label=(data.get("benchmark_label") or "").strip() or None,
-        kind=kind,
-    )
+    if non_cote:
+        kind = market.NON_COTE
+    elif asset["type"] in market.CRYPTO_ASSET_TYPES:
+        kind = "crypto"
+    else:
+        kind = "titre"
+    champs = {
+        "symbol": (data.get("symbol") or ticker).strip(),
+        "exchange": (data.get("exchange") or "").strip() or None,
+        "currency": (data.get("currency") or "EUR").strip().upper(),
+        "label": (data.get("label") or "").strip() or None,
+        "isin": (data.get("isin") or "").strip() or None,
+        "benchmark_symbol": (data.get("benchmark_symbol") or "").strip() or None,
+        "benchmark_label": (data.get("benchmark_label") or "").strip() or None,
+        "kind": kind,
+    }
+    # La cle n'est posee que si un taux est effectivement fourni : un simple
+    # versement sur un fonds euro deja enregistre effacerait sinon son taux, et
+    # la ligne repasserait silencieusement a sa valeur nominale.
+    if non_cote and as_float(data.get("taux_annuel")) is not None:
+        champs["taux_annuel"] = as_float(data.get("taux_annuel"))
+    market.upsert_security(ticker, **champs)
 
     sens = (data.get("type") or "versement").strip()
     montant = abs(montant) if sens == "versement" else -abs(montant)
@@ -73,7 +88,8 @@ def add_position(aid):
         "prix_unitaire, ticker, note) VALUES (?,?,?,?,?,?,?,?,?)",
         (
             new_id(), aid, as_date(data.get("date"), date.today().isoformat()),
-            round(montant, 2), sens, abs(quantite), prix, ticker,
+            round(montant, 2), sens,
+            abs(quantite) if quantite else None, prix, ticker,
             (data.get("note") or "").strip() or None,
         ),
     )
@@ -107,9 +123,12 @@ def upsert_security_route():
     ticker = (data.get("ticker") or "").strip()
     if not ticker:
         return fail("Ticker requis.")
+    # `if k in data` et non la liste entiere : l'ecran de correspondance
+    # n'envoie que les colonnes qu'il affiche, et les absentes repartaient a
+    # NULL. Corriger une place effacait donc le nom saisi et l'ISIN, sans un mot.
     fields = {k: (data.get(k) or None) for k in (
         "symbol", "exchange", "currency", "isin", "label",
-        "benchmark_symbol", "benchmark_label")}
+        "benchmark_symbol", "benchmark_label") if k in data}
     sid = market.upsert_security(ticker, **fields)
     return jsonify({"id": sid}), 201
 

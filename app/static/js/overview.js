@@ -15,6 +15,8 @@ App.tabs.overview = {
     App.tabs.overview.renderAlertes(data.alertes || []);
     App.tabs.overview.renderKpis(data);
     App.tabs.overview.renderNetWorth(data.patrimoine_serie);
+    App.tabs.overview.renderPatrimoine(data.patrimoine_par_famille);
+    App.tabs.overview.renderDepenses(data.depenses_serie);
     App.tabs.overview.renderCategories(data.mois);
     App.tabs.overview.renderRepartition(data.repartition, data.metrics);
     App.tabs.overview.renderFlows(data.depenses_serie);
@@ -160,6 +162,10 @@ App.tabs.overview = {
     if (!data) return;
     if (kind === 'networth' && App.tabs.overview.expanded !== 'networth') {
       App.tabs.overview.renderNetWorth(data.patrimoine_serie);
+    } else if (kind === 'patrimoine') {
+      App.tabs.overview.renderPatrimoine(data.patrimoine_par_famille);
+    } else if (kind === 'depenses') {
+      App.tabs.overview.renderDepenses(data.depenses_serie);
     } else if (kind === 'categories') {
       App.tabs.overview.renderCategories(data.mois);
     } else if (kind === 'flows') {
@@ -176,8 +182,15 @@ App.tabs.overview = {
     if (kind === 'networth') return App.tabs.overview.buildAssetFilters(host);
     // Le camembert donne la forme, le tableau les chiffres exacts : les deux
     // se lisent ensemble.
+    if (kind === 'patrimoine') {
+      host.append(App.tabs.overview.tablePatrimoine(data.patrimoine_par_famille));
+    }
+    // Douze mois pour la courbe, six pour l'histogramme : chacun son tableau.
+    if (kind === 'depenses') host.append(App.tabs.overview.tableFlows(data.depenses_serie));
     if (kind === 'categories') host.append(App.tabs.overview.tableCategories(data.mois));
-    if (kind === 'flows') host.append(App.tabs.overview.tableFlows(data.depenses_serie));
+    if (kind === 'flows') {
+      host.append(App.tabs.overview.tableFlows((data.depenses_serie || []).slice(-6)));
+    }
     return null;
   },
 
@@ -265,6 +278,30 @@ App.tabs.overview = {
           App.h('th', { class: 'right' }, 'Montant'),
           App.h('th', { class: 'right' }, 'Part'),
           App.h('th', { class: 'right' }, 'Opér.'))),
+        tbody));
+  },
+
+  tablePatrimoine(familles) {
+    const lignes = familles || [];
+    const total = lignes.reduce((s, f) => s + f.montant, 0);
+    const tbody = App.h('tbody', {});
+    for (const f of lignes) {
+      tbody.append(App.h('tr', {},
+        App.h('td', {}, App.fmt.famille(f.famille)),
+        App.h('td', { class: 'right num' }, App.fmt.eur(f.montant)),
+        App.h('td', { class: 'right num' },
+          total ? App.fmt.pct(100 * f.montant / total) : '—')));
+    }
+    tbody.append(App.h('tr', {},
+      App.h('td', {}, App.h('strong', {}, 'Total des actifs')),
+      App.h('td', { class: 'right num' }, App.h('strong', {}, App.fmt.eur(total))),
+      App.h('td', {})));
+    return App.h('div', { class: 'table-wrap scroll-y' },
+      App.h('table', { class: 'table' },
+        App.h('thead', {}, App.h('tr', {},
+          App.h('th', {}, 'Famille'),
+          App.h('th', { class: 'right' }, 'Montant'),
+          App.h('th', { class: 'right' }, 'Part'))),
         tbody));
   },
 
@@ -366,6 +403,88 @@ App.tabs.overview = {
     });
   },
 
+  /* Répartition réelle du patrimoine, par famille d'actifs.
+
+     C'est l'actif brut : les passifs n'y figurent pas, une part de camembert
+     ne pouvant pas être négative. Le total est rappelé dans le titre pour que
+     l'écart avec le patrimoine net du héros ne surprenne pas. */
+  renderPatrimoine(familles) {
+    const total = (familles || []).reduce((s, f) => s + f.montant, 0);
+    const titre = App.el('#ov-pat-total');
+    if (titre) titre.textContent = total ? `${App.fmt.eur(total, true)} d’actifs` : '';
+
+    if (!familles || !familles.length) {
+      App.chart('chart-patrimoine', {
+        type: 'doughnut',
+        data: { labels: ['Aucun actif'], datasets: [{ data: [1], backgroundColor: ['#2a3242'] }] },
+        options: { plugins: { tooltip: { enabled: false }, legend: { display: false } } },
+      });
+      return;
+    }
+    App.chart('chart-patrimoine', {
+      type: 'doughnut',
+      data: {
+        labels: familles.map((f) => App.fmt.famille(f.famille)),
+        datasets: [{
+          data: familles.map((f) => f.montant),
+          backgroundColor: familles.map((_, i) => App.chartColors[i % App.chartColors.length]),
+          borderWidth: 0,
+        }],
+      },
+      options: {
+        cutout: '62%',
+        plugins: {
+          legend: { position: 'right' },
+          tooltip: {
+            callbacks: {
+              label: (c) => `${c.label} : ${App.fmt.eur(c.parsed)} (${App.fmt.pct(100 * c.parsed / total)})`,
+            },
+          },
+        },
+      },
+    });
+  },
+
+  /* Courbe de dépenses sur douze mois, avec la moyenne en repère.
+
+     L'histogramme du bas montre déjà dépenses, revenus et épargne côte à côte
+     sur six mois ; celui-ci ne suit qu'une grandeur, sur une année pleine —
+     assez pour qu'une saison se voie. */
+  renderDepenses(serie) {
+    const points = serie || [];
+    const moyenne = points.length
+      ? points.reduce((s, p) => s + p.depenses, 0) / points.length : 0;
+    App.chart('chart-depenses', {
+      type: 'line',
+      data: {
+        labels: points.map((p) => App.fmt.month(p.mois)),
+        datasets: [
+          {
+            label: 'Dépenses', data: points.map((p) => p.depenses),
+            borderColor: App.chartColors[4],
+            backgroundColor: 'transparent',
+            fill: false, tension: .3, borderWidth: 2, pointRadius: 2,
+          },
+          {
+            label: 'Moyenne 12 mois', data: points.map(() => Math.round(moyenne * 100) / 100),
+            borderColor: App.chartColors[8],
+            borderDash: [5, 4], borderWidth: 1.5,
+            pointRadius: 0, fill: false,
+          },
+        ],
+      },
+      options: {
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          tooltip: {
+            callbacks: { label: (c) => `${c.dataset.label} : ${App.fmt.eur(c.parsed.y)}` },
+          },
+        },
+        scales: { y: { ticks: { callback: (v) => App.fmt.eur(v, true) } } },
+      },
+    });
+  },
+
   renderCategories(month) {
     App.el('#ov-cat-month').textContent = App.fmt.month(month.mois);
     const cats = month.par_categorie;
@@ -441,14 +560,18 @@ App.tabs.overview = {
   },
 
   renderFlows(series) {
+    // La serie arrive sur douze mois pour la courbe de depenses ; cet
+    // histogramme en montre trois grandeurs a la fois, et devient illisible
+    // au-dela de six colonnes.
+    const s6 = (series || []).slice(-6);
     App.chart('chart-flows', {
       type: 'bar',
       data: {
-        labels: series.map((p) => App.fmt.month(p.mois)),
+        labels: s6.map((p) => App.fmt.month(p.mois)),
         datasets: [
-          { label: 'Revenus', data: series.map((p) => p.revenus), backgroundColor: App.chartColors[1], borderRadius: 4 },
-          { label: 'Dépenses', data: series.map((p) => p.depenses), backgroundColor: App.chartColors[4], borderRadius: 4 },
-          { label: 'Épargne', data: series.map((p) => p.epargne), backgroundColor: App.chartColors[0], borderRadius: 4 },
+          { label: 'Revenus', data: s6.map((p) => p.revenus), backgroundColor: App.chartColors[1], borderRadius: 4 },
+          { label: 'Dépenses', data: s6.map((p) => p.depenses), backgroundColor: App.chartColors[4], borderRadius: 4 },
+          { label: 'Épargne', data: s6.map((p) => p.epargne), backgroundColor: App.chartColors[0], borderRadius: 4 },
         ],
       },
       options: {

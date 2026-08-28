@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -616,6 +617,291 @@ class TestBenchmark(MarketTestCase):
         self.assertAlmostEqual(ligne["perf_indice"], 10.0, places=1)
         self.assertAlmostEqual(ligne["ecart"], 15.0, places=1)
         self.assertEqual(ligne["serie_ligne"][0]["valeur"], 100.0)
+
+
+class TestRechercheInstruments(unittest.TestCase):
+    """Regroupement et classement des resultats, hors reseau."""
+
+    @staticmethod
+    def _ligne(symbol, nom, exchange, pays="Germany", devise="EUR"):
+        return {
+            "symbol": symbol, "instrument_name": nom, "exchange": exchange,
+            "mic_code": f"X{exchange[:3].upper()}", "country": pays,
+            "currency": devise, "instrument_type": "Common Stock",
+        }
+
+    def test_une_valeur_sur_vingt_places_donne_une_entree(self):
+        rows = [self._ligne(f"SPX{i}", "Space Exploration Technologies Corp. Class A",
+                            f"Place{i}") for i in range(20)]
+        out = market._resultats_titres(rows, None, 25)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(len(out[0]["autres_places"]), 19)
+
+    def test_le_regroupement_ignore_la_casse_et_les_espaces(self):
+        rows = [self._ligne("A", "Amundi  MSCI World", "XETR"),
+                self._ligne("B", "amundi msci world", "SIX")]
+        self.assertEqual(len(market._resultats_titres(rows, None, 25)), 1)
+
+    def test_euronext_passe_devant(self):
+        """Un detenteur de PEA doit voir la ligne francaise en premier."""
+        rows = [
+            self._ligne("WRDUSA.USD", "Amundi MSCI World", "SIX", "Switzerland", "CHF"),
+            self._ligne("LYYA", "Amundi MSCI World", "XETR", "Germany", "EUR"),
+            self._ligne("WLD", "Amundi MSCI World", "Euronext", "France", "EUR"),
+        ]
+        out = market._resultats_titres(rows, None, 25)
+        self.assertEqual(out[0]["symbol"], "WLD")
+        # A rang egal, l'ordre du fournisseur est conserve : EUR avant CHF.
+        self.assertEqual([c["symbol"] for c in out[0]["autres_places"]],
+                         ["LYYA", "WRDUSA.USD"])
+
+    def test_des_valeurs_distinctes_restent_distinctes(self):
+        rows = [self._ligne("WLD", "Amundi MSCI World", "Euronext"),
+                self._ligne("ESE", "BNP S&P 500", "Euronext")]
+        self.assertEqual(len(market._resultats_titres(rows, None, 25)), 2)
+
+    def test_la_limite_compte_des_valeurs_et_non_des_cotations(self):
+        rows = []
+        for v in range(5):
+            rows += [self._ligne(f"S{v}-{i}", f"Valeur {v}", f"Place{i}")
+                     for i in range(10)]
+        self.assertEqual(len(market._resultats_titres(rows, None, 3)), 3)
+
+    def test_l_isin_interroge_est_attache_aux_resultats(self):
+        """Le fournisseur ne renvoie pas l'ISIN : la requete est la seule source."""
+        out = market._resultats_titres(
+            [self._ligne("SPCX", "Space Exploration Technologies Corp.", "NASDAQ")],
+            "US84615Q1031", 25)
+        self.assertEqual(out[0]["isin"], "US84615Q1031")
+
+    def test_une_recherche_par_nom_n_invente_pas_d_isin(self):
+        out = market._resultats_titres(
+            [self._ligne("WLD", "Amundi MSCI World", "Euronext")], None, 25)
+        self.assertIsNone(out[0]["isin"])
+
+    def test_reconnaissance_d_un_isin(self):
+        for code in ("US84615Q1031", "FR0010315770", "IE00B4L5Y983"):
+            self.assertTrue(market.ISIN_RE.match(code), code)
+        for code in ("CW8", "MSCI WORLD", "US84615Q103"):
+            self.assertFalse(market.ISIN_RE.match(code), code)
+
+
+class TestYahooFinance(unittest.TestCase):
+    """Fournisseur alternatif. Le reseau est remplace par une reponse en dur."""
+
+    @staticmethod
+    def _sans_reseau(payload):
+        return unittest.mock.patch.object(market, "_get_json", return_value=payload)
+
+    def test_la_recherche_est_normalisee_dans_la_forme_de_twelve_data(self):
+        """Une seule fonction regroupe et classe, quel que soit le fournisseur."""
+        payload = {"quotes": [{
+            "symbol": "SPCX", "shortname": "Space Exploration Technologies",
+            "longname": "Space Exploration Technologies Corp.",
+            "quoteType": "EQUITY", "exchange": "NMS", "exchDisp": "NASDAQ",
+            "typeDisp": "Titres",
+        }]}
+        with self._sans_reseau(payload):
+            rows = market.YahooFinance.search("US84615Q1031", 25)
+        self.assertEqual(rows[0]["symbol"], "SPCX")
+        self.assertEqual(rows[0]["instrument_name"],
+                         "Space Exploration Technologies Corp.")
+        self.assertEqual(rows[0]["exchange"], "NASDAQ")
+        self.assertEqual(rows[0]["instrument_type"], "Titres")
+
+    def test_une_ligne_sans_symbole_est_ecartee(self):
+        with self._sans_reseau({"quotes": [{"shortname": "sans symbole"}]}):
+            self.assertEqual(market.YahooFinance.search("x", 25), [])
+
+    def test_le_cours_vient_du_graphique_et_non_de_quote(self):
+        """`/v7/finance/quote` reclame un cookie et un crumb : on l'evite."""
+        payload = {"chart": {"result": [{"meta": {
+            "regularMarketPrice": 123.45, "currency": "USD",
+            "regularMarketTime": 1_755_000_000, "fullExchangeName": "NasdaqGS",
+            "longName": "Space Exploration Technologies Corp.",
+        }}]}}
+        with self._sans_reseau(payload) as faux:
+            found, errors = market.YahooFinance().quotes(
+                [{"cle": "US84615Q1031", "symbol": "SPCX"}])
+        self.assertEqual(errors, [])
+        self.assertEqual(found["US84615Q1031"]["price"], 123.45)
+        self.assertEqual(found["US84615Q1031"]["currency"], "USD")
+        self.assertIn("/v8/finance/chart/SPCX", faux.call_args[0][0])
+
+    def test_une_erreur_yahoo_devient_une_erreur_de_ligne(self):
+        payload = {"chart": {"result": None,
+                             "error": {"description": "No data found"}}}
+        with self._sans_reseau(payload):
+            found, errors = market.YahooFinance().quotes(
+                [{"cle": "INCONNU", "symbol": "ZZZZ"}])
+        self.assertEqual(found, {})
+        self.assertEqual(errors[0]["erreur"], "No data found")
+
+    def test_la_serie_ignore_les_seances_sans_cloture(self):
+        payload = {"chart": {"result": [{
+            "timestamp": [1_704_067_200, 1_704_153_600, 1_704_240_000],
+            "indicators": {"quote": [{"close": [100.0, None, 110.0]}]},
+        }]}}
+        with self._sans_reseau(payload):
+            serie = market.YahooFinance().series("WLD.PA", "2024-01-01", "2024-01-03")
+        self.assertEqual([v for _, v in serie], [100.0, 110.0])
+
+
+class TestSupportNonCote(MarketTestCase):
+    """Fonds euro : valorise en local, et qui ne casse plus son enveloppe."""
+
+    def _assurance_vie(self):
+        return self.post("/api/assets", {
+            "type": "AssuranceVie", "label": "AV Linxea",
+            "date_acquisition": "2024-01-02", "valeur_acquisition": 0,
+        })
+
+    def _ajoute_fonds_euro(self, aid, montant=10000, taux=2.5, date_versement="2024-01-01"):
+        return self.post(f"/api/assets/{aid}/positions", {
+            "kind": "non_cote", "ticker": "Fonds euro", "label": "Fonds euro",
+            "montant": montant, "taux_annuel": taux, "date": date_versement,
+        })
+
+    def test_saisissable_sans_quantite_ni_prix(self):
+        av = self._assurance_vie()
+        self._ajoute_fonds_euro(av["id"])
+        lignes = self.get(f"/api/assets/{av['id']}/positions")["lignes"]
+        self.assertEqual(len(lignes), 1)
+        self.assertEqual(lignes[0]["kind"], "non_cote")
+
+    def test_saisissable_cours_desactives(self):
+        """Aucun reseau en jeu : le reglage ne doit rien bloquer."""
+        av = self._assurance_vie()
+        res = self.client.post(f"/api/assets/{av['id']}/positions", json={
+            "kind": "non_cote", "ticker": "Fonds euro", "label": "Fonds euro",
+            "montant": 5000,
+        })
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+
+    def test_valorisation_au_taux_saisi(self):
+        av = self._assurance_vie()
+        self._ajoute_fonds_euro(av["id"], 10000, 2.5, "2024-01-01")
+        res = self.client.get(f"/api/assets/{av['id']}/positions?date=2024-12-31")
+        ligne = res.get_json()["lignes"][0]
+        self.assertAlmostEqual(ligne["valeur"], 10250.68, places=2)
+
+    def test_sans_taux_la_valeur_reste_nominale(self):
+        av = self._assurance_vie()
+        self.post(f"/api/assets/{av['id']}/positions", {
+            "kind": "non_cote", "ticker": "Fonds euro", "label": "Fonds euro",
+            "montant": 8000, "date": "2024-01-01",
+        })
+        res = self.client.get(f"/api/assets/{av['id']}/positions?date=2026-12-31")
+        self.assertEqual(res.get_json()["lignes"][0]["valeur"], 8000.0)
+
+    def test_une_enveloppe_mixte_garde_sa_valeur_de_marche(self):
+        """Le point qui bloquait : un fonds euro annulait toute l'assurance vie."""
+        self.enable_market()
+        av = self._assurance_vie()
+        self.post(f"/api/assets/{av['id']}/movements", {
+            "date": "2024-01-05", "montant": 1000, "type": "versement",
+            "ticker": "IE00B4L5Y983", "quantite": 10, "prix_unitaire": 100,
+        })
+        self.post("/api/securities", {
+            "ticker": "IE00B4L5Y983", "symbol": "CW8", "currency": "EUR",
+        })
+        self._ajoute_fonds_euro(av["id"], 10000, 0)
+        with self.app.app_context():
+            market.refresh_quotes(FakeProvider({"CW8": 120.0}))
+
+        positions = self.get(f"/api/assets/{av['id']}/positions")
+        self.assertTrue(positions["complet"])
+        self.assertEqual(positions["valeur_totale"], 11200.0)   # 10 x 120 + 10 000
+
+        asset = next(a for a in self.get("/api/assets")["assets"] if a["id"] == av["id"])
+        self.assertEqual(asset["valeur_source"], "marche")
+
+    def test_aucun_appel_reseau_pour_un_support_non_cote(self):
+        self.enable_market()
+        av = self._assurance_vie()
+        self._ajoute_fonds_euro(av["id"])
+        spy = FakeProvider({})
+        with self.app.app_context():
+            market.refresh_quotes(spy)
+        self.assertEqual(spy.calls, 0)
+
+    def test_n_est_pas_signale_comme_symbole_a_mapper(self):
+        self.enable_market()
+        av = self._assurance_vie()
+        self._ajoute_fonds_euro(av["id"])
+        self.assertNotIn("Fonds euro", self.get("/api/market/status")["tickers_non_mappes"])
+
+    def test_le_taux_survit_a_un_nouveau_versement(self):
+        av = self._assurance_vie()
+        self._ajoute_fonds_euro(av["id"], 10000, 2.5, "2024-01-01")
+        self.post(f"/api/assets/{av['id']}/positions", {
+            "kind": "non_cote", "ticker": "Fonds euro", "montant": 500,
+            "date": "2024-06-01",
+        })
+        with self.app.app_context():
+            self.assertEqual(
+                market.securities_by_ticker()["Fonds euro"]["taux_annuel"], 2.5)
+
+
+class TestCorrespondanceEditable(MarketTestCase):
+    def test_corriger_une_place_n_efface_ni_le_nom_ni_l_isin(self):
+        """L'ecran des parametres n'envoie que ce qu'il affiche."""
+        self.post("/api/securities", {
+            "ticker": "US84615Q1031", "symbol": "SPCX", "label": "SpaceX",
+            "isin": "US84615Q1031", "currency": "USD",
+        })
+        self.post("/api/securities", {"ticker": "US84615Q1031", "exchange": "NASDAQ"})
+        with self.app.app_context():
+            sec = market.securities_by_ticker()["US84615Q1031"]
+        self.assertEqual(sec["label"], "SpaceX")
+        self.assertEqual(sec["isin"], "US84615Q1031")
+        self.assertEqual(sec["exchange"], "NASDAQ")
+
+    def test_le_nom_affiche_est_modifiable(self):
+        self.post("/api/securities", {
+            "ticker": "US84615Q1031", "symbol": "SPCX",
+            "label": "Space Exploration Technologies Corp. Class A",
+        })
+        self.post("/api/securities", {"ticker": "US84615Q1031", "label": "SpaceX"})
+        with self.app.app_context():
+            self.assertEqual(
+                market.securities_by_ticker()["US84615Q1031"]["label"], "SpaceX")
+
+
+class TestValeurCapitalisee(unittest.TestCase):
+    """Interets credites au 31 decembre, prorata temporis."""
+
+    def test_une_annee_pleine(self):
+        # 2024 compte 366 jours, comptes sur une base 365.
+        self.assertAlmostEqual(
+            finance.valeur_capitalisee([("2024-01-01", 10000)], 2.5, "2024-12-31"),
+            10250.68, places=2)
+
+    def test_les_interets_se_capitalisent(self):
+        deux_ans = finance.valeur_capitalisee([("2024-01-01", 10000)], 2.5, "2025-12-31")
+        self.assertGreater(deux_ans, 10500.0)   # plus que deux fois 250 : ils composent
+        self.assertAlmostEqual(deux_ans, 10506.95, places=2)
+
+    def test_un_versement_de_juillet_ne_rapporte_pas_une_annee_pleine(self):
+        self.assertAlmostEqual(
+            finance.valeur_capitalisee([("2024-07-01", 10000)], 2.5, "2024-12-31"),
+            10126.03, places=2)
+
+    def test_un_rachat_diminue_le_capital(self):
+        avec = finance.valeur_capitalisee(
+            [("2024-01-01", 10000), ("2025-01-01", -2000)], 2.5, "2025-12-31")
+        self.assertAlmostEqual(avec, 8456.95, places=2)
+
+    def test_sans_taux_la_somme_des_flux(self):
+        self.assertEqual(
+            finance.valeur_capitalisee([("2024-01-01", 10000)], 0, "2030-12-31"), 10000.0)
+
+    def test_aucun_flux(self):
+        self.assertIsNone(finance.valeur_capitalisee([], 2.5))
+
+    def test_avant_le_premier_versement(self):
+        self.assertEqual(
+            finance.valeur_capitalisee([("2024-06-01", 10000)], 2.5, "2024-01-01"), 0.0)
 
 
 if __name__ == "__main__":

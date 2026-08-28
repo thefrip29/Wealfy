@@ -141,7 +141,7 @@ def asset_detail(asset, movements, at_date=None, ctx=None):
     value, source = saisie, "saisie"
     if ctx:
         live, kind = market.market_value(
-            asset, movements, ctx["securities"], ctx["prices"]), "marche"
+            asset, movements, ctx["securities"], ctx["prices"], at_date), "marche"
         if live is None and asset["type"] in market.RATE_ASSET_TYPES:
             live, kind = market.rate_value(asset, movements, at_date), "taux"
         elif live is None and asset["type"] in market.INDEXED_ASSET_TYPES:
@@ -654,7 +654,7 @@ def market_asset_detail(asset_id, at_date=None, ctx=None):
     value = detail["valeur"]
     tri = finance.asset_xirr(asset, movements, value, at_date)
     lignes = (
-        market.line_values(movements, ctx["securities"], ctx["prices"])
+        market.line_values(movements, ctx["securities"], ctx["prices"], at_date)
         if ctx else finance.pru_par_ligne(movements)
     )
     return {
