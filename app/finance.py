@@ -247,6 +247,20 @@ def _quinzaine_credit(annee_quinzaine, mois, jour):
     return _quinzaine(date(annee_quinzaine, mois, jour))
 
 
+def _debut_millesime(d, mois, jour):
+    """Lendemain de la derniere capitalisation a la date `d`.
+
+    C'est la que demarre l'annee d'interets en cours. Les interets courus
+    depuis cette date sont dus : la banque les versera a la prochaine echeance,
+    quoi qu'il arrive entre-temps.
+    """
+    echeance = date(d.year, mois, min(jour, calendar.monthrange(d.year, mois)[1]))
+    if echeance >= d:
+        an = d.year - 1
+        echeance = date(an, mois, min(jour, calendar.monthrange(an, mois)[1]))
+    return echeance + timedelta(days=1)
+
+
 def valeur_livret(asset, movements, taux_annuel, at_date=None, credit=None) -> float:
     """Capital d'un livret a une date donnee, interets deja credites inclus.
 
@@ -270,7 +284,29 @@ def valeur_livret(asset, movements, taux_annuel, at_date=None, credit=None) -> f
         if d and d <= at_date and mv["type"] == "valorisation":
             base_date, base = d, float(mv["montant"] or 0)
 
-    events = [(_quinzaine(base_date), base)]
+    mois_credit, jour_credit = _jour_credit(credit)
+    rate = (taux_annuel or 0.0) / 100.0 / 24.0
+
+    # L'annee d'interets court depuis la derniere capitalisation, PAS depuis la
+    # derniere valorisation. Une valorisation dit COMBIEN il y a sur le livret,
+    # pas depuis quand : le solde d'un livret ne contient jamais les interets de
+    # l'annee en cours, puisqu'ils ne sont verses qu'a l'echeance. Repartir de sa
+    # date les effacait — recaler son Livret Jeune fin aout sur le meme montant
+    # faisait tomber la projection de 48 EUR a 18 EUR.
+    #
+    # Le solde declare est donc suppose avoir ete la depuis le debut du
+    # millesime. C'est une approximation, la meme que celle qu'on fait de tete en
+    # multipliant son solde par son taux, et elle vaut mieux que de supposer
+    # l'argent apparu le jour de la saisie. Deux garde-fous : on ne remonte
+    # jamais avant l'ouverture du livret (`acq`), ni avant une valorisation plus
+    # ancienne, dont les millesimes suivants doivent etre rejoues pour capitaliser.
+    debut_millesime = max(acq, _debut_millesime(base_date, mois_credit, jour_credit))
+    start_q = min(_quinzaine(base_date), _quinzaine(debut_millesime))
+    end_q = _quinzaine(at_date)
+
+    # Le solde de base entre au debut du millesime, et non a la date de la
+    # valorisation : c'est ce report qui lui rend les quinzaines deja courues.
+    events = [(start_q, base)]
     for mv in movements:
         d = parse_date(mv["date"])
         if not d or not (base_date < d <= at_date):
@@ -281,10 +317,6 @@ def valeur_livret(asset, movements, taux_annuel, at_date=None, credit=None) -> f
         elif mv["type"] == "retrait":
             events.append((_quinzaine(d) - 1, -abs(montant)))
     events.sort()
-
-    mois_credit, jour_credit = _jour_credit(credit)
-    rate = (taux_annuel or 0.0) / 100.0 / 24.0
-    start_q, end_q = _quinzaine(base_date), _quinzaine(at_date)
     # La quinzaine en cours n'entre dans le calcul que le jour ou elle s'acheve.
     borne = end_q + 1 if _quinzaine_revolue(at_date) else end_q
     balance = accrued = 0.0

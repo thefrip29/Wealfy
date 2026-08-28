@@ -548,6 +548,49 @@ class TestLivretInterest(unittest.TestCase):
                  "valeur_actuelle": None}
         self.assertEqual(finance.interets_prevus(actif, [], None, "2026-09-30"), 0.0)
 
+    # --- une valorisation dit combien, pas depuis quand ---------------------
+
+    def test_valoriser_en_cours_d_annee_n_efface_pas_les_interets_courus(self):
+        """Cas signale : 1798 EUR a 2,7 %, recale fin aout sur le meme montant.
+
+        Le solde d'un livret ne contient jamais les interets de l'annee : ils
+        tombent a l'echeance. Repartir de la date de valorisation les effacait,
+        et la projection passait de 48,55 EUR a 18,20 EUR.
+        """
+        actif = {"date_acquisition": "2018-08-24", "valeur_acquisition": 1798,
+                 "valeur_actuelle": 1798}
+        recale = [{"date": "2026-08-29", "type": "valorisation", "montant": 1798}]
+        self.assertEqual(finance.interets_prevus(actif, recale, 2.7, "2026-08-29"), 48.55)
+        # Soit exactement le calcul de tete : le solde multiplie par le taux.
+        self.assertAlmostEqual(1798 * 0.027, 48.55, places=2)
+
+    def test_valoriser_plusieurs_fois_ne_change_rien(self):
+        actif = {"date_acquisition": "2018-08-24", "valeur_acquisition": 1798,
+                 "valeur_actuelle": 1798}
+        une = [{"date": "2026-01-01", "type": "valorisation", "montant": 1798}]
+        trois = une + [
+            {"date": "2026-08-28", "type": "valorisation", "montant": 1798},
+            {"date": "2026-08-29", "type": "valorisation", "montant": 1798},
+        ]
+        self.assertEqual(finance.interets_prevus(actif, une, 2.7, "2026-08-29"),
+                         finance.interets_prevus(actif, trois, 2.7, "2026-08-29"))
+
+    def test_un_livret_ouvert_en_cours_d_annee_ne_touche_qu_un_prorata(self):
+        """L'ouverture reste une borne : on ne remonte pas avant elle."""
+        actif = {"date_acquisition": "2026-08-29", "valeur_acquisition": 1798,
+                 "valeur_actuelle": 1798}
+        prevus = finance.interets_prevus(actif, [], 2.7, "2026-08-29")
+        self.assertLess(prevus, 1798 * 0.027)
+        self.assertEqual(prevus, 18.20)
+
+    def test_une_valorisation_ancienne_capitalise_les_annees_suivantes(self):
+        """On ne remonte pas non plus apres une valorisation plus ancienne."""
+        actif = {"date_acquisition": "2018-01-01", "valeur_acquisition": 1000,
+                 "valeur_actuelle": None}
+        vieille = [{"date": "2024-05-01", "type": "valorisation", "montant": 1798}]
+        # Deux echeances passees depuis : les interets se composent.
+        self.assertGreater(finance.valeur_livret(actif, vieille, 2.7, "2026-08-29"), 1850.0)
+
     # --- date de credit configurable ---------------------------------------
 
     def test_la_date_de_credit_se_deplace(self):
@@ -615,6 +658,33 @@ class TestLivretThroughApi(MarketTestCase):
         detail = self.get(f"/api/assets/{livret['id']}")
         self.assertEqual(detail["asset"]["valeur_source"], "taux")
         self.assertEqual(detail["asset"]["valeur"], 8000.0)
+
+    def test_enregistrer_la_fiche_sans_changer_le_montant_ne_valorise_pas(self):
+        """Corriger un libelle empilait une valorisation a chaque sauvegarde."""
+        livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A", "date_acquisition": "2020-01-01",
+            "valeur_acquisition": 5000, "valeur_actuelle": 8000,
+            "metadata": {"taux_annuel": 2.4},
+        })
+        for _ in range(3):
+            self.client.put(f"/api/assets/{livret['id']}", json={
+                "label": "Livret A renomme", "valeur_actuelle": 8000,
+            })
+        mouvements = self.get(f"/api/assets/{livret['id']}")["movements"]
+        self.assertEqual([m for m in mouvements if m["type"] == "valorisation"], [])
+
+    def test_deux_corrections_le_meme_jour_ne_laissent_qu_une_valorisation(self):
+        livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A", "date_acquisition": "2020-01-01",
+            "valeur_acquisition": 5000, "metadata": {"taux_annuel": 2.4},
+        })
+        for montant in (8000, 8500, 9000):
+            self.client.put(f"/api/assets/{livret['id']}", json={"valeur_actuelle": montant})
+        detail = self.get(f"/api/assets/{livret['id']}")
+        valos = [m for m in detail["movements"] if m["type"] == "valorisation"]
+        self.assertEqual(len(valos), 1)
+        self.assertEqual(valos[0]["montant"], 9000.0)
+        self.assertEqual(detail["asset"]["valeur"], 9000.0)
 
     def test_un_livret_declare_aujourd_hui_n_a_aucune_plus_value(self):
         """`docs/donnees.md` le promet : la plus-value demarre a zero."""

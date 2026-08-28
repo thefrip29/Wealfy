@@ -144,14 +144,26 @@ def update_asset(aid):
     # chiffre. On pose la valorisation datee qui manquait.
     nouvelle = as_float(data.get("valeur_actuelle"), None) if "valeur_actuelle" in data else None
     type_actif = (data.get("type") or asset["type"] or "").strip()
-    if nouvelle is not None and type_actif in market.RATE_ASSET_TYPES:
+    ancienne = asset["valeur_actuelle"]
+    # Seulement si le montant CHANGE : enregistrer la fiche pour corriger un
+    # libelle ou un taux empilait sinon une valorisation par sauvegarde.
+    if (nouvelle is not None and type_actif in market.RATE_ASSET_TYPES
+            and (ancienne is None or round(float(ancienne), 2) != round(nouvelle, 2))):
         # `services.get_asset` rend deja `metadata` sous forme de dict.
         meta = data["metadata"] if "metadata" in data else (asset["metadata"] or {})
         if (meta or {}).get("taux_annuel") not in (None, ""):
+            aujourdhui = date.today().isoformat()
+            # Une seule valorisation par jour : on remplace celle du jour au
+            # lieu d'en accumuler une a chaque correction de saisie.
+            execute(
+                "DELETE FROM asset_movements WHERE asset_id = ? AND date = ? "
+                "AND type = 'valorisation'",
+                (aid, aujourdhui),
+            )
             execute(
                 "INSERT INTO asset_movements(id, asset_id, date, montant, type, note) "
                 "VALUES (?,?,?,?,'valorisation',?)",
-                (new_id(), aid, date.today().isoformat(), round(nouvelle, 2),
+                (new_id(), aid, aujourdhui, round(nouvelle, 2),
                  "Valeur saisie depuis la fiche"),
             )
     return jsonify(row_to_dict(query("SELECT * FROM assets WHERE id = ?", (aid,), one=True)))
