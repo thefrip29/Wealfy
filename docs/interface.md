@@ -342,10 +342,38 @@ est passé dans *Dépenses*, là où les imports se font ; son code y est passé
 aussi, alors qu'il vivait dans le module de l'Historique sans y être rendu. Un
 import peut être annulé : ses transactions sont supprimées avec lui.
 
-**Paramètres** (icône engrenage) — trois sections : *Classement des dépenses*
-(catégories, virements internes, règles), *Objectifs et frais* (répartition
-cible, TER et courtage), *Cours de marché* (fournisseur, correspondances de
-symboles, types d'actifs personnalisés).
+**Paramètres** (icône engrenage) — quatre sections dont le contenu correspond au
+titre : *Classement des dépenses* (catégories, rôles, mots-clés, règles),
+*Objectifs* (répartition cible, frais, crédit des intérêts), *Cours de marché*,
+et *Général* (types d'actifs personnalisés, sauvegardes). « Types d'actifs
+personnalisés » était logé sous *Cours de marché*, avec lesquels il n'a rien à
+voir.
+
+### Un seul modèle d'enregistrement
+
+Deux coexistaient sans le dire. Catégories, cases à cocher, règles,
+correspondances de symboles et types personnalisés s'écrivaient **au clic** ;
+répartition cible, date de crédit, frais et cours attendaient un bouton
+**Enregistrer**. Rien ne distinguait les deux à l'écran, et une répartition
+retouchée puis abandonnée était perdue en silence.
+
+Tout s'enregistre maintenant à la modification, et la modale le dit en une
+ligne. **Une seule exception, annoncée sur place** : la section *Cours de
+marché* garde son bouton, parce que l'activer fait sortir des données de la
+machine. Un réglage à conséquence se confirme.
+
+Les champs à saisie libre (frais, poches) s'écrivent à la **sortie du champ** et
+non à la frappe : sinon « 1 » serait enregistré avant « 120 ».
+
+### Le rôle d'une catégorie, en un tableau
+
+C'étaient **trois listes de cases à cocher empilées** — épargne, charges fixes,
+virements internes — portant chacune la même liste de catégories sous trois
+titres différents. Il fallait parcourir l'écran trois fois pour savoir ce qu'une
+catégorie faisait, et rien ne montrait qu'une même catégorie pouvait être cochée
+dans deux colonnes qui se contredisent.
+
+Une ligne par catégorie, trois colonnes. La contradiction se voit.
 
 
 ## Observations patrimoniales

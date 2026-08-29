@@ -881,6 +881,10 @@ input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
 .table tbody tr:last-child td { border-bottom: 0; }
 .table tbody tr:hover { background: var(--card-2); }
 .table .right, th.right { text-align: right; }
+.table .center, th.center { text-align: center; }
+/* Une case a cocher dans un tableau ne doit pas s'etirer sur la colonne :
+   la regle globale des champs leur donne `width: 100%`. */
+.table .center input[type=checkbox] { width: auto; }
 .table .empty { color: var(--muted); text-align: center; padding: var(--space-6); }
 .table select { padding: 4px 8px; font-size: var(--fs-sm); }
 

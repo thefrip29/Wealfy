@@ -9,25 +9,26 @@ App.settings = {
     ]);
     App.state.settings = settings;
 
-    // Trois sections au lieu de six. Les réglages qui se répondent sont
-    // désormais côte à côte : classer ses dépenses, viser une répartition,
-    // brancher les cours. Le contenu est intact, seul le rangement change.
+    // Quatre sections dont le contenu correspond au titre. « Types d'actifs
+    // personnalisés » était logé sous « Cours de marché », avec lesquels il n'a
+    // rien à voir ; il rejoint les sauvegardes dans « Général ».
     const sections = [
       ['Classement des dépenses', App.h('div', {},
         App.settings.panelCategories(settings),
         App.h('div', { class: 'section-title' }, 'Règles de classification'),
         App.settings.panelRules(rules, settings))],
-      ['Objectifs et frais', App.h('div', {},
+      ['Objectifs', App.h('div', {},
         App.settings.panelRepartition(settings),
-        App.h('div', { class: 'section-title' }, 'Produits à taux'),
-        App.settings.panelTaux(settings),
         App.h('div', { class: 'section-title' }, 'Frais annuels'),
-        App.settings.panelFees(settings))],
-      ['Cours de marché', App.h('div', {},
-        App.settings.panelMarket(settings, market),
+        App.settings.panelFees(settings),
+        App.h('div', { class: 'section-title' }, 'Crédit des intérêts'),
+        App.settings.panelTaux(settings))],
+      ['Cours de marché', App.settings.panelMarket(settings, market)],
+      ['Général', App.h('div', {},
         App.h('div', { class: 'section-title' }, 'Types d’actifs personnalisés'),
-        App.settings.panelAssetTypes(settings))],
-      ['Sauvegardes', App.settings.panelBackups(settings)],
+        App.settings.panelAssetTypes(settings),
+        App.h('div', { class: 'section-title' }, 'Sauvegardes'),
+        App.settings.panelBackups(settings))],
     ];
     const trouve = sections.findIndex(
       ([label]) => focus && label.toLowerCase().includes(focus.toLowerCase()));
@@ -51,7 +52,13 @@ App.settings = {
     App.modal.open({
       title: 'Paramètres',
       wide: true,
-      body: App.h('div', {}, nav, stack),
+      // Deux modèles d'enregistrement coexistaient sans le dire : certains
+      // réglages s'écrivaient au clic, d'autres attendaient un bouton. Il n'en
+      // reste qu'un, et l'exception est annoncée là où elle se trouve.
+      body: App.h('div', {},
+        App.h('p', { class: 'hint', style: 'margin-bottom:12px' },
+          'Vos modifications sont enregistrées au fur et à mesure.'),
+        nav, stack),
       footer: [App.h('button', { class: 'btn primary', onclick: () => App.modal.close() }, 'Fermer')],
     });
   },
@@ -105,26 +112,57 @@ App.settings = {
           input, App.h('button', { class: 'btn', onclick: add }, 'Ajouter')));
     };
 
-    /* Cases à cocher sur la liste des catégories de dépenses. */
-    const checkboxes = (key, message) => {
-      const host = App.h('div', {});
+    /* Le rôle de chaque catégorie de dépense, en un seul tableau.
+
+       C'était trois listes de cases à cocher, empilées, portant chacune la même
+       liste de catégories sous trois titres différents. Il fallait parcourir
+       l'écran trois fois pour savoir ce qu'une catégorie faisait, et rien ne
+       montrait qu'une même catégorie pouvait se retrouver cochée dans deux
+       colonnes qui se contredisent — épargne et virement interne, par exemple.
+       Une ligne par catégorie, trois colonnes : la contradiction se voit. */
+    const ROLES = [
+      ['categories_non_depense', 'Épargne',
+        'Comptée comme épargne plutôt que comme dépense, et entre dans le taux d’épargne'],
+      ['categories_charges_fixes', 'Charge fixe',
+        'Tombe tous les mois quoi qu’il arrive ; sert au calcul du reste à vivre'],
+      ['categories_transfert', 'Virement interne',
+        'Ni dépense, ni revenu, ni épargne : l’argent a seulement changé de poche'],
+    ];
+
+    const tableRoles = () => {
+      const tbody = App.h('tbody', {});
       const render = () => {
-        App.clear(host);
-        for (const cat of settings.categories_depenses || []) {
-          const cb = App.h('input', { type: 'checkbox' });
-          cb.checked = (settings[key] || []).includes(cat);
-          cb.addEventListener('change', async () => {
-            const set = new Set(settings[key] || []);
-            if (cb.checked) set.add(cat); else set.delete(cat);
-            settings[key] = [...set];
-            await App.settings.save({ [key]: settings[key] }, message);
+        App.clear(tbody);
+        const cats = settings.categories_depenses || [];
+        if (!cats.length) {
+          tbody.append(App.h('tr', {}, App.h('td', { colspan: 4, class: 'empty' },
+            'Aucune catégorie de dépense.')));
+          return;
+        }
+        for (const cat of cats) {
+          const cellules = ROLES.map(([key, , titre]) => {
+            const cb = App.h('input', { type: 'checkbox', title: titre });
+            cb.checked = (settings[key] || []).includes(cat);
+            cb.addEventListener('change', async () => {
+              const set = new Set(settings[key] || []);
+              if (cb.checked) set.add(cat); else set.delete(cat);
+              settings[key] = [...set];
+              await App.settings.save({ [key]: settings[key] }, 'Rôles mis à jour');
+            });
+            return App.h('td', { class: 'center' }, cb);
           });
-          host.append(App.h('label',
-            { class: 'checkline', style: 'margin-right:14px' }, cb, cat));
+          tbody.append(App.h('tr', {}, App.h('td', {}, cat), ...cellules));
         }
       };
       render();
-      return host;
+      return App.h('div', { class: 'table-wrap scroll-y' },
+        App.h('table', { class: 'table' },
+          App.h('thead', {}, App.h('tr', {},
+            App.h('th', {}, 'Catégorie'),
+            ...ROLES.map(([, libelle, titre]) => App.h('th', {
+              class: 'center', title: titre,
+            }, libelle)))),
+          tbody));
     };
 
     /* Mots-clés qui trahissent un virement entre comptes de l'utilisateur. */
@@ -164,31 +202,26 @@ App.settings = {
       build('categories_depenses', 'Catégories de dépenses'),
       build('categories_revenus', 'Catégories de revenus'),
 
-      App.h('div', { class: 'section-title' }, 'Comptées comme épargne, pas comme dépense'),
-      App.h('p', { class: 'hint' },
-        'Un virement vers un livret n’est pas une dépense : coché, il est compté '
-        + 'comme épargne et entre dans le taux d’épargne.'),
-      checkboxes('categories_non_depense', 'Exclusions mises à jour'),
-
-      App.h('div', { class: 'section-title' }, 'Charges fixes'),
-      App.h('p', { class: 'hint' },
-        'Ce qui tombe tous les mois quoi qu’il arrive. Ce qui reste une fois '
-        + 'ces charges et votre épargne mises de côté, c’est votre reste à vivre.'),
-      checkboxes('categories_charges_fixes', 'Charges fixes mises à jour'),
-
-      App.h('div', { class: 'section-title' }, 'Virements internes — neutres des deux côtés'),
-      App.h('p', { class: 'hint' },
-        'Un virement LCL → Revolut apparaît deux fois : en débit sur un relevé, en '
-        + 'crédit sur l’autre. Ces catégories ne comptent donc ni comme dépense, ni '
-        + 'comme revenu, ni comme épargne — l’argent a seulement changé de poche.'),
-      checkboxes('categories_transfert', 'Virements internes mis à jour'),
+      App.h('div', { class: 'section-title' }, 'Rôle de chaque catégorie'),
+      App.note('Ce que chaque colonne change',
+        App.h('p', {}, App.h('strong', {}, 'Épargne'),
+          ' : un virement vers un livret n’est pas une dépense. Coché, il est '
+          + 'compté comme épargne et entre dans le taux d’épargne.'),
+        App.h('p', {}, App.h('strong', {}, 'Charge fixe'),
+          ' : ce qui tombe tous les mois quoi qu’il arrive. Ce qui reste une fois '
+          + 'ces charges et votre épargne mises de côté, c’est votre reste à vivre.'),
+        App.h('p', {}, App.h('strong', {}, 'Virement interne'),
+          ' : un virement LCL → Revolut apparaît deux fois, en débit sur un relevé '
+          + 'et en crédit sur l’autre. Ces catégories ne comptent ni comme dépense, '
+          + 'ni comme revenu, ni comme épargne.')),
+      tableRoles(),
 
       App.h('div', { class: 'section-title' }, 'Mots-clés de détection à l’import'),
       App.note('Comment ils sont utilisés',
         'Cherchés dans le libellé, sans casse ni accents. Vos règles de classification '
-        + 'restent prioritaires. Le rapprochement par paires (bouton « Détecter les '
-        + 'virements internes » dans l’onglet Dépenses) rattrape ce que les mots-clés '
-        + 'manquent, en appariant deux relevés.'),
+        + 'restent prioritaires. Après un import, l’application propose d’elle-même les '
+        + 'paires débit/crédit qu’elle a repérées entre deux relevés : c’est ce '
+        + 'rapprochement qui rattrape ce que les mots-clés manquent.'),
       App.h('div', { style: 'margin:10px 0' }, motsHost),
       App.h('div', { class: 'actions' },
         motInput, App.h('button', { class: 'btn', onclick: addMot }, 'Ajouter')));
@@ -287,6 +320,14 @@ App.settings = {
     const host = App.h('div', {});
     const totalNode = App.h('p', { class: 'hint' });
 
+    // Enregistrement à la modification, comme les catégories. Le bouton
+    // « Enregistrer » qui gardait ces poches était un piège : les catégories
+    // et les cases à cocher, elles, s'écrivaient toutes seules, et rien ne
+    // distinguait les deux à l'écran. Une répartition retouchée puis abandonnée
+    // était perdue en silence.
+    const enregistrer = () => App.settings.save(
+      { repartition_cible: buckets }, 'Répartition enregistrée');
+
     const render = () => {
       App.clear(host);
       buckets.forEach((b, i) => {
@@ -298,14 +339,17 @@ App.settings = {
         }
         typesSel.addEventListener('change', () => {
           b.types = Array.from(typesSel.selectedOptions).map((o) => o.value);
+          enregistrer();
         });
         const labelIn = App.input('l', { value: b.label || '' });
         labelIn.addEventListener('input', () => { b.label = labelIn.value; });
+        labelIn.addEventListener('change', enregistrer);
         const pctIn = App.input('p', { type: 'number', step: '0.1', value: b.pct ?? 0 });
         pctIn.addEventListener('input', () => {
           b.pct = parseFloat(pctIn.value) || 0;
           updateTotal();
         });
+        pctIn.addEventListener('change', enregistrer);
         host.append(App.h('div', { class: 'form-grid', style: 'margin-bottom:10px' },
           App.field('Poche', labelIn),
           App.field('Cible (%)', pctIn),
@@ -313,7 +357,7 @@ App.settings = {
           App.h('div', { class: 'field' }, App.h('label', {}, ' '),
             App.h('button', {
               class: 'btn danger',
-              onclick: () => { buckets.splice(i, 1); render(); updateTotal(); },
+              onclick: () => { buckets.splice(i, 1); render(); updateTotal(); enregistrer(); },
             }, 'Retirer'))));
       });
     };
@@ -333,12 +377,11 @@ App.settings = {
       App.h('div', { class: 'actions', style: 'margin-top:12px' },
         App.h('button', {
           class: 'btn',
-          onclick: () => { buckets.push({ label: 'Nouvelle poche', types: [], pct: 0 }); render(); updateTotal(); },
-        }, '+ Poche'),
-        App.h('button', {
-          class: 'btn primary',
-          onclick: () => App.settings.save({ repartition_cible: buckets }, 'Répartition enregistrée'),
-        }, 'Enregistrer')));
+          onclick: () => {
+            buckets.push({ label: 'Nouvelle poche', types: [], pct: 0 });
+            render(); updateTotal();
+          },
+        }, '+ Poche')));
   },
 
   /* ---------- frais annuels ---------- */
@@ -359,21 +402,25 @@ App.settings = {
       await App.settings.save({ date_credit_interets: valeur },
         'Date de crédit enregistrée');
     };
+    jourIn.addEventListener('change', save);
+    moisIn.addEventListener('change', save);
 
     return App.h('div', {},
       App.h('p', { class: 'hint' },
         'Le jour où vos intérêts sont versés sur le capital. C’est le '
-        + '31 décembre pour le Livret A, le LDDS, le LEP, le Livret Jeune, le PEL et '
-        + 'le CEL — à changer seulement si vous détenez un dépôt à terme qui '
-        + 'crédite à sa date anniversaire.'),
-      App.h('p', { class: 'hint' },
-        'Jusqu’à cette date, la valeur affichée reste le capital, celui de votre '
-        + 'relevé bancaire. Les intérêts à venir sont indiqués à côté.'),
+        + '31 décembre pour la plupart des livrets — à changer seulement si vous '
+        + 'détenez un dépôt à terme qui crédite à sa date anniversaire.'),
       App.h('div', { class: 'form-grid', style: 'margin-top:12px' },
         App.field('Jour', jourIn),
         App.field('Mois', moisIn)),
-      App.h('div', { class: 'actions', style: 'margin:12px 0' },
-        App.h('button', { class: 'btn primary', onclick: save }, 'Enregistrer')));
+      App.note('Ce que cette date change',
+        App.h('p', {},
+          'Jusqu’à elle, la valeur affichée d’un livret reste le capital, celui de '
+          + 'votre relevé bancaire. Les intérêts à venir sont indiqués à côté, et '
+          + 'viennent s’ajouter au capital à l’échéance.'),
+        App.h('p', {},
+          'Elle vaut pour le Livret A, le LDDS, le LEP, le Livret Jeune, le PEL et '
+          + 'le CEL, qui créditent tous au 31 décembre.')));
   },
 
   panelFees(settings) {
@@ -408,6 +455,9 @@ App.settings = {
       render();
       await App.settings.save({ frais_annuels: fees }, 'Frais enregistrés');
     };
+    // À la sortie du champ, pas à la frappe : sinon chaque chiffre tapé
+    // déclencherait un enregistrement, et « 1 » serait écrit avant « 120 ».
+    for (const champ of [yearIn, terIn, cIn]) champ.addEventListener('change', save);
 
     return App.h('div', {},
       App.h('p', { class: 'hint' },
@@ -417,9 +467,7 @@ App.settings = {
         App.field('Année', yearIn),
         App.field('TER (€)', terIn),
         App.field('Courtage (€)', cIn)),
-      App.h('div', { class: 'actions', style: 'margin:12px 0' },
-        App.h('button', { class: 'btn primary', onclick: save }, 'Enregistrer')),
-      App.h('div', { class: 'table-wrap' },
+      App.h('div', { class: 'table-wrap', style: 'margin-top:14px' },
         App.h('table', { class: 'table' },
           App.h('thead', {}, App.h('tr', {},
             App.h('th', {}, 'Année'), App.h('th', { class: 'right' }, 'TER'),
@@ -724,14 +772,20 @@ App.settings = {
         }),
         App.field('Rafraîchir au lancement', autoIn),
         App.field('Durée de vie du cache (heures)', ttlIn)),
-      // Le rafraîchissement se déclenchait de trois endroits : ici, depuis la
-      // barre de l'onglet Patrimoine, et automatiquement au lancement. Seul
-      // celui de la barre reste : c'est là que les cours s'affichent, avec la
-      // pastille qui dit s'ils sont à jour.
+      // Seule section qui garde un bouton, et c'est délibéré : le reste des
+      // réglages s'enregistre à la modification, mais activer les cours fait
+      // sortir des données de la machine. Un réglage à conséquence se confirme.
+      //
+      // Le rafraîchissement, lui, se déclenchait de trois endroits : ici, la
+      // barre de l'onglet Patrimoine, et l'automatique au lancement. Seul celui
+      // de la barre reste, là où la pastille dit si les cours sont à jour.
       App.h('div', { class: 'actions', style: 'margin-top:12px' },
         App.h('button', { class: 'btn primary', onclick: save }, 'Enregistrer'),
         cleEnPlace ? App.h('button', { class: 'btn', onclick: oublierCle },
           'Oublier la clé') : null),
+      App.h('p', { class: 'hint', style: 'margin-top:8px' },
+        'Cette section est la seule à demander une validation : elle décide '
+        + 'de ce qui sort de votre machine.'),
 
       App.h('div', { class: 'section-title' }, 'Vérifier la couverture d’un symbole'),
       App.h('p', { class: 'hint' },
