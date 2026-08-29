@@ -9,14 +9,12 @@ App.loadMeta = async function () {
 
    `/api/assets` et `/api/market/status` etaient demandes deux fois apres
    chaque ecriture : une fois ici, une fois par `wealth.load()`. Cette
-   fonction est desormais seule a les lire, et porte les parametres dont
-   l'onglet Patrimoine a besoin — le mois affiche et les archives. */
+   fonction est desormais seule a les lire, et porte le parametre dont
+   l'onglet Patrimoine a besoin : le mois affiche. */
 App.loadRefs = async function () {
-  const archives = App.el('#we-archived');
-  const archived = archives && archives.checked ? '1' : '0';
   const arrete = App.monthAsOf(App.state.month);
   const [portfolio, liabilities, market] = await Promise.all([
-    App.api.get(`/api/assets?archived=${archived}&date=${arrete}`),
+    App.api.get(`/api/assets?date=${arrete}`),
     App.api.get('/api/liabilities'),
     App.api.get('/api/market/status'),
   ]);
@@ -447,9 +445,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   App.el('#we-refresh-quotes').addEventListener('click',
     (e) => App.tabs.wealth.refreshQuotes(e.target));
   App.el('#we-add').addEventListener('click', () => App.tabs.wealth.openAddChooser());
-  // `App.refresh` et non `wealth.load()` : depuis que `loadRefs` est seul à
-  // lire les actifs, c'est lui qui porte le paramètre `archived`.
-  App.el('#we-archived').addEventListener('change', () => App.refresh());
 
   App.state.month = localStorage.getItem('patrimoine.month') || App.monthISO();
   App.setMonthLabel(App.state.month);

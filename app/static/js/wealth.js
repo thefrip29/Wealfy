@@ -5,9 +5,9 @@ App.tabs.wealth = {
   RATE: ['Livret', 'LDDS', 'LEP', 'LivretJeune', 'PEL', 'CEL', 'DepotTerme'],
   openGroups: new Set(),
 
-  /* Ne lit plus le serveur : `App.loadRefs` vient de le faire, avec le mois
-     affiche et l'etat des archives. Les deux memes appels partaient ici une
-     seconde fois apres chaque ecriture. */
+  /* Ne lit plus le serveur : `App.loadRefs` vient de le faire, a la date
+     d'arret du mois affiche. Les deux memes appels partaient ici une seconde
+     fois apres chaque ecriture. */
   async load() {
     const snap = App.state.portfolio;
     const market = App.state.market;
@@ -85,7 +85,12 @@ App.tabs.wealth = {
           `${snap.liabilities.length} prêt(s)`)
         : null,
       cotables
-        ? kpi('Plus-value latente', App.fmt.signed(pv), null, pv >= 0 ? 'good' : 'bad')
+        ? kpi('Plus-value latente', App.fmt.signed(pv),
+          // Une plus-value latente n'a pas de periode fixe : c'est l'ecart
+          // entre la valeur du jour et ce qui a ete investi, produit par
+          // produit, depuis la date d'entree de chacun.
+          'depuis l’acquisition de chaque produit',
+          pv >= 0 ? 'good' : 'bad')
         : null,
     ].filter(Boolean));
   },
@@ -143,7 +148,6 @@ App.tabs.wealth = {
             App.h('div', { class: 'num' }, App.fmt.eur(a.valeur)),
             App.tabs.wealth.sourceBadge(a)),
           App.tabs.wealth.gainCell(a, pvClass),
-          App.h('div', { class: 'right sub' }, `investi ${App.fmt.eur(a.investi, true)}`),
           App.h('div', { class: 'right' },
             App.h('button', {
               class: 'btn small',
@@ -620,43 +624,147 @@ App.tabs.wealth = {
   },
 
   /* ==================================================================
-     Un seul point d'entrée, et trois portes derrière.
+     Deux niveaux : d'abord la nature de ce qu'on ajoute, ensuite le produit.
 
      Il y a eu trois boutons côte à côte, puis un seul bouton ouvrant vingt
-     cartes de produits. Le catalogue était alors rendu DEUX FOIS, en deux
-     mises en page différentes : une carte par produit ici, une ligne par
-     produit dans la déclaration groupée. Trois formulaires créaient un actif.
+     cartes d'un coup. Les vingt cartes étaient lisibles mais mélangeaient un
+     Livret A, un prêt immobilier et un formulaire libre sur le même plan.
 
-     Il n'en reste qu'un pour les produits courants : la déclaration, où le
-     catalogue porte directement ses champs. Choisir un produit puis saisir
-     son montant dans un second écran ne faisait qu'ajouter une étape à ce
-     que la grille demande déjà sur une ligne.
+     La catégorie répond « quelle sorte de chose », les cartes « laquelle » —
+     avec, parmi elles, la déclaration groupée pour qui arrive avec tout son
+     patrimoine à saisir d'un coup.
      ================================================================== */
-  openAddChooser() {
-    const carte = (libelle, sousTitre, action) => App.h('button', {
-      class: 'choice', onclick: action,
-    },
-    App.h('div', {},
-      App.h('div', { class: 'choice-title' }, libelle),
-      App.h('div', { class: 'choice-sub' }, sousTitre)),
-    App.h('span', { class: 'choice-go' }, '→'));
+  carteChoix(libelle, sousTitre, action) {
+    return App.h('button', { class: 'choice', onclick: action },
+      App.h('div', {},
+        App.h('div', { class: 'choice-title' }, libelle),
+        sousTitre ? App.h('div', { class: 'choice-sub' }, sousTitre) : null),
+      App.h('span', { class: 'choice-go' }, '\u2192'));
+  },
 
+  openAddChooser() {
+    const carte = App.tabs.wealth.carteChoix;
     App.modal.open({
-      title: 'Qu’est-ce que vous voulez ajouter ?',
+      title: 'Qu\u2019est-ce que vous voulez ajouter ?',
       body: App.h('div', { class: 'choice-grid' },
-        carte('Un produit d’épargne ou de placement',
-          'Livret, PEA, assurance vie, crypto, bien immobilier… '
-          + 'Plusieurs à la fois si besoin',
-          () => App.tabs.wealth.openQuickAdd()),
-        carte('Un prêt ou un crédit',
-          'Mensualité et capital restant dû calculés',
+        carte('Un produit d\u2019\u00e9pargne ou de placement',
+          'Livret, PEA, assurance vie, crypto, bien immobilier\u2026',
+          () => App.tabs.wealth.openProduitChooser()),
+        carte('Un pr\u00eat ou un cr\u00e9dit',
+          'Mensualit\u00e9 et capital restant d\u00fb calcul\u00e9s',
           () => App.tabs.wealth.openLiabilityForm(null)),
         carte('Autre chose',
-          'Formulaire complet, pour ce qui n’entre dans aucune case',
+          'Formulaire complet, pour ce qui n\u2019entre dans aucune case',
           () => App.tabs.wealth.openAssetForm(null))),
       footer: [App.h('button', {
         class: 'btn', onclick: () => App.modal.close(),
       }, 'Annuler')],
+    });
+  },
+
+  /* Second niveau : une carte par produit, group\u00e9es par famille. La
+     d\u00e9claration group\u00e9e est une carte parmi les autres, en t\u00eate d'une section
+     \u00e0 elle : c'est un chemin d'entr\u00e9e, pas un produit. */
+  openProduitChooser() {
+    const carte = App.tabs.wealth.carteChoix;
+    const body = App.h('div', {});
+
+    body.append(
+      App.h('div', { class: 'section-title' }, 'Tout d\u2019un coup'),
+      App.h('div', { class: 'choice-grid' },
+        carte('Ajouter plusieurs produits',
+          'La liste compl\u00e8te, un montant par ligne \u2014 pour la premi\u00e8re mise en route',
+          () => App.tabs.wealth.openQuickAdd())));
+
+    for (const [groupe, produits] of App.tabs.wealth.CATALOGUE) {
+      body.append(App.h('div', { class: 'section-title' }, groupe));
+      const grid = App.h('div', { class: 'choice-grid' });
+      for (const [type, libelle, avecTaux] of produits) {
+        grid.append(carte(libelle, App.tabs.wealth.SOUS_TITRES[type] || null,
+          () => App.tabs.wealth.openSimpleAssetForm(type, libelle, avecTaux)));
+      }
+      body.append(grid);
+    }
+
+    App.modal.open({
+      title: 'Quel produit ?',
+      wide: true,
+      body,
+      footer: [App.h('button', {
+        class: 'btn', onclick: () => App.tabs.wealth.openAddChooser(),
+      }, 'Retour')],
+    });
+  },
+
+  SOUS_TITRES: {
+    Livret: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
+    LDDS: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
+    LEP: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
+    LivretJeune: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
+    PEL: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
+    CEL: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
+    DepotTerme: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
+    PEA: 'Vous choisirez vos supports ensuite',
+    CTO: 'Vous choisirez vos supports ensuite',
+    AssuranceVie: 'Vous choisirez vos supports ensuite',
+    PER: 'Vous choisirez vos supports ensuite',
+    Crypto: 'Vous choisirez vos cryptos ensuite',
+    Immobilier: 'R\u00e9\u00e9valuation possible par indice',
+    SCPI: 'R\u00e9\u00e9valuation possible par indice',
+  },
+
+  /* Formulaire court : le type est d\u00e9j\u00e0 choisi, on ne demande que
+     l'indispensable. Le reste se r\u00e8gle ensuite dans la fiche. */
+  openSimpleAssetForm(type, libelle, avecTaux) {
+    const marche = App.tabs.wealth.MARKET.includes(type);
+    const form = App.h('form', { class: 'form-grid', onsubmit: (e) => e.preventDefault() },
+      App.field('Nom', App.input('label', { value: libelle, required: true })),
+      App.field('Montant aujourd\u2019hui (\u20ac)', App.input('valeur_actuelle', {
+        type: 'number', step: '0.01', required: true,
+      })),
+      App.field('Depuis le', App.dateField('date_acquisition', {
+        value: App.todayISO(),
+      })),
+      avecTaux ? App.field('Taux annuel (%)', App.input('taux_annuel', {
+        type: 'number', step: '0.01',
+      }), { hint: 'Laiss\u00e9 vide, le montant reste fig\u00e9' }) : null);
+
+    const save = async () => {
+      const v = App.formValues(form);
+      if (!v.valeur_actuelle) {
+        return App.invalide(form, 'valeur_actuelle', 'Indiquez un montant.');
+      }
+      const metadata = {};
+      if (v.taux_annuel) metadata.taux_annuel = parseFloat(v.taux_annuel);
+      try {
+        const asset = await App.api.post('/api/assets', {
+          type,
+          label: v.label.trim() || libelle,
+          date_acquisition: v.date_acquisition,
+          valeur_acquisition: v.valeur_actuelle,   // pas d'historique connu
+          valeur_actuelle: v.valeur_actuelle,
+          metadata,
+        });
+        App.modal.close();
+        App.toast(`${v.label || libelle} ajout\u00e9`, 'success');
+        await App.refreshAll();
+        // Un compte-titres ou un portefeuille crypto n'a d'int\u00e9r\u00eat qu'une fois
+        // ses lignes renseign\u00e9es : on y emm\u00e8ne directement.
+        if (marche) await App.tabs.wealth.openAssetDetail(asset.id);
+      } catch (e) { App.toast(e.message, 'error'); }
+    };
+
+    App.modal.open({
+      title: `Ajouter \u2014 ${libelle}`,
+      body: App.h('div', {}, form,
+        marche ? App.h('p', { class: 'hint', style: 'margin-top:14px' },
+          'Vous pourrez choisir vos supports juste apr\u00e8s, par une recherche.') : null),
+      footer: [
+        App.h('button', {
+          class: 'btn', onclick: () => App.tabs.wealth.openProduitChooser(),
+        }, 'Retour'),
+        App.h('button', { class: 'btn primary', onclick: save }, 'Ajouter'),
+      ],
     });
   },
 
@@ -781,7 +889,9 @@ App.tabs.wealth = {
       footer: [
         App.h('div', { style: 'margin-right:auto' },
           App.h('span', { class: 'sub' }, 'Total déclaré : '), totalNode),
-        App.h('button', { class: 'btn', onclick: () => App.modal.close() }, 'Annuler'),
+        App.h('button', {
+          class: 'btn', onclick: () => App.tabs.wealth.openProduitChooser(),
+        }, 'Retour'),
         submit,
       ],
     });

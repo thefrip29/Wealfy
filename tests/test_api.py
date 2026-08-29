@@ -523,6 +523,41 @@ class TestActionsGroupees(ApiTestCase):
         self.assertEqual(len(self.get("/api/transactions?month=2024-03")), 3)
 
 
+class TestEtendueArchive(ApiTestCase):
+    """Un Livret A ouvert en 2003 faisait calculer 275 mois d'archive, dont
+    265 sans la moindre transaction ni le moindre mouvement : 700 ms, et un
+    tableau que personne ne lit. Une archive raconte ce qui s'est passe."""
+
+    def test_ouverture_ancienne_ne_gonfle_pas_l_archive(self):
+        self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A",
+            "date_acquisition": "2003-10-02", "valeur_actuelle": 5000,
+        })
+        self.post("/api/transactions", {
+            "date": "2024-03-01", "amount": -10, "description": "Cafe",
+        })
+        archive = self.get("/api/history")["archive"]
+        # L'archive est rendue du plus recent au plus ancien : c'est sa DERNIERE
+        # ligne qui porte le mois de depart.
+        self.assertEqual(archive[-1]["mois"], "2024-03")
+        # Sans la correction, l'ouverture de 2003 imposait plus de 250 mois.
+        self.assertLess(len(archive), 60)
+
+    def test_sans_mouvement_on_retombe_sur_les_ouvertures(self):
+        """Mieux vaut une archive plate qu'une archive vide : sans aucun
+        mouvement enregistre, la date d'ouverture reprend la main."""
+        self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A",
+            "date_acquisition": "2024-01-15", "valeur_actuelle": 5000,
+        })
+        archive = self.get("/api/history")["archive"]
+        self.assertEqual(archive[-1]["mois"], "2024-01")
+
+    def test_base_vide_ne_plante_pas(self):
+        self.assertEqual(self.get("/api/history")["archive"][0]["mois"],
+                         month_key())
+
+
 class TestAnalytics(ApiTestCase):
     def seed(self):
         self.post("/api/assets", {

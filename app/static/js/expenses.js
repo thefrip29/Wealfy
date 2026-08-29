@@ -42,7 +42,6 @@ App.tabs.expenses = {
         f.transferts_internes
           ? `hors ${App.fmt.eur(f.transferts_internes)} de virements internes`
           : `${f.nb_depenses} ligne(s)`),
-      kpi('Solde', App.fmt.signed(f.solde), null, f.solde >= 0 ? 'good' : 'bad'),
       kpi('Épargne', App.fmt.eur(f.epargne),
         f.taux_epargne === null ? null : `taux ${App.fmt.ratio(f.taux_epargne)}`),
     );

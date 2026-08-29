@@ -388,8 +388,18 @@ code { font-family: var(--font-mono); font-size: var(--fs-xs); }
   background: color-mix(in srgb, var(--text-on-brand) 14%, transparent);
   color: var(--text-on-brand);
 }
-#open-settings { transition: transform var(--t-slow) var(--ease); }
+/* Les trois boutons de droite repondent au survol, avec la meme duree et la
+   meme courbe : seul l'engrenage bougeait, et son voisin immobile donnait
+   l'impression d'etre desactive. Le geste differe parce que l'objet differe —
+   un engrenage tourne, une lune s'incline, un oeil s'ouvre. */
+#toggle-privacy, #toggle-theme, #open-settings {
+  transition: transform var(--t-slow) var(--ease),
+              color var(--t-fast) var(--ease),
+              background var(--t-fast) var(--ease);
+}
 #open-settings:hover { transform: rotate(45deg); }
+#toggle-theme:hover { transform: rotate(-18deg); }
+#toggle-privacy:hover { transform: scale(1.15); }
 
 /* ---------- navigation, dans la barre ---------- */
 .tabs { position: relative; display: flex; align-items: center; gap: 2px; height: 100%; }
@@ -1091,7 +1101,7 @@ input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
 .group-body > .group-inner { overflow: hidden; }
 
 .asset-row {
-  display: grid; grid-template-columns: 1fr 150px 140px 120px 88px;
+  display: grid; grid-template-columns: 1fr 150px 140px 88px;
   gap: var(--space-3); align-items: center;
   padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5);
   border-top: 1px solid var(--line-soft);

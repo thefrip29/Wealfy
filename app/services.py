@@ -456,14 +456,31 @@ def mark_as_transfer(transaction_ids, categorie=None):
 
 
 def data_range():
-    """Bornes temporelles des données existantes."""
-    rows = [
+    """Bornes de l'archive mensuelle : le premier mois ou il s'est passe
+    quelque chose, jusqu'a aujourd'hui.
+
+    La borne basse suivait auparavant la plus ancienne date de TOUTES les
+    tables, date d'ouverture des comptes comprise. Un Livret A ouvert en 2003
+    faisait donc calculer 275 mois, dont 265 sans la moindre transaction ni le
+    moindre mouvement : 700 ms de calcul, et un tableau de 275 lignes que
+    personne ne lit. Les valeurs de ces mois-la n'etaient d'ailleurs pas de
+    l'histoire mais une reconstitution, faute d'enregistrement.
+
+    Une archive raconte ce qui s'est passe. On part donc du premier mouvement
+    d'argent reellement enregistre. Sans aucun, on retombe sur les dates
+    d'ouverture : mieux vaut une archive plate qu'une archive vide.
+    """
+    mouvements = [
         query("SELECT MIN(date) d FROM transactions", one=True),
         query("SELECT MIN(date) d FROM asset_movements", one=True),
-        query("SELECT MIN(date_acquisition) d FROM assets", one=True),
-        query("SELECT MIN(date_debut) d FROM liabilities", one=True),
     ]
-    dates = [finance.parse_date(r["d"]) for r in rows if r and r["d"]]
+    dates = [finance.parse_date(r["d"]) for r in mouvements if r and r["d"]]
+    if not dates:
+        ouvertures = [
+            query("SELECT MIN(date_acquisition) d FROM assets", one=True),
+            query("SELECT MIN(date_debut) d FROM liabilities", one=True),
+        ]
+        dates = [finance.parse_date(r["d"]) for r in ouvertures if r and r["d"]]
     start = min(dates) if dates else date.today()
     return start, date.today()
 

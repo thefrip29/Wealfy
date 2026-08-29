@@ -865,13 +865,16 @@ App.settings = {
       App.toast(cb.checked ? 'Animations allégées' : 'Animations complètes', 'success');
     });
 
+    // Une case a cocher seule dans une `form-grid` flottait au milieu d'une
+    // cellule dimensionnee pour un champ de saisie. `checkline` est le motif
+    // deja utilise ailleurs pour une case suivie de son libelle.
     return App.h('div', {},
-      App.h('div', { class: 'form-grid' },
-        App.field('Animations économes', cb, {
-          hint: reduit
-            ? 'Imposé par votre système (« réduire les animations »)'
-            : 'Supprime les flous animés et fige le fond',
-        })),
+      App.h('label', { class: 'checkline' }, cb, 'Animations économes'),
+      App.h('p', { class: 'hint', style: 'margin-top:6px' },
+        reduit
+          ? 'Imposé par votre système : « réduire les animations » est activé.'
+          : 'Supprime les flous animés et fige le fond. Les trajectoires et les '
+            + 'durées ne changent pas.'),
       App.note('Ce que le mode économe change',
         App.h('p', {},
           'Les trajectoires et les durées ne bougent pas. Seuls disparaissent le '
