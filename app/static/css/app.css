@@ -791,8 +791,12 @@ textarea { font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 
 }
 .date-cal:hover { color: var(--accent); background: var(--accent-soft); }
 
+/* Entre la modale (100) et les toasts (200) : le calendrier est attache au
+   `<body>`, donc frere de `.modal-backdrop`. A 90 il passait DESSOUS, et le
+   choix d'une date etait invisible depuis la fiche d'un actif. Les toasts,
+   eux, doivent rester au-dessus de tout. */
 .calendrier {
-  position: fixed; z-index: 90; width: 252px; padding: var(--space-2);
+  position: fixed; z-index: 150; width: 252px; padding: var(--space-2);
   background: var(--card); border: 1px solid var(--line);
   border-radius: var(--radius-s); box-shadow: var(--shadow-2);
   animation: cal-entree var(--t-fast) var(--ease);
