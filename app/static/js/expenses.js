@@ -22,7 +22,7 @@ App.tabs.expenses = {
     const host = App.el('#ex-last-import');
     if (!imports.length) {
       host.textContent = 'Aucun relevé importé pour le moment. '
-        + 'Collez votre export CSV Revolut, ou votre relevé LCL converti en texte.';
+        + 'Déposez un export CSV, ou le PDF téléchargé depuis votre banque.';
       return;
     }
     const last = imports[0];
@@ -48,29 +48,130 @@ App.tabs.expenses = {
     );
   },
 
+  /* Le filtre gagne « À classer » en tête : c'est le geste principal après un
+     import, et il n'y avait aucun moyen d'isoler ces lignes. */
+  NON_CATEGORISE: 'Non categorise',
+
   fillCategoryFilter() {
     const sel = App.el('#ex-filter-cat');
     const current = sel.value;
     App.clear(sel);
     sel.append(App.h('option', { value: '' }, 'Toutes catégories'));
-    const used = [...new Set(App.tabs.expenses.cache.transactions.map((t) => t.category))].sort();
+    sel.append(App.h('option', { value: App.tabs.expenses.NON_CATEGORISE }, 'À classer'));
+    const used = [...new Set(App.tabs.expenses.cache.transactions.map((t) => t.category))]
+      .filter((c) => c !== App.tabs.expenses.NON_CATEGORISE).sort();
     for (const c of used) sel.append(App.h('option', { value: c }, c));
     sel.value = current;
+  },
+
+  /* Lignes cochées, pour les actions groupées. Conservées entre deux rendus :
+     filtrer, cocher, changer de filtre, cocher encore, agir une seule fois. */
+  selection: new Set(),
+
+  lignesFiltrees() {
+    const q = (App.el('#ex-search').value || '').trim().toLowerCase();
+    const cat = App.el('#ex-filter-cat').value;
+    return App.tabs.expenses.cache.transactions.filter((t) => (
+      (!q || t.description.toLowerCase().includes(q))
+      && (!cat || t.category === cat)
+    ));
+  },
+
+  /* Cellule de catégorie.
+
+     C'était un `<select>` par ligne, portant toutes les catégories, reconstruit
+     intégralement à chaque frappe dans la recherche : deux cents listes
+     déroulantes vivantes pour un seul choix à faire, et un tableau qui ne
+     ressemblait plus à un tableau. Le texte redevient du texte, et la liste
+     n'existe qu'au moment où on la déroule. */
+  celluleCategorie(t) {
+    const cell = App.h('td', {});
+    const afficher = () => {
+      App.clear(cell);
+      cell.append(App.h('button', {
+        class: 'cat-cell', title: 'Changer la catégorie',
+        onclick: () => editer(),
+      }, t.category));
+    };
+    const editer = () => {
+      App.clear(cell);
+      const sel = App.select('category', App.categoriesAll(), t.category,
+        { class: 'small-select' });
+      const enregistrer = async () => {
+        if (sel.value === t.category) { afficher(); return; }
+        try {
+          await App.api.put(`/api/transactions/${t.id}`, { category: sel.value });
+          t.category = sel.value;
+          App.toast('Catégorie mise à jour', 'success');
+          await App.refreshOthers();
+        } catch (e) { App.toast(e.message, 'error'); }
+        afficher();
+      };
+      sel.addEventListener('change', enregistrer);
+      sel.addEventListener('blur', () => { if (sel.isConnected) afficher(); });
+      cell.append(sel);
+      sel.focus();
+    };
+    afficher();
+    return cell;
+  },
+
+  /* Barre d'actions groupées, visible dès la première ligne cochée. */
+  renderBulk() {
+    const host = App.el('#ex-bulk');
+    App.clear(host);
+    const n = App.tabs.expenses.selection.size;
+    host.hidden = n === 0;
+    if (!n) return;
+
+    const sel = App.select('cat', App.categoriesAll(), null, { class: 'small-select' });
+    sel.selectedIndex = -1;
+    sel.addEventListener('change', async () => {
+      try {
+        const res = await App.api.post('/api/transactions/categorie',
+          { ids: [...App.tabs.expenses.selection], category: sel.value });
+        App.toast(`${res.modifiees} ligne(s) classée(s) en « ${res.category} »`, 'success');
+        App.tabs.expenses.selection.clear();
+        await App.refreshAll();
+      } catch (e) { App.toast(e.message, 'error'); }
+    });
+
+    host.append(
+      App.h('span', {}, `${n} ligne(s) sélectionnée(s)`),
+      App.h('span', { class: 'sub' }, 'Classer en'),
+      sel,
+      App.h('button', {
+        class: 'btn small danger',
+        onclick: () => App.confirm(`Supprimer ${n} transaction(s) ?`, async () => {
+          try {
+            const res = await App.api.post('/api/transactions/suppression',
+              { ids: [...App.tabs.expenses.selection] });
+            App.toast(`${res.supprimees} transaction(s) supprimée(s)`, 'success');
+            App.tabs.expenses.selection.clear();
+            await App.refreshAll();
+          } catch (e) { App.toast(e.message, 'error'); }
+        }),
+      }, 'Supprimer'),
+      App.h('button', {
+        class: 'btn small',
+        onclick: () => {
+          App.tabs.expenses.selection.clear();
+          App.tabs.expenses.renderTable();
+        },
+      }, 'Tout décocher'));
   },
 
   renderTable() {
     const tbody = App.el('#ex-table tbody');
     App.clear(tbody);
-    const q = (App.el('#ex-search').value || '').toLowerCase();
-    const cat = App.el('#ex-filter-cat').value;
-    const rows = App.tabs.expenses.cache.transactions.filter((t) => (
-      (!q || t.description.toLowerCase().includes(q))
-      && (!cat || t.category === cat)
-    ));
+    const rows = App.tabs.expenses.lignesFiltrees();
+    const toutCocher = App.el('#ex-select-all');
 
     if (!rows.length) {
+      toutCocher.checked = false;
+      App.tabs.expenses.renderBulk();
       const vide = App.tabs.expenses.cache.transactions.length === 0;
-      tbody.append(App.h('tr', {}, App.h('td', { colspan: 6 },
+      tbody.append(App.h('tr', {}, App.h('td', { colspan: 7 },
         App.h('div', { class: 'empty-cta' },
           App.h('p', {}, vide
             ? `Aucune transaction en ${App.fmt.month(App.state.month)}.`
@@ -95,30 +196,42 @@ App.tabs.expenses = {
         : (t.liability_id ? ((liabs.find((l) => l.id === t.liability_id) || {}).label
           || 'Prêt') : null);
 
-      const catSelect = App.select('category', App.categoriesAll(), t.category, {
-        class: 'small-select',
-      });
-      catSelect.addEventListener('change', async () => {
-        try {
-          await App.api.put(`/api/transactions/${t.id}`, { category: catSelect.value });
-          t.category = catSelect.value;
-          App.toast('Catégorie mise à jour', 'success');
-          App.refreshOthers('expenses');
-        } catch (e) { App.toast(e.message, 'error'); }
+      const coche = App.h('input', { type: 'checkbox', 'aria-label': 'Sélectionner' });
+      coche.checked = App.tabs.expenses.selection.has(t.id);
+      coche.addEventListener('change', () => {
+        if (coche.checked) App.tabs.expenses.selection.add(t.id);
+        else App.tabs.expenses.selection.delete(t.id);
+        toutCocher.checked = rows.every((r) => App.tabs.expenses.selection.has(r.id));
+        App.tabs.expenses.renderBulk();
       });
 
       tbody.append(App.h('tr', {},
+        App.h('td', { class: 'center' }, coche),
         App.h('td', { class: 'nowrap' }, App.fmt.date(t.date)),
         App.h('td', {}, App.h('div', { class: 'ell', title: t.description }, t.description)),
-        App.h('td', {}, catSelect),
+        App.tabs.expenses.celluleCategorie(t),
         App.h('td', { class: `right num ${t.amount < 0 ? 'neg' : 'pos'}` }, App.fmt.eur(t.amount)),
-        App.h('td', {}, link ? App.h('span', { class: 'pill accent' }, link) : App.h('span', { class: 'muted' }, '—')),
+        App.h('td', {}, link
+          ? App.h('span', { class: 'pill accent' }, link)
+          : App.h('span', { class: 'muted' }, '—')),
         App.h('td', { class: 'right' },
           App.h('button', {
             class: 'icon-btn', title: 'Modifier',
             onclick: () => App.tabs.expenses.openForm(t),
-          }, '✎'))));
+          }, '\u270e'))));
     }
+    toutCocher.checked = rows.every((r) => App.tabs.expenses.selection.has(r.id));
+    App.tabs.expenses.renderBulk();
+  },
+
+  /* Coche ou décoche ce que le filtre courant laisse voir, et rien d'autre :
+     cocher des lignes invisibles serait une action à l'aveugle. */
+  toutSelectionner(actif) {
+    for (const t of App.tabs.expenses.lignesFiltrees()) {
+      if (actif) App.tabs.expenses.selection.add(t.id);
+      else App.tabs.expenses.selection.delete(t.id);
+    }
+    App.tabs.expenses.renderTable();
   },
 
   /* ---------- journal des imports ----------
@@ -194,7 +307,9 @@ App.tabs.expenses = {
     const save = async () => {
       const values = App.formValues(form);
       values.amount = parseFloat(values.amount);
-      if (Number.isNaN(values.amount)) return App.toast('Montant invalide', 'error');
+      if (Number.isNaN(values.amount)) {
+        return App.invalide(form, 'amount', 'Indiquez un montant. Négatif pour une dépense.');
+      }
       try {
         if (isEdit) await App.api.put(`/api/transactions/${tx.id}`, values);
         else await App.api.post('/api/transactions', values);
@@ -347,6 +462,7 @@ App.tabs.expenses = {
     App.modal.open({
       title: 'Importer un relevé',
       wide: true,
+      garder: true,
       body: App.h('div', {},
         depot,
         App.h('div', { class: 'field full', style: 'margin-top:14px' },
@@ -445,6 +561,7 @@ App.tabs.expenses = {
       title: `Prévisualisation — ${sourceName}`,
       body,
       wide: true,
+      garder: true,
       footer: [
         App.h('button', { class: 'btn', onclick: () => App.tabs.expenses.openImport() }, 'Retour'),
         App.h('button', { class: 'btn primary', onclick: confirm }, 'Confirmer l’import'),

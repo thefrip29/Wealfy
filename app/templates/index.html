@@ -205,10 +205,18 @@
           <button class="btn" id="ex-add">+ Transaction</button>
         </div>
       </div>
+      <!-- Barre d'actions groupees : elle n'apparait qu'a partir de la premiere
+           ligne cochee. Recategoriser trente lignes se faisait sinon une par
+           une, chacune declenchant sa requete et son rechargement. -->
+      <div class="bulk-bar" id="ex-bulk" hidden></div>
+
       <div class="table-wrap">
         <table class="table" id="ex-table">
           <thead>
             <tr>
+              <th class="center" style="width:34px">
+                <input type="checkbox" id="ex-select-all"
+                       aria-label="Tout selectionner"></th>
               <th style="width:110px">Date</th>
               <th>Libellé</th>
               <th style="width:190px">Catégorie</th>
@@ -314,8 +322,13 @@
   </section>
 </main>
 
+<!-- `role`, `aria-modal` et `aria-labelledby` : sans eux, un lecteur d'ecran
+     annonce un groupe anonyme et continue de lire la page derriere, qui est
+     pourtant inatteignable a la souris. Le piege a tabulation vit dans
+     `App.modal.piegerFocus`. -->
 <div class="modal-backdrop" id="modal-backdrop" hidden>
-  <div class="modal" id="modal">
+  <div class="modal" id="modal" role="dialog" aria-modal="true"
+       aria-labelledby="modal-title">
     <div class="modal-head">
       <h2 id="modal-title"></h2>
       <button class="icon-btn" id="modal-close">&times;</button>

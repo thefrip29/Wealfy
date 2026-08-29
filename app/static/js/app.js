@@ -338,13 +338,17 @@ App.goToMonth = async function (ym) {
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // La croix est explicite : elle ferme du premier coup. Le clic hors cadre et
+  // Échap sont ambigus — c'est eux qui emportaient une saisie longue — et
+  // passent donc par `demanderFermeture`.
   App.el('#modal-close').addEventListener('click', () => App.modal.close());
   App.el('#modal-backdrop').addEventListener('click', (e) => {
-    if (e.target.id === 'modal-backdrop') App.modal.close();
+    if (e.target.id === 'modal-backdrop') App.modal.demanderFermeture();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !App.el('#modal-backdrop').hidden) App.modal.close();
+    if (e.key === 'Escape' && !App.el('#modal-backdrop').hidden) App.modal.demanderFermeture();
   });
+  document.addEventListener('keydown', App.modal.piegerFocus);
 
   // Un fichier lâché à côté de la zone de dépôt ferait quitter la page pour
   // l'afficher, et la saisie en cours partirait avec elle. Tout dépôt hors
@@ -401,8 +405,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   App.el('#ex-add').addEventListener('click', () => App.tabs.expenses.openForm(null));
   App.el('#ex-import').addEventListener('click', () => App.tabs.expenses.openImport());
-  App.el('#ex-search').addEventListener('input', () => App.tabs.expenses.renderTable());
+  // Recherche debouncee : `renderTable` reconstruit toutes les lignes, et le
+  // faire a chaque frappe rendait la saisie pateuse sur un mois charge.
+  let rechercheDelai;
+  App.el('#ex-search').addEventListener('input', () => {
+    clearTimeout(rechercheDelai);
+    rechercheDelai = setTimeout(() => App.tabs.expenses.renderTable(), 150);
+  });
   App.el('#ex-filter-cat').addEventListener('change', () => App.tabs.expenses.renderTable());
+  App.el('#ex-select-all').addEventListener('change',
+    (e) => App.tabs.expenses.toutSelectionner(e.target.checked));
 
   App.el('#we-refresh-quotes').addEventListener('click',
     (e) => App.tabs.wealth.refreshQuotes(e.target));

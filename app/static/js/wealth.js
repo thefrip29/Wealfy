@@ -505,8 +505,8 @@ App.tabs.wealth = {
     const save = async () => {
       const v = App.formValues(form);
       const label = (v.label || '').trim();
-      if (!label) return App.toast('Nom du support requis', 'error');
-      if (!v.montant) return App.toast('Montant requis', 'error');
+      if (!label) return App.invalide(form, 'label', 'Indiquez le nom du support.');
+      if (!v.montant) return App.invalide(form, 'montant', 'Indiquez un montant.');
       try {
         await App.api.post(`/api/assets/${asset.id}/positions`, {
           ...v,
@@ -589,8 +589,8 @@ App.tabs.wealth = {
     const save = async () => {
       const v = App.formValues(form);
       const ticker = (v.ticker || item.ticker || '').trim();
-      if (!ticker) return App.toast('Instrument requis', 'error');
-      if (!v.quantite) return App.toast('Quantité requise', 'error');
+      if (!ticker) return App.invalide(form, 'ticker', 'Indiquez un instrument.');
+      if (!v.quantite) return App.invalide(form, 'quantite', 'Indiquez une quantité.');
       try {
         await App.api.post(`/api/assets/${asset.id}/positions`, {
           ...v,
@@ -907,7 +907,7 @@ App.tabs.wealth = {
         valeur_actuelle: v.valeur_actuelle === '' ? null : v.valeur_actuelle,
         metadata,
       };
-      if (!payload.label) return App.toast('Le libellé est obligatoire', 'error');
+      if (!payload.label) return App.invalide(form, 'label', 'Indiquez un libellé.');
       try {
         if (isEdit) await App.api.put(`/api/assets/${asset.id}`, payload);
         else await App.api.post('/api/assets', payload);
@@ -1110,7 +1110,7 @@ App.tabs.wealth = {
       if (!v.montant && v.quantite && v.prix_unitaire) {
         v.montant = String(parseFloat(v.quantite) * parseFloat(v.prix_unitaire));
       }
-      if (!v.montant) return App.toast('Montant requis', 'error');
+      if (!v.montant) return App.invalide(form, 'montant', 'Indiquez un montant.');
       try {
         await App.api.post(`/api/assets/${a.id}/movements`, v);
         App.toast('Mouvement ajouté', 'success');
@@ -1272,7 +1272,7 @@ App.tabs.wealth = {
 
     const save = async () => {
       const v = App.formValues(form);
-      if (!v.valeur) return App.toast('Valeur requise', 'error');
+      if (!v.valeur) return App.invalide(form, 'valeur', 'Indiquez une valeur.');
       try {
         await App.api.post(`/api/assets/${asset.id}/valorisation`, v);
         App.modal.close();
@@ -1316,6 +1316,7 @@ App.tabs.wealth = {
     App.modal.open({
       title: `Importer des mouvements — ${asset.label}`,
       wide: true,
+      garder: true,
       body: App.h('div', {},
         App.h('p', { class: 'hint' },
           'Objectif : récupérer quantité, prix unitaire et ticker de chaque achat pour '
@@ -1366,6 +1367,7 @@ App.tabs.wealth = {
     App.modal.open({
       title: `Prévisualisation — ${asset.label}`,
       wide: true,
+      garder: true,
       body: App.h('div', {},
         App.h('p', { class: 'hint' },
           `${res.total} ligne(s) lue(s), ${res.doublons} déjà présente(s) `

@@ -337,6 +337,45 @@ produit d'épargne ou de placement (la grille de déclaration, plusieurs à la f
 si besoin), un prêt, ou autre chose. En dessous : actifs groupés par famille,
 passifs avec capital restant dû.
 
+### Le tableau des transactions
+
+La catégorie était un `<select>` **par ligne**, portant toutes les catégories, et
+`renderTable` se rejouait à chaque frappe dans la recherche : deux cents listes
+déroulantes vivantes pour un seul choix à faire, et un tableau qui ne
+ressemblait plus à un tableau. La catégorie redevient du texte ; la liste
+n'existe qu'au moment où on la déroule. La recherche est débouncée à 150 ms.
+
+Une colonne de cases à cocher et une **barre d'actions groupées**, qui
+n'apparaît qu'à partir de la première ligne cochée : classer ou supprimer d'un
+coup, en une requête (`POST /api/transactions/categorie` et
+`/api/transactions/suppression`). Reclasser trente lignes après un import se
+faisait sinon une par une, chacune déclenchant sa requête et son rechargement.
+« Tout sélectionner » ne coche que ce que le filtre laisse voir : cocher des
+lignes invisibles serait une action à l'aveugle.
+
+Le filtre de catégorie gagne **« À classer »** en tête. C'est le geste principal
+après un import, et il n'y avait aucun moyen d'isoler ces lignes.
+
+### Formulaires et modale
+
+**La validation se fait sur le champ.** C'était un toast : affiché en bas à
+droite, à l'opposé du regard, effacé au bout de 3,6 s, et sans dire lequel des
+huit champs était en cause. `App.invalide(form, nom, message)` marque le champ,
+y ramène le curseur et laisse le navigateur afficher le message à côté de lui.
+Le toast reste pour les erreurs venant du serveur.
+
+**Une saisie longue ne part plus sur un clic à côté.** Un clic hors cadre
+emportait un relevé de trois cents lignes collé dans la modale d'import, sans un
+mot. Il n'y a qu'une modale dans la page — en ouvrir une de confirmation
+détruirait justement le formulaire qu'on cherche à sauver : le geste est donc
+**redemandé**, un second Échap ou un second clic dans les quatre secondes. Le
+bouton *Annuler* et la croix ferment du premier coup, eux sont explicites.
+
+**La modale s'annonce.** `role="dialog"`, `aria-modal="true"` et
+`aria-labelledby` : sans eux un lecteur d'écran lisait un groupe anonyme et
+continuait sur la page derrière, pourtant inatteignable à la souris. La
+tabulation y est enfermée, et le focus revient d'où il venait à la fermeture.
+
 **Historique** — l'archive mensuelle, et rien d'autre. Le journal des imports
 est passé dans *Dépenses*, là où les imports se font ; son code y est passé
 aussi, alors qu'il vivait dans le module de l'Historique sans y être rendu. Un

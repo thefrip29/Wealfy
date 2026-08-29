@@ -161,8 +161,18 @@ App.toast = function (message, kind = 'info', ms = 3600) {
 };
 
 /* ---------- modale ---------- */
+const FOCUSABLES = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
 App.modal = {
-  open({ title, body, footer, wide }) {
+  /* `garder` protège une saisie longue. Un clic à côté de la modale d'import
+     emportait un relevé de trois cents lignes, sans un mot.
+
+     Pas de modale de confirmation par-dessus : il n'y en a qu'une dans la page,
+     et l'ouvrir détruirait justement le formulaire qu'on cherche à sauver. Le
+     geste est donc redemandé — un second Échap, ou un second clic à côté, dans
+     les quelques secondes qui suivent. Le bouton « Annuler » ferme toujours du
+     premier coup : lui est explicite. */
+  open({ title, body, footer, wide, garder }) {
     App.el('#modal-title').textContent = title || '';
     const bodyHost = App.el('#modal-body');
     const footHost = App.el('#modal-foot');
@@ -172,14 +182,65 @@ App.modal = {
     App.el('#modal').classList.toggle('wide', !!wide);
     App.el('#modal-backdrop').hidden = false;
     document.body.style.overflow = 'hidden';
+    App.modal.garder = !!garder;
+    App.modal.abandonArme = false;
+    // Où revenir en fermant : sans cela, le focus repart au début du document
+    // et la navigation au clavier recommence de zéro à chaque modale.
+    App.modal.retour = document.activeElement;
     const first = bodyHost.querySelector('input, select, textarea');
     if (first) setTimeout(() => first.focus(), 30);
   },
+
+  /* Vrai si la modale porte une saisie qu'une fermeture perdrait. */
+  saisieEnCours() {
+    if (!App.modal.garder) return false;
+    return App.els('input, textarea', App.el('#modal-body'))
+      .some((c) => c.type !== 'checkbox' && c.type !== 'radio' && c.value.trim());
+  },
+
+  /* Fermeture demandée par un geste ambigu (Échap, clic hors cadre). Renvoie
+     vrai si la modale s'est effectivement fermée. */
+  demanderFermeture() {
+    if (!App.modal.saisieEnCours() || App.modal.abandonArme) {
+      App.modal.close();
+      return true;
+    }
+    App.modal.abandonArme = true;
+    App.toast('Recommencez le geste pour abandonner cette saisie.', 'info', 4000);
+    clearTimeout(App.modal.minuterie);
+    App.modal.minuterie = setTimeout(() => { App.modal.abandonArme = false; }, 4000);
+    return false;
+  },
+
   close() {
+    clearTimeout(App.modal.minuterie);
+    App.modal.garder = false;
+    App.modal.abandonArme = false;
     App.el('#modal-backdrop').hidden = true;
     document.body.style.overflow = '';
     App.clear(App.el('#modal-body'));
     App.clear(App.el('#modal-foot'));
+    const retour = App.modal.retour;
+    App.modal.retour = null;
+    if (retour && retour.isConnected && retour.focus) retour.focus();
+  },
+
+  /* Enferme la tabulation dans la modale. Sans cela, Tab en sort et parcourt
+     la page derrière, qui est pourtant inatteignable à la souris. */
+  piegerFocus(e) {
+    if (e.key !== 'Tab' || App.el('#modal-backdrop').hidden) return;
+    const cibles = App.els(FOCUSABLES, App.el('#modal'))
+      .filter((n) => !n.disabled && n.offsetParent !== null);
+    if (!cibles.length) return;
+    const premier = cibles[0];
+    const dernier = cibles[cibles.length - 1];
+    if (e.shiftKey && document.activeElement === premier) {
+      e.preventDefault();
+      dernier.focus();
+    } else if (!e.shiftKey && document.activeElement === dernier) {
+      e.preventDefault();
+      premier.focus();
+    }
   },
   setBody(node) {
     const host = App.el('#modal-body');
@@ -238,6 +299,37 @@ App.note = function (summary, ...children) {
 
 App.input = function (name, attrs = {}) {
   return App.h('input', Object.assign({ type: 'text', name }, attrs));
+};
+
+/* Signale un champ obligatoire manquant ou invalide, SUR LE CHAMP.
+
+   C'était un toast : il s'affichait en bas à droite, à l'opposé du regard,
+   disparaissait au bout de 3,6 s, et ne disait pas lequel des huit champs
+   était en cause. Ici le champ est marqué, ramené sous le curseur, et le
+   message sort de l'infobulle native du navigateur — à côté de lui.
+
+   Renvoie toujours `false`, pour s'écrire `return App.invalide(...)` là où on
+   écrivait `return App.toast(...)`. */
+App.invalide = function (form, name, message) {
+  const champ = form && form.querySelector(`[name="${name}"]`);
+  // Un champ de date est un conteneur : c'est sa partie visible qui reçoit la
+  // marque, le champ nommé étant caché (voir `App.dateField`).
+  const cible = champ && champ.type === 'hidden'
+    ? champ.parentElement.querySelector('.date-saisie') : champ;
+  if (!cible) {
+    App.toast(message, 'error');
+    return false;
+  }
+  cible.classList.add('invalide');
+  cible.setCustomValidity(message);
+  if (cible.reportValidity) cible.reportValidity(); else cible.focus();
+  const nettoyer = () => {
+    cible.classList.remove('invalide');
+    cible.setCustomValidity('');
+  };
+  cible.addEventListener('input', nettoyer, { once: true });
+  cible.addEventListener('change', nettoyer, { once: true });
+  return false;
 };
 
 App.select = function (name, options, value, attrs = {}) {

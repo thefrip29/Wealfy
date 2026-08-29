@@ -99,6 +99,37 @@ def update_transaction(tid):
     ))
 
 
+@bp.post("/api/transactions/categorie")
+def recategoriser():
+    """Change la categorie de plusieurs transactions d'un coup.
+
+    Apres un import, recategoriser trente lignes se faisait une par une :
+    trente requetes, et un rechargement complet de l'onglet a chaque fois.
+    """
+    data = body()
+    ids = [i for i in (data.get("ids") or []) if i]
+    categorie = (data.get("category") or "").strip()
+    if not ids:
+        return fail("Aucune transaction selectionnee.")
+    if not categorie:
+        return fail("Categorie manquante.")
+    marques = ",".join("?" for _ in ids)
+    execute(f"UPDATE transactions SET category = ? WHERE id IN ({marques})",
+            [categorie, *ids])
+    return jsonify({"ok": True, "modifiees": len(ids), "category": categorie})
+
+
+@bp.post("/api/transactions/suppression")
+def supprimer_plusieurs():
+    """Supprime plusieurs transactions d'un coup."""
+    ids = [i for i in (body().get("ids") or []) if i]
+    if not ids:
+        return fail("Aucune transaction selectionnee.")
+    marques = ",".join("?" for _ in ids)
+    execute(f"DELETE FROM transactions WHERE id IN ({marques})", ids)
+    return jsonify({"ok": True, "supprimees": len(ids)})
+
+
 @bp.delete("/api/transactions/<tid>")
 def delete_transaction(tid):
     execute("DELETE FROM transactions WHERE id = ?", (tid,))

@@ -1278,6 +1278,32 @@ input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
 .depot-etat:not(:empty) { margin-top: var(--space-3); }
 
 /* ==========================================================================
+   Tableau des transactions : selection et categorie
+   ========================================================================== */
+
+/* La categorie redevient du texte. C'etait un `<select>` par ligne, portant
+   toutes les categories et reconstruit a chaque frappe dans la recherche : le
+   tableau ne ressemblait plus a un tableau. La liste n'existe plus qu'au
+   moment ou on la deroule. */
+.cat-cell {
+  background: none; border: 1px solid transparent; color: var(--text);
+  font: inherit; text-align: left; cursor: pointer;
+  padding: 3px 6px; margin: -3px -6px; border-radius: var(--radius-sm);
+  width: calc(100% + 12px);
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.cat-cell:hover { background: var(--card-2); border-color: var(--line); }
+
+.bulk-bar {
+  display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+  margin-bottom: var(--space-3); padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--accent); border-radius: var(--radius-s);
+  background: var(--action-subtle); font-size: var(--fs-sm);
+}
+.bulk-bar[hidden] { display: none; }
+.bulk-bar select { width: auto; }
+
+/* ==========================================================================
    États vides
    ========================================================================== */
 

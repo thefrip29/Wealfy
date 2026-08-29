@@ -478,6 +478,51 @@ class TestAccueilBaseVide(ApiTestCase):
         self.assertFalse(self.get("/api/overview")["aucune_donnee"])
 
 
+class TestActionsGroupees(ApiTestCase):
+    """Apres un import, reclasser trente lignes se faisait une par une :
+    trente requetes, et un rechargement complet de l'onglet a chaque fois."""
+
+    def trois_lignes(self):
+        ids = []
+        for jour, libelle in ((1, "Cafe"), (2, "Boulangerie"), (3, "Cinema")):
+            res = self.post("/api/transactions", {
+                "date": f"2024-03-0{jour}", "amount": -10, "description": libelle,
+            })
+            ids.append(res["id"])
+        return ids
+
+    def test_recategorise_plusieurs_lignes(self):
+        ids = self.trois_lignes()
+        res = self.post("/api/transactions/categorie",
+                        {"ids": ids[:2], "category": "Loisirs"})
+        self.assertEqual(res["modifiees"], 2)
+        cats = {t["id"]: t["category"]
+                for t in self.get("/api/transactions?month=2024-03")}
+        self.assertEqual(cats[ids[0]], "Loisirs")
+        self.assertEqual(cats[ids[1]], "Loisirs")
+        self.assertNotEqual(cats[ids[2]], "Loisirs")
+
+    def test_supprime_plusieurs_lignes(self):
+        ids = self.trois_lignes()
+        res = self.post("/api/transactions/suppression", {"ids": ids[:2]})
+        self.assertEqual(res["supprimees"], 2)
+        restantes = self.get("/api/transactions?month=2024-03")
+        self.assertEqual([t["id"] for t in restantes], [ids[2]])
+
+    def test_selection_vide_refusee(self):
+        """Sans garde, un UPDATE sans clause `IN` toucherait toute la table."""
+        for url in ("/api/transactions/categorie", "/api/transactions/suppression"):
+            res = self.client.post(url, json={"ids": [], "category": "Loisirs"})
+            self.assertEqual(res.status_code, 400, url)
+
+    def test_categorie_manquante_refusee(self):
+        ids = self.trois_lignes()
+        res = self.client.post("/api/transactions/categorie", json={"ids": ids})
+        self.assertEqual(res.status_code, 400)
+        # Rien n'a bouge.
+        self.assertEqual(len(self.get("/api/transactions?month=2024-03")), 3)
+
+
 class TestAnalytics(ApiTestCase):
     def seed(self):
         self.post("/api/assets", {
