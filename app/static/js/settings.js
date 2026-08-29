@@ -707,18 +707,6 @@ App.settings = {
     };
     renderStatus(status);
 
-    const refreshNow = async (btn) => {
-      btn.classList.add('busy');
-      try {
-        const res = await App.api.post('/api/market/refresh');
-        App.toast(`${res.ok} cours récupéré(s), ${res.ko} en échec`,
-          res.ko ? 'error' : 'success');
-        renderStatus(await App.api.get('/api/market/status'));
-        await App.refreshAll();
-      } catch (e) { App.toast(e.message, 'error'); }
-      btn.classList.remove('busy');
-    };
-
     return App.h('div', {},
       App.h('div', { class: 'callout' },
         App.h('strong', {}, 'Ceci fait sortir des données de votre machine.'),
@@ -739,11 +727,12 @@ App.settings = {
         }),
         App.field('Rafraîchir au lancement', autoIn),
         App.field('Durée de vie du cache (heures)', ttlIn)),
+      // Le rafraîchissement se déclenchait de trois endroits : ici, depuis la
+      // barre de l'onglet Patrimoine, et automatiquement au lancement. Seul
+      // celui de la barre reste : c'est là que les cours s'affichent, avec la
+      // pastille qui dit s'ils sont à jour.
       App.h('div', { class: 'actions', style: 'margin-top:12px' },
         App.h('button', { class: 'btn primary', onclick: save }, 'Enregistrer'),
-        App.h('button', {
-          class: 'btn', onclick: (e) => refreshNow(e.target),
-        }, 'Rafraîchir les cours maintenant'),
         cleEnPlace ? App.h('button', { class: 'btn', onclick: oublierCle },
           'Oublier la clé') : null),
 

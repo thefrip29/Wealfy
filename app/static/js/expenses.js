@@ -15,7 +15,7 @@ App.tabs.expenses = {
     App.tabs.expenses.renderKpis(flows);
     App.tabs.expenses.fillCategoryFilter();
     App.tabs.expenses.renderTable();
-    App.tabs.history.renderImports(imports);
+    App.tabs.expenses.renderImports(imports);
   },
 
   renderLastImport(imports) {
@@ -116,6 +116,56 @@ App.tabs.expenses = {
             onclick: () => App.tabs.expenses.openForm(t),
           }, '✎'))));
     }
+  },
+
+  /* ---------- journal des imports ----------
+     Il s'affichait dans cet onglet mais son code vivait dans
+     `App.tabs.history`, qui ne le rendait pas : c'est `expenses.load()`
+     qui appelait la fonction de l'autre module. Le code rejoint l'ecran. */
+  renderImports(imports) {
+    const tbody = App.el('#hi-imports tbody');
+    App.clear(tbody);
+    if (!imports.length) {
+      tbody.append(App.h('tr', {}, App.h('td', { colspan: 5, class: 'empty' },
+        'Aucun import enregistré.')));
+      return;
+    }
+    for (const imp of imports) {
+      tbody.append(App.h('tr', {},
+        App.h('td', { class: 'nowrap' }, App.fmt.dateTime(imp.date_import)),
+        App.h('td', {}, App.h('span', { class: 'pill accent' }, imp.source)),
+        App.h('td', { class: 'nowrap' },
+          `${App.fmt.date(imp.periode_debut)} → ${App.fmt.date(imp.periode_fin)}`),
+        App.h('td', { class: 'right num' }, imp.nombre_lignes),
+        App.h('td', { class: 'right' },
+          App.h('button', {
+            class: 'btn small',
+            onclick: () => App.tabs.expenses.showImport(imp),
+          }, 'Voir'),
+          ' ',
+          App.h('button', {
+            class: 'btn small danger',
+            onclick: () => App.confirm(
+              `Annuler cet import ? Les ${imp.nombre_lignes} transaction(s) associée(s) seront supprimées.`,
+              async () => {
+                await App.api.del(`/api/imports/${imp.id}`);
+                App.toast('Import annulé', 'success');
+                await App.refreshAll();
+              }),
+          }, 'Annuler'))));
+    }
+  },
+
+  async showImport(imp) {
+    const txs = await App.api.get(`/api/transactions?import_id=${imp.id}`);
+    App.modal.open({
+      title: `Import ${imp.source} — ${App.fmt.dateTime(imp.date_import)}`,
+      wide: true,
+      body: txs.length
+        ? App.tabs.wealth.txTable(txs)
+        : App.h('p', { class: 'muted' }, 'Aucune transaction rattachée (elles ont peut-être été supprimées).'),
+      footer: [App.h('button', { class: 'btn primary', onclick: () => App.modal.close() }, 'Fermer')],
+    });
   },
 
   /* ---------- saisie manuelle ---------- */

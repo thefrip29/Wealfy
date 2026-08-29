@@ -351,26 +351,35 @@ App.tabs.wealth = {
             App.h('th', { class: 'right' }, 'Gain'),
             App.h('th', {}))),
           tbody)),
-      App.h('div', { class: 'actions', style: 'margin-top:14px' },
+      // Un seul bouton plein. Il y en avait quatre côte à côte pour un même
+      // but — ajouter une ligne — et rien ne disait lequel prendre. Les trois
+      // autres sont des cas particuliers : ils se replient, comme tout le
+      // secondaire ailleurs dans l'application.
+      // Liste vide : l'appel à l'action est déjà dans le tableau, à la place
+      // des lignes absentes. Le répéter juste en dessous ferait deux boutons
+      // identiques à trois centimètres l'un de l'autre.
+      positions.lignes.length ? App.h('div', { class: 'actions', style: 'margin-top:14px' },
         App.h('button', {
           class: 'btn primary',
           onclick: () => App.tabs.wealth.openInstrumentSearch(asset, host),
-        }, kind === 'crypto' ? '+ Ajouter une crypto' : '+ Ajouter un support'),
-        // Aucune place ne cote un fonds euro : c'est l'actif général de
-        // l'assureur. Il ne peut donc pas venir d'une recherche, d'où ce
-        // second bouton — qui ne touche jamais au réseau.
-        kind === 'crypto' ? null : App.h('button', {
-          class: 'btn',
-          onclick: () => App.tabs.wealth.openNonCoteForm(asset, host),
-        }, '+ Support non coté'),
-        App.h('button', {
-          class: 'btn',
-          onclick: () => App.tabs.wealth.openMovementImport(asset),
-        }, 'Importer un relevé'),
-        App.h('button', {
-          class: 'btn',
-          onclick: () => App.tabs.wealth.openPositionForm(asset, host, null),
-        }, 'Saisir un symbole à la main')),
+        }, kind === 'crypto' ? '+ Ajouter une crypto' : '+ Ajouter un support')) : null,
+      App.note('Autres façons d’ajouter une ligne',
+        App.h('div', { class: 'actions', style: 'margin-top:8px' },
+          // Aucune place ne cote un fonds euro : c'est l'actif général de
+          // l'assureur. Il ne peut donc pas venir d'une recherche — et ne
+          // touche jamais au réseau.
+          kind === 'crypto' ? null : App.h('button', {
+            class: 'btn',
+            onclick: () => App.tabs.wealth.openNonCoteForm(asset, host),
+          }, 'Support non coté (fonds euro…)'),
+          App.h('button', {
+            class: 'btn',
+            onclick: () => App.tabs.wealth.openMovementImport(asset),
+          }, 'Importer un relevé de titres'),
+          App.h('button', {
+            class: 'btn',
+            onclick: () => App.tabs.wealth.openPositionForm(asset, host, null),
+          }, 'Saisir un symbole à la main'))),
       // Comparaison à l'indice : repliée, elle ne se charge qu'à la demande
       // (les séries historiques coûtent plus de quota que les cours du jour).
       kind === 'crypto' || !positions.lignes.length ? null
@@ -602,125 +611,43 @@ App.tabs.wealth = {
   },
 
   /* ==================================================================
-     Un seul point d'entrée pour tout ajouter.
+     Un seul point d'entrée, et trois portes derrière.
 
-     Il y avait trois boutons — « + Prêt », « + Actif détaillé »,
-     « + Ajouter mes produits » — dont deux faisaient la même chose à des
-     moments différents. On choisit d'abord QUOI ajouter, la saisie suit.
+     Il y a eu trois boutons côte à côte, puis un seul bouton ouvrant vingt
+     cartes de produits. Le catalogue était alors rendu DEUX FOIS, en deux
+     mises en page différentes : une carte par produit ici, une ligne par
+     produit dans la déclaration groupée. Trois formulaires créaient un actif.
+
+     Il n'en reste qu'un pour les produits courants : la déclaration, où le
+     catalogue porte directement ses champs. Choisir un produit puis saisir
+     son montant dans un second écran ne faisait qu'ajouter une étape à ce
+     que la grille demande déjà sur une ligne.
      ================================================================== */
   openAddChooser() {
-    const carte = (type, libelle, sousTitre, action) => App.h('button', {
+    const carte = (libelle, sousTitre, action) => App.h('button', {
       class: 'choice', onclick: action,
     },
     App.h('div', {},
       App.h('div', { class: 'choice-title' }, libelle),
-      sousTitre ? App.h('div', { class: 'choice-sub' }, sousTitre) : null),
+      App.h('div', { class: 'choice-sub' }, sousTitre)),
     App.h('span', { class: 'choice-go' }, '→'));
-
-    const body = App.h('div', {});
-    for (const [groupe, produits] of App.tabs.wealth.CATALOGUE) {
-      body.append(App.h('div', { class: 'section-title' }, groupe));
-      const grid = App.h('div', { class: 'choice-grid' });
-      for (const [type, libelle, avecTaux] of produits) {
-        grid.append(carte(type, libelle,
-          App.tabs.wealth.SOUS_TITRES[type] || null,
-          () => App.tabs.wealth.openSimpleAssetForm(type, libelle, avecTaux)));
-      }
-      body.append(grid);
-    }
-
-    body.append(
-      App.h('div', { class: 'section-title' }, 'Emprunts'),
-      App.h('div', { class: 'choice-grid' },
-        carte('pret', 'Prêt ou crédit',
-          'Mensualité et capital restant dû calculés',
-          () => App.tabs.wealth.openLiabilityForm(null))),
-      App.h('div', { class: 'section-title' }, 'Autre'),
-      App.h('div', { class: 'choice-grid' },
-        carte('bulk', 'Déclarer plusieurs produits d’un coup',
-          'Pour la première mise en route',
-          () => App.tabs.wealth.openQuickAdd()),
-        carte('custom', 'Actif d’un autre genre',
-          'Formulaire complet, tous les champs',
-          () => App.tabs.wealth.openAssetForm(null))));
 
     App.modal.open({
       title: 'Qu’est-ce que vous voulez ajouter ?',
-      wide: true,
-      body,
+      body: App.h('div', { class: 'choice-grid' },
+        carte('Un produit d’épargne ou de placement',
+          'Livret, PEA, assurance vie, crypto, bien immobilier… '
+          + 'Plusieurs à la fois si besoin',
+          () => App.tabs.wealth.openQuickAdd()),
+        carte('Un prêt ou un crédit',
+          'Mensualité et capital restant dû calculés',
+          () => App.tabs.wealth.openLiabilityForm(null)),
+        carte('Autre chose',
+          'Formulaire complet, pour ce qui n’entre dans aucune case',
+          () => App.tabs.wealth.openAssetForm(null))),
       footer: [App.h('button', {
         class: 'btn', onclick: () => App.modal.close(),
       }, 'Annuler')],
-    });
-  },
-
-  SOUS_TITRES: {
-    Livret: 'Intérêts calculés au taux que vous indiquez',
-    LDDS: 'Intérêts calculés au taux que vous indiquez',
-    LEP: 'Intérêts calculés au taux que vous indiquez',
-    LivretJeune: 'Intérêts calculés au taux que vous indiquez',
-    PEL: 'Intérêts calculés au taux que vous indiquez',
-    CEL: 'Intérêts calculés au taux que vous indiquez',
-    DepotTerme: 'Intérêts calculés au taux que vous indiquez',
-    PEA: 'Vous choisirez vos supports ensuite',
-    CTO: 'Vous choisirez vos supports ensuite',
-    AssuranceVie: 'Vous choisirez vos supports ensuite',
-    PER: 'Vous choisirez vos supports ensuite',
-    Crypto: 'Vous choisirez vos cryptos ensuite',
-    Immobilier: 'Réévaluation possible par indice',
-    SCPI: 'Réévaluation possible par indice',
-  },
-
-  /* Formulaire court : le type est déjà choisi, on ne demande que
-     l'indispensable. Le reste se règle ensuite dans la fiche. */
-  openSimpleAssetForm(type, libelle, avecTaux) {
-    const marche = App.tabs.wealth.MARKET.includes(type);
-    const form = App.h('form', { class: 'form-grid', onsubmit: (e) => e.preventDefault() },
-      App.field('Nom', App.input('label', { value: libelle, required: true })),
-      App.field('Montant aujourd’hui (€)', App.input('valeur_actuelle', {
-        type: 'number', step: '0.01', required: true,
-      })),
-      App.field('Depuis le', App.dateField('date_acquisition', {
-        value: App.todayISO(),
-      })),
-      avecTaux ? App.field('Taux annuel (%)', App.input('taux_annuel', {
-        type: 'number', step: '0.01',
-      }), { hint: 'Laissé vide, le montant reste figé' }) : null);
-
-    const save = async () => {
-      const v = App.formValues(form);
-      if (!v.valeur_actuelle) return App.toast('Indiquez un montant', 'error');
-      const metadata = {};
-      if (v.taux_annuel) metadata.taux_annuel = parseFloat(v.taux_annuel);
-      try {
-        const asset = await App.api.post('/api/assets', {
-          type,
-          label: v.label.trim() || libelle,
-          date_acquisition: v.date_acquisition,
-          valeur_acquisition: v.valeur_actuelle,   // pas d'historique connu
-          valeur_actuelle: v.valeur_actuelle,
-          metadata,
-        });
-        App.modal.close();
-        App.toast(`${v.label || libelle} ajouté`, 'success');
-        await App.refreshAll();
-        // Un compte-titres ou un portefeuille crypto n'a d'intérêt qu'une fois
-        // ses lignes renseignées : on y emmène directement.
-        if (marche) await App.tabs.wealth.openAssetDetail(asset.id);
-      } catch (e) { App.toast(e.message, 'error'); }
-    };
-
-    App.modal.open({
-      title: `Ajouter — ${libelle}`,
-      body: App.h('div', {}, form,
-        marche ? App.h('p', { class: 'hint', style: 'margin-top:14px' },
-          'Vous pourrez choisir vos supports juste après, par une recherche.') : null),
-      footer: [
-        App.h('button', {
-          class: 'btn', onclick: () => App.tabs.wealth.openAddChooser(),
-        }, 'Retour'),
-        App.h('button', { class: 'btn primary', onclick: save }, 'Ajouter'),
-      ],
     });
   },
 
@@ -809,6 +736,16 @@ App.tabs.wealth = {
         App.toast(`${res.crees} produit(s) ajouté(s) — ${App.fmt.eur(res.total)}`,
           'success');
         await App.refreshAll();
+        // Un compte-titres ou un portefeuille crypto vide n'a aucun intérêt :
+        // sa valeur vient de ses lignes. On y emmène directement — mais
+        // seulement s'il n'y en a qu'un, sinon le choix serait arbitraire.
+        const comptes = (res.actifs || [])
+          .filter((a) => App.tabs.wealth.MARKET.includes(a.type));
+        if (comptes.length === 1) {
+          await App.tabs.wealth.openAssetDetail(comptes[0].id);
+        } else if (comptes.length > 1) {
+          App.toast('Ouvrez chaque compte pour y déclarer vos supports.', 'info', 6000);
+        }
       } catch (e) { App.toast(e.message, 'error'); }
     });
 
@@ -906,9 +843,15 @@ App.tabs.wealth = {
       App.h('div', { class: 'form-grid' },
         App.field('Type', typeSelect),
         App.field('Libellé', App.input('label', { value: (asset && asset.label) || '', required: true })),
-        App.field('Valeur aujourd’hui (€)', App.input('valeur_actuelle', {
-          type: 'number', step: '0.01', value: (asset && asset.valeur_actuelle) ?? '',
-        }), { hint: 'Le montant que vous avez dessus maintenant' }),
+        // À la CRÉATION seulement. Trois chemins fixaient la valeur d'un actif :
+        // ce champ, le bouton « Valoriser », et un mouvement de type
+        // « valorisation ». Seuls les deux derniers datent le point et
+        // alimentent la courbe de patrimoine ; celui-ci l'écrasait en silence.
+        // Il ne reste donc que la déclaration initiale, datée elle aussi par
+        // « Depuis le », et la valorisation.
+        isEdit ? null : App.field('Valeur aujourd’hui (€)',
+          App.input('valeur_actuelle', { type: 'number', step: '0.01' }),
+          { hint: 'Le montant que vous avez dessus maintenant' }),
         App.field('Depuis le', App.dateField('date_acquisition', {
           value: (asset && asset.date_acquisition) || App.todayISO(),
         }), { hint: 'Ouverture, achat, ou simplement aujourd’hui' }),
@@ -919,7 +862,10 @@ App.tabs.wealth = {
         }), {
           hint: 'Laissez vide si vous ne connaissez pas l’historique : '
             + 'la plus-value démarrera à zéro plutôt qu’inventée',
-        })),
+        }),
+        isEdit ? App.h('p', { class: 'hint', style: 'grid-column:1/-1' },
+          'La valeur du jour ne se modifie pas ici : le bouton « Valoriser » '
+          + 'l’enregistre à une date, ce qui alimente la courbe de patrimoine.') : null),
       App.h('div', { class: 'section-title' }, 'Champs spécifiques au type'),
       metaHost);
     renderMeta();
@@ -1138,7 +1084,12 @@ App.tabs.wealth = {
     const isMarket = App.tabs.wealth.MARKET.includes(a.type);
     const form = App.h('form', { class: 'form-grid', onsubmit: (e) => e.preventDefault() },
       App.field('Date', App.dateField('date', { value: App.todayISO() })),
-      App.field('Type', App.select('type', [['versement', 'Versement / achat'], ['retrait', 'Retrait / vente'], ['valorisation', 'Valorisation']], 'versement')),
+      // « Valorisation » a quitté ce menu. Le bouton « Valoriser » fait la même
+      // chose sous un nom qui se comprend, avec l'explication qui va avec — et
+      // proposer les deux revenait à demander de choisir entre deux mots pour
+      // un seul geste. Les valorisations déjà enregistrées restent listées
+      // au-dessus : c'est leur historique.
+      App.field('Type', App.select('type', [['versement', 'Versement / achat'], ['retrait', 'Retrait / vente']], 'versement')),
       App.field('Montant (€)', App.input('montant', { type: 'number', step: '0.01' })),
       isMarket ? App.field('Ticker / ISIN', App.input('ticker')) : null,
       isMarket ? App.field('Quantité', App.input('quantite', { type: 'number', step: '0.000001' })) : null,
@@ -1170,11 +1121,11 @@ App.tabs.wealth = {
           tbody)),
       App.h('div', { class: 'section-title' }, 'Ajouter un mouvement'),
       form,
+      // L'import de relevé de titres vivait ici ET sous les positions, pour le
+      // même geste. Il ne reste que celui des positions, là où les lignes se
+      // gèrent — cet onglet-ci raconte l'historique.
       App.h('div', { class: 'actions', style: 'margin-top:12px' },
-        App.h('button', { class: 'btn primary', onclick: add }, 'Ajouter'),
-        isMarket ? App.h('button', {
-          class: 'btn', onclick: () => App.tabs.wealth.openMovementImport(a),
-        }, 'Importer un relevé de titres') : null));
+        App.h('button', { class: 'btn primary', onclick: add }, 'Ajouter')));
   },
 
   renderBenchmark(host, res) {

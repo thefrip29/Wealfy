@@ -313,13 +313,15 @@ le fichier y est lâché ou choisi, puis analysé sans second clic (voir
 catégorie modifiable directement dans la liste, ajout manuel, tendance 6 mois.
 Un mois vide propose directement l'import plutôt qu'un tableau nu.
 
-**Patrimoine** — **un seul bouton « + Ajouter »**. Il ouvre un choix : quel
-produit voulez-vous ajouter ? Livret A, PEA, assurance vie, crypto, bien
-immobilier, prêt… Le type choisi, la saisie se limite au nom, au montant et à la
-date. En dessous : actifs groupés par famille, passifs avec capital restant dû.
+**Patrimoine** — **un seul bouton « + Ajouter »**, et trois portes derrière : un
+produit d'épargne ou de placement (la grille de déclaration, plusieurs à la fois
+si besoin), un prêt, ou autre chose. En dessous : actifs groupés par famille,
+passifs avec capital restant dû.
 
-**Historique** — archive mensuelle et journal des imports. Un import peut être
-annulé : ses transactions sont supprimées avec lui.
+**Historique** — l'archive mensuelle, et rien d'autre. Le journal des imports
+est passé dans *Dépenses*, là où les imports se font ; son code y est passé
+aussi, alors qu'il vivait dans le module de l'Historique sans y être rendu. Un
+import peut être annulé : ses transactions sont supprimées avec lui.
 
 **Paramètres** (icône engrenage) — trois sections : *Classement des dépenses*
 (catégories, virements internes, règles), *Objectifs et frais* (répartition
@@ -407,14 +409,52 @@ Il y a eu jusqu'à trois boutons côte à côte — « + Prêt », « + Actif d�
 différents : l'un pour déclarer l'existant, l'autre pour ajouter au fil de
 l'eau. La distinction n'existait que dans le code.
 
-Il n'en reste **un seul**. On choisit d'abord *quoi* ajouter dans une liste
-lisible, la saisie suit. La déclaration groupée (plusieurs montants d'un coup,
-pour la première mise en route) et le formulaire complet restent accessibles,
-comme deux entrées parmi les autres — au lieu d'occuper la barre en permanence.
+Il n'en reste **un seul**, et **trois portes derrière** : un produit d'épargne ou
+de placement, un prêt, ou autre chose.
+
+Le bouton unique a d'abord ouvert vingt cartes de produits. Le catalogue était
+alors rendu **deux fois**, en deux mises en page différentes : une carte par
+produit dans ce choix, une ligne par produit dans la déclaration groupée. Et
+**trois formulaires créaient un actif** — le court, la grille, le complet.
+
+Il n'en reste qu'un pour les produits courants : la grille de déclaration, où
+chaque produit porte directement son montant et son taux. Choisir un produit
+puis saisir son montant dans un second écran n'ajoutait qu'une étape à ce que la
+grille demande déjà sur une ligne — et elle accepte plusieurs produits d'un coup.
 
 Après avoir créé un PEA ou un portefeuille crypto, l'application ouvre
 directement sa fiche : un compte-titres vide n'a d'intérêt qu'une fois ses
-lignes renseignées.
+lignes renseignées. Seulement s'il n'y en a qu'un, sinon le choix serait
+arbitraire.
+
+### Une valeur se pose à une date, ou pas du tout
+
+Trois chemins fixaient la valeur d'un actif : le champ « Valeur aujourd'hui » de
+la fiche, le bouton **Valoriser**, et un mouvement de type « valorisation ».
+Seuls les deux derniers **datent** le point et alimentent la courbe de
+patrimoine ; le premier l'écrasait en silence.
+
+Le champ ne subsiste donc qu'à la **création**, où il est daté par « Depuis le ».
+En modification, la fiche décrit l'actif et ne le valorise plus — elle renvoie
+au bouton. Et « Valorisation » a quitté le menu du formulaire de mouvement :
+proposer les deux revenait à faire choisir entre deux mots pour un seul geste.
+Les valorisations déjà enregistrées restent listées dans l'historique.
+
+### Un bouton plein, le reste replié
+
+La fiche d'un compte-titres alignait **quatre boutons côte à côte** pour un même
+but — ajouter une ligne : « + Ajouter un support », « + Support non coté »,
+« Importer un relevé », « Saisir un symbole à la main ». Plus un cinquième par
+l'onglet *Historique* de la même fiche. Rien ne disait lequel prendre.
+
+Il en reste un plein. Les trois autres sont des cas particuliers et se replient
+sous « Autres façons d'ajouter une ligne ». Quand la liste est vide, même le
+bouton plein disparaît : l'appel à l'action est déjà dans le tableau, à la place
+des lignes absentes.
+
+Le rafraîchissement des cours se déclenchait lui aussi de trois endroits. Seul
+celui de la barre *Patrimoine* reste, là où les cours s'affichent avec la
+pastille qui dit s'ils sont à jour ; l'automatique au lancement ne bouge pas.
 
 ### La fiche d'un actif : deux onglets, plus cinq
 
