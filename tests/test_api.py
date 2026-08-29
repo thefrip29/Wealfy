@@ -558,6 +558,83 @@ class TestEtendueArchive(ApiTestCase):
                          month_key())
 
 
+class TestGainAnnuel(ApiTestCase):
+    """Le gain de l'annee, versements exclus.
+
+    L'indicateur donnait la plus-value CUMULEE depuis l'acquisition de chaque
+    produit : un chiffre sans periode, qui ne bouge presque plus une fois le
+    patrimoine constitue, et qui peut afficher un joli total pendant que
+    l'annee en cours perd de l'argent.
+
+    Les actifs sont crees SANS `valeur_actuelle` : leur valeur est alors
+    reconstituee depuis les valorisations datees, ce qui est le mecanisme
+    qu'on veut eprouver ici.
+    """
+
+    def compte(self, valeur_debut=1200):
+        """Produit acquis 1 000 il y a deux ans, valorise au 31 decembre."""
+        an = date.today().year
+        actif = self.post("/api/assets", {
+            "type": "CompteCourant", "label": "Support",
+            "date_acquisition": f"{an - 2}-01-15", "valeur_acquisition": 1000,
+        })
+        self.post(f"/api/assets/{actif['id']}/valorisation",
+                  {"date": f"{an - 1}-12-31", "valeur": valeur_debut})
+        return actif["id"], an
+
+    def gain(self):
+        return self.get("/api/assets")["gain_annuel"]
+
+    def test_gain_mesure_l_ecart_depuis_le_31_decembre(self):
+        aid, an = self.compte()
+        self.post(f"/api/assets/{aid}/valorisation",
+                  {"date": f"{an}-06-30", "valeur": 1500})
+        g = self.gain()
+        self.assertEqual(g["montant"], 300.0)
+        self.assertEqual(g["annee"], an)
+        self.assertEqual(g["depuis"], f"{an}-01-01")
+
+    def test_un_versement_n_est_pas_un_gain(self):
+        """Le coeur de l'affaire : un euro verse augmente la valeur ET le
+        capital investi. Le compter comme un gain serait se mentir."""
+        aid, an = self.compte()
+        self.post(f"/api/assets/{aid}/movements",
+                  {"date": f"{an}-03-01", "type": "versement", "montant": 500})
+        # 1200 au 31 decembre + 500 verses = 1700 sans le moindre gain.
+        self.post(f"/api/assets/{aid}/valorisation",
+                  {"date": f"{an}-06-30", "valeur": 1700})
+        self.assertEqual(self.gain()["montant"], 0.0)
+
+    def test_gain_par_dessus_un_versement(self):
+        aid, an = self.compte()
+        self.post(f"/api/assets/{aid}/movements",
+                  {"date": f"{an}-03-01", "type": "versement", "montant": 500})
+        self.post(f"/api/assets/{aid}/valorisation",
+                  {"date": f"{an}-06-30", "valeur": 2000})
+        self.assertEqual(self.gain()["montant"], 300.0)
+
+    def test_annee_en_perte(self):
+        aid, an = self.compte()
+        self.post(f"/api/assets/{aid}/valorisation",
+                  {"date": f"{an}-06-30", "valeur": 900})
+        self.assertEqual(self.gain()["montant"], -300.0)
+
+    def test_produit_ouvert_dans_l_annee(self):
+        """Il n'existe pas dans la photo de reference : tout ce qu'il a
+        gagne l'a ete cette annee."""
+        an = date.today().year
+        actif = self.post("/api/assets", {
+            "type": "CompteCourant", "label": "Nouveau",
+            "date_acquisition": f"{an}-02-01", "valeur_acquisition": 1000,
+        })
+        self.post(f"/api/assets/{actif['id']}/valorisation",
+                  {"date": f"{an}-06-30", "valeur": 1150})
+        self.assertEqual(self.gain()["montant"], 150.0)
+
+    def test_base_vide(self):
+        self.assertEqual(self.gain()["montant"], 0.0)
+
+
 class TestAnalytics(ApiTestCase):
     def seed(self):
         self.post("/api/assets", {

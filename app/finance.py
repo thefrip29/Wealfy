@@ -394,12 +394,28 @@ def valeur_capitalisee(flux, taux_annuel, at_date=None):
     return round(solde, 2)
 
 
-def invested_amount(asset, movements) -> float:
-    """Capital net reellement investi (acquisition + versements - retraits)."""
+def invested_amount(asset, movements, at_date=None) -> float:
+    """Capital net reellement investi (acquisition + versements - retraits).
+
+    `at_date` borne les mouvements pris en compte, comme le fait
+    `asset_value_at` pour la valeur. Sans cette borne, les deux fonctions ne
+    parlaient pas de la meme date : la valeur d'octobre etait comparee a un
+    capital investi qui incluait deja les versements de decembre, et la
+    plus-value d'une date passee sortait fausse.
+
+    Par defaut, aucune borne : le comportement d'origine, pour les appelants
+    qui veulent le total sur toute la vie du produit.
+    """
+    at_date = parse_date(at_date)
     total = float(asset["valeur_acquisition"] or 0)
     for mv in movements:
-        if mv["type"] in ("versement", "retrait"):
-            total += float(mv["montant"] or 0)
+        if mv["type"] not in ("versement", "retrait"):
+            continue
+        if at_date is not None:
+            d = parse_date(mv["date"])
+            if d is None or d > at_date:
+                continue
+        total += float(mv["montant"] or 0)
     return round(total, 2)
 
 

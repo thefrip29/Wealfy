@@ -62,18 +62,18 @@ App.tabs.wealth = {
      lorsqu'elles ont quelque chose à dire.
 
      « Capital restant dû » à zéro juste au-dessus d'un tableau qui annonce
-     « Aucun prêt enregistré » n'apprenait rien. Et une plus-value n'existe pas
-     sur un patrimoine qui n'est fait que de livrets : ceux-ci rapportent des
-     intérêts, affichés ligne par ligne, pas une plus-value latente.
+     « Aucun prêt enregistré » n'apprenait rien. Et un gain de marché n'existe
+     pas sur un patrimoine qui n'est fait que de livrets : ceux-ci rapportent
+     des intérêts, affichés ligne par ligne.
 
-     Le sous-titre de la plus-value a disparu : il portait le poids de la crypto,
-     sujet sans rapport, et divisait par `patrimoine_net` alors que la condition
-     d'affichage testait `total_actif` — un net nul donnait l'infini. */
+     La dernière case a porté le poids de la crypto en sous-titre — sujet sans
+     rapport, et divisé par `patrimoine_net` alors que la condition d'affichage
+     testait `total_actif`, si bien qu'un net nul donnait l'infini. */
   renderKpis(snap) {
     const host = App.el('#we-kpis');
     App.clear(host);
     const kpi = App.tabs.overview.kpi;
-    const pv = snap.assets.reduce((s, a) => s + a.plus_value, 0);
+    const gain = snap.gain_annuel || { montant: 0, annee: new Date().getFullYear() };
     const cotables = snap.assets.some((a) => a.valeur_source !== 'taux');
     // `.filter(Boolean)` : `Element.append()` transforme un null en texte
     // « null », contrairement à `App.h` qui filtre ses enfants.
@@ -84,13 +84,14 @@ App.tabs.wealth = {
         ? kpi('Capital restant dû', App.fmt.eur(snap.total_passif),
           `${snap.liabilities.length} prêt(s)`)
         : null,
+      // C'était la plus-value CUMULÉE depuis l'acquisition de chaque produit :
+      // un chiffre sans période, qui ne bouge presque plus une fois le
+      // patrimoine constitué. C'est maintenant le gain de l'année en cours,
+      // versements exclus — voir `services.gain_annuel`.
       cotables
-        ? kpi('Plus-value latente', App.fmt.signed(pv),
-          // Une plus-value latente n'a pas de periode fixe : c'est l'ecart
-          // entre la valeur du jour et ce qui a ete investi, produit par
-          // produit, depuis la date d'entree de chacun.
-          'depuis l’acquisition de chaque produit',
-          pv >= 0 ? 'good' : 'bad')
+        ? kpi(`Gain ${gain.annee}`, App.fmt.signed(gain.montant),
+          `depuis le 1er janvier ${gain.annee}`,
+          gain.montant >= 0 ? 'good' : 'bad')
         : null,
     ].filter(Boolean));
   },

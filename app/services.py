@@ -133,7 +133,7 @@ def asset_detail(asset, movements, at_date=None, ctx=None):
     at_date = finance.parse_date(at_date) or date.today()
     is_today = at_date >= date.today()
     saisie = finance.asset_value_at(asset, movements, at_date, use_manual_current=is_today)
-    invested = finance.invested_amount(asset, movements)
+    invested = finance.invested_amount(asset, movements, at_date)
 
     # Valeur calculée, par ordre de préférence. Chaque source renvoie None si
     # elle ne peut pas produire un chiffre complet : on retombe alors sur la
@@ -200,6 +200,40 @@ def portfolio(at_date=None, include_archived=False, ctx=None, cache=None):
         "total_actif": total_actif,
         "total_passif": total_passif,
         "patrimoine_net": round(total_actif - total_passif, 2),
+    }
+
+
+def gain_annuel(at_date=None, snap=None, cache=None):
+    """Plus-value acquise depuis le 1er janvier, versements exclus.
+
+    C'est l'ecart entre la plus-value latente d'aujourd'hui et celle du
+    31 decembre precedent.
+
+    Passer par la PLUS-VALUE et non par la valeur est ce qui ecarte les
+    versements de l'annee sans avoir a les recenser : un euro verse augmente la
+    valeur ET le capital investi, donc laisse la plus-value inchangee. Un euro
+    gagne n'augmente que la valeur.
+
+    Un produit ouvert dans l'annee n'existe pas dans la photo de reference —
+    `portfolio` ecarte les actifs acquis apres la date demandee. Toute sa
+    plus-value compte donc pour l'annee, ce qui est exact.
+
+    Attention a ce que ce chiffre NE dit PAS : une vente n'y apparait pas. Elle
+    diminue la valeur et le capital investi du meme montant, donc laisse la
+    plus-value inchangee. L'application ne suit que le latent.
+    """
+    at_date = finance.parse_date(at_date) or date.today()
+    cache = shared_cache(cache)
+    if snap is None:
+        snap = portfolio(at_date, cache=cache)
+    reference = date(at_date.year - 1, 12, 31)
+    avant = portfolio(reference, cache=cache)
+    ecart = (sum(a["plus_value"] for a in snap["assets"])
+             - sum(a["plus_value"] for a in avant["assets"]))
+    return {
+        "montant": round(ecart, 2),
+        "depuis": finance.iso(date(at_date.year, 1, 1)),
+        "annee": at_date.year,
     }
 
 

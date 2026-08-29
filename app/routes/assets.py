@@ -15,6 +15,10 @@ def list_assets():
     at = as_date(request.args.get("date"), date.today().isoformat())
     include_archived = request.args.get("archived") == "1"
     snap = services.portfolio(at, include_archived)
+    # Le gain de l'annee demande une seconde photo, au 31 decembre precedent.
+    # Elle passe par le meme cache : la lecture des actifs et des mouvements
+    # n'est pas refaite.
+    snap["gain_annuel"] = services.gain_annuel(at, snap)
     return jsonify(snap)
 
 

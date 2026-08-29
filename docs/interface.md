@@ -315,6 +315,34 @@ maintenant les trois flux du mois et le trait la moyenne des douze derniers : la
 tendance longue est un repère posé sur le détail court, plutôt qu'une carte à
 elle seule.
 
+### Le gain de l'année, et non le cumul d'une vie
+
+La dernière case de l'onglet *Patrimoine* donnait la **plus-value cumulée**
+depuis l'acquisition de chaque produit. Un chiffre qu'aucune période ne cadrait,
+et qui ne bouge presque plus une fois le patrimoine constitué : sur les données
+de test, il annonçait **+1 302 €** pendant que l'année en cours perdait
+**949 €**. Le total masquait l'année.
+
+Elle donne désormais le gain depuis le 1er janvier, **versements exclus**.
+
+Le calcul passe par la plus-value et non par la valeur, et c'est ce qui écarte
+les versements sans avoir à les recenser : un euro versé augmente la valeur ET
+le capital investi, donc laisse la plus-value inchangée ; un euro gagné
+n'augmente que la valeur. Le gain est donc l'écart entre la plus-value
+d'aujourd'hui et celle du 31 décembre précédent (`services.gain_annuel`).
+
+Un produit ouvert dans l'année n'existe pas dans la photo de référence : toute
+sa plus-value compte pour l'année, ce qui est exact.
+
+**Ce que ce chiffre ne dit pas :** une vente n'y apparaît pas. Elle diminue la
+valeur et le capital investi du même montant, donc laisse la plus-value
+inchangée. L'application ne suit que le latent.
+
+Au passage, `invested_amount` accepte enfin une date. `asset_value_at` bornait
+déjà ses mouvements, pas lui : la valeur d'octobre était donc comparée à un
+capital investi qui incluait déjà les versements de décembre, et **toute
+plus-value à une date passée sortait fausse**.
+
 ### Le sélecteur de mois ne ment plus
 
 Il était **inerte** sur *Patrimoine* et sur *Historique* : en changer y jouait
