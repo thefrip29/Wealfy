@@ -543,12 +543,23 @@ class TestEtendueArchive(ApiTestCase):
         # Sans la correction, l'ouverture de 2003 imposait plus de 250 mois.
         self.assertLess(len(archive), 60)
 
-    def test_sans_mouvement_on_retombe_sur_les_ouvertures(self):
-        """Mieux vaut une archive plate qu'une archive vide : sans aucun
-        mouvement enregistre, la date d'ouverture reprend la main."""
+    def test_un_solde_declare_ancre_l_archive_a_la_saisie(self):
+        """Declarer un produit ancien avec son solde du jour pose une
+        valorisation datee d'aujourd'hui : c'est de ce jour que date la
+        connaissance, pas de l'ouverture du produit."""
         self.post("/api/assets", {
             "type": "Livret", "label": "Livret A",
             "date_acquisition": "2024-01-15", "valeur_actuelle": 5000,
+        })
+        archive = self.get("/api/history")["archive"]
+        self.assertEqual(archive[-1]["mois"], month_key())
+
+    def test_sans_solde_declare_on_retombe_sur_les_ouvertures(self):
+        """Mieux vaut une archive plate qu'une archive vide : sans solde du
+        jour ni mouvement, la date d'ouverture reprend la main."""
+        self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A",
+            "date_acquisition": "2024-01-15", "valeur_acquisition": 5000,
         })
         archive = self.get("/api/history")["archive"]
         self.assertEqual(archive[-1]["mois"], "2024-01")

@@ -279,10 +279,39 @@ def valeur_livret(asset, movements, taux_annuel, at_date=None, credit=None) -> f
 
     # Point de depart : derniere valorisation connue, sinon l'acquisition.
     base_date, base = acq, float(asset["valeur_acquisition"] or 0)
+    connu = False
+    valorisations = False
     for mv in sorted(movements, key=lambda m: parse_date(m["date"]) or date.min):
         d = parse_date(mv["date"])
-        if d and d <= at_date and mv["type"] == "valorisation":
-            base_date, base = d, float(mv["montant"] or 0)
+        if not d or mv["type"] != "valorisation":
+            continue
+        valorisations = True
+        if d <= at_date:
+            base_date, base, connu = d, float(mv["montant"] or 0), True
+
+    # AUCUN solde connu a cette date, alors qu'il en existe un plus tard.
+    #
+    # C'est la signature d'un produit deja constitue : on l'a declare avec son
+    # solde DU JOUR, sous sa date d'OUVERTURE. Composer les interets depuis
+    # cette ouverture les fait courir sur des annees ou rien ne dit que
+    # l'argent etait la. Un Livret A ouvert en 2003 et declare 3 985 EUR en
+    # 2026 « valait » ainsi 5 798 EUR au 31 decembre precedent — 1 813 EUR que
+    # la banque n'a jamais verses. Le retour au solde reel se lisait ensuite
+    # comme une perte de 1 813 EUR sur l'annee.
+    #
+    # Avant le premier solde connu, on ne sait rien. Le montant declare est
+    # donc reporte tel quel, corrige des seuls mouvements reels. C'est plat, et
+    # c'est le seul choix qui n'invente pas de passe.
+    #
+    # Sans AUCUNE valorisation, en revanche, la valeur d'acquisition est bien
+    # ce qu'elle dit : un depot a cette date, dont les interets sont dus.
+    if not connu and valorisations:
+        total = base
+        for mv in movements:
+            d = parse_date(mv["date"])
+            if d and d <= at_date and mv["type"] in ("versement", "retrait"):
+                total += float(mv["montant"] or 0)
+        return round(total, 2)
 
     mois_credit, jour_credit = _jour_credit(credit)
     rate = (taux_annuel or 0.0) / 100.0 / 24.0

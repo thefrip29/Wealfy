@@ -63,6 +63,42 @@ sont signalés et décochés avant confirmation ; un index unique en base bloque
 l'insertion même si on force.
 
 
+## Un solde declare est date du jour ou on le declare
+
+Le formulaire demande **« Montant aujourd'hui »** et **« Depuis le »**, en
+invitant à saisir la vraie date d'ouverture. L'application stockait alors le
+couple (2003, 3 985 €), qui affirme que la somme était là dès l'ouverture.
+
+Sur un livret, cela faisait courir les intérêts sur vingt-deux ans. Un Livret A
+ouvert en 2003 et déclaré 3 985 € en 2026 « valait » ainsi 5 798 € au
+31 décembre précédent :
+
+    3 985,01 x 1,017^22,2 = 5 798 €
+
+soit **1 813 € d'intérêts que la banque n'a jamais versés**. Le retour au solde
+réel le lendemain se lisait comme une perte, et le gain de l'année affichait
+− 949 € alors que rien n'avait été perdu.
+
+C'est le symétrique du principe déjà tenu vers l'avant — *on ne fabrique pas de
+performance sur un produit déjà constitué*. La garde manquait vers l'arrière.
+
+**Deux corrections, qui se répondent.**
+
+1. **À la création**, un montant du jour sur un produit ouvert antérieurement
+   pose une **valorisation datée d'aujourd'hui**. Le solde devient un fait daté
+   au lieu d'une affirmation sur le passé. La date d'ouverture reste ce qu'elle
+   est : l'ancienneté du produit, qui compte pour un PEA.
+2. **Avant le premier solde connu**, `valeur_livret` ne compose plus rien. Le
+   montant est reporté tel quel, corrigé des seuls mouvements réels. Plat, parce
+   qu'on ne sait pas — et c'est le seul choix qui n'invente pas de passé.
+
+**Sans aucune valorisation, rien ne change** : la valeur d'acquisition est alors
+bien ce qu'elle dit, un dépôt à cette date, et ses intérêts sont dus. C'est ce
+qui distingue « j'ai déposé 10 000 € en janvier 2024 » de « mon livret ouvert
+en 2024 contient 10 000 € aujourd'hui » : le second passe par le formulaire, qui
+date le solde.
+
+
 ## Déclarer son patrimoine existant
 
 *Patrimoine → **+ Ajouter mes produits*** ouvre une liste des placements

@@ -53,16 +53,33 @@ def create_asset():
         return fail("Le type est obligatoire.")
     d = as_date(data.get("date_acquisition"), date.today().isoformat())
     aid = new_id()
+    actuelle = as_float(data.get("valeur_actuelle"), None)
     execute(
         "INSERT INTO assets(id, type, label, date_acquisition, valeur_acquisition, "
         "valeur_actuelle, metadata) VALUES (?,?,?,?,?,?,?)",
         (
             aid, atype, label, d,
             as_float(data.get("valeur_acquisition"), 0.0) or 0.0,
-            as_float(data.get("valeur_actuelle"), None),
+            actuelle,
             json.dumps(data.get("metadata") or {}, ensure_ascii=False),
         ),
     )
+    # « Montant aujourd'hui » sur un produit ouvert AVANT aujourd'hui : c'est un
+    # solde du jour, pas un depot d'epoque. On le pose donc comme un fait date.
+    #
+    # Sans cela, le couple (date d'ouverture, montant) affirme que la somme
+    # etait la des l'ouverture, et les interets courent sur toute la periode :
+    # un livret ouvert en 2003 et declare aujourd'hui se voyait crediter vingt
+    # ans d'interets que personne n'a touches. La date d'ouverture reste ce
+    # qu'elle est — l'anciennete du produit, qui compte pour un PEA.
+    aujourdhui = date.today().isoformat()
+    if actuelle is not None and d < aujourdhui:
+        execute(
+            "INSERT INTO asset_movements(id, asset_id, date, montant, type, note) "
+            "VALUES (?,?,?,?,'valorisation',?)",
+            (new_id(), aid, aujourdhui, round(actuelle, 2),
+             "Solde declare a la creation"),
+        )
     return jsonify(row_to_dict(query("SELECT * FROM assets WHERE id = ?", (aid,), one=True))), 201
 
 

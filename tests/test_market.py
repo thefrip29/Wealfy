@@ -659,6 +659,51 @@ class TestLivretThroughApi(MarketTestCase):
         self.assertEqual(detail["asset"]["valeur_source"], "taux")
         self.assertEqual(detail["asset"]["valeur"], 8000.0)
 
+    def test_un_livret_ancien_ne_fabrique_pas_d_interets_passes(self):
+        """Le cas qui produisait une perte de 1 813 EUR sur l'annee.
+
+        Un Livret A ouvert en 2003, declare aujourd'hui avec son solde du jour.
+        L'application datait ce solde a l'ouverture et faisait courir les
+        interets sur vingt-deux ans : le livret « valait » alors 5 798 EUR au
+        31 decembre precedent, contre 3 985 EUR le lendemain. Le retour au reel
+        se lisait comme une perte, alors qu'un livret ne perd jamais.
+        """
+        an = date.today().year
+        livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A", "date_acquisition": "2003-10-02",
+            "valeur_acquisition": 3985.01, "valeur_actuelle": 3985.01,
+            "metadata": {"taux_annuel": 1.7},
+        })
+        veille = self.get(f"/api/assets/{livret['id']}?date={an - 1}-12-31")
+        self.assertEqual(veille["asset"]["valeur"], 3985.01)
+        # Et donc aucune perte fabriquee sur l'annee.
+        self.assertEqual(self.get("/api/assets")["gain_annuel"]["montant"], 0.0)
+
+    def test_un_depot_reel_garde_ses_interets(self):
+        """L'inverse doit rester vrai : sans solde du jour declare, la valeur
+        d'acquisition est bien un depot a cette date, et ses interets sont dus.
+        """
+        livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A", "date_acquisition": "2024-01-01",
+            "valeur_acquisition": 10000, "metadata": {"taux_annuel": 3.0},
+        })
+        detail = self.get(f"/api/assets/{livret['id']}?date=2024-12-31")
+        self.assertAlmostEqual(detail["asset"]["valeur"], 10300.0, delta=1.0)
+
+    def test_les_interets_courent_apres_le_solde_declare(self):
+        """Le passe est plat, l'avenir non : une fois le solde connu, les
+        interets reprennent normalement."""
+        an = date.today().year
+        livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A", "date_acquisition": "2003-10-02",
+            "valeur_acquisition": 3985.01, "valeur_actuelle": 3985.01,
+            "metadata": {"taux_annuel": 1.7},
+        })
+        detail = self.get(f"/api/assets/{livret['id']}")
+        self.assertGreater(detail["asset"]["interets_prevus"], 0)
+        futur = self.get(f"/api/assets/{livret['id']}?date={an + 2}-12-31")
+        self.assertGreater(futur["asset"]["valeur"], 3985.01)
+
     def test_enregistrer_la_fiche_sans_changer_le_montant_ne_valorise_pas(self):
         """Corriger un libelle empilait une valorisation a chaque sauvegarde."""
         livret = self.post("/api/assets", {
@@ -671,7 +716,11 @@ class TestLivretThroughApi(MarketTestCase):
                 "label": "Livret A renomme", "valeur_actuelle": 8000,
             })
         mouvements = self.get(f"/api/assets/{livret['id']}")["movements"]
-        self.assertEqual([m for m in mouvements if m["type"] == "valorisation"], [])
+        # Une seule, celle posee a la creation pour dater le solde declare.
+        # Ce qui est verifie ici, c'est qu'enregistrer la fiche n'en empile pas.
+        valos = [m for m in mouvements if m["type"] == "valorisation"]
+        self.assertEqual(len(valos), 1)
+        self.assertEqual(valos[0]["note"], "Solde declare a la creation")
 
     def test_deux_corrections_le_meme_jour_ne_laissent_qu_une_valorisation(self):
         livret = self.post("/api/assets", {
