@@ -341,6 +341,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (e.key === 'Escape' && !App.el('#modal-backdrop').hidden) App.modal.close();
   });
 
+  // Un fichier lâché à côté de la zone de dépôt ferait quitter la page pour
+  // l'afficher, et la saisie en cours partirait avec elle. Tout dépôt hors
+  // des zones prévues est donc refusé ; celles-ci arrêtent l'événement
+  // elles-mêmes, avant qu'il n'arrive ici.
+  for (const nom of ['dragover', 'drop']) {
+    window.addEventListener(nom, (e) => e.preventDefault());
+  }
+
   App.els('.tab').forEach((btn) => {
     btn.addEventListener('click', () => {
       // Cliquer l'onglet où l'on se trouve déjà rejouait toute l'apparition :

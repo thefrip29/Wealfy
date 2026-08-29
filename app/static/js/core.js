@@ -11,18 +11,30 @@ const App = {
 
 /* ---------- HTTP ---------- */
 App.api = {
+  /* Lecture commune : le serveur répond en JSON, sauf quand il tombe avant
+     d'y arriver — auquel cas le corps est du texte, et le message d'erreur
+     doit tout de même remonter. */
+  async lire(res) {
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch (e) { data = { error: text }; }
+    if (!res.ok) throw new Error((data && data.error) || `Erreur ${res.status}`);
+    return data;
+  },
   async request(method, url, payload) {
     const opts = { method, headers: {} };
     if (payload !== undefined) {
       opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(payload);
     }
-    const res = await fetch(url, opts);
-    const text = await res.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch (e) { data = { error: text }; }
-    if (!res.ok) throw new Error((data && data.error) || `Erreur ${res.status}`);
-    return data;
+    return App.api.lire(await fetch(url, opts));
+  },
+  /* Envoi d'un fichier. Pas de `Content-Type` posé à la main : le navigateur
+     doit écrire lui-même la frontière du multipart. */
+  async upload(url, file) {
+    const form = new FormData();
+    form.append('fichier', file);
+    return App.api.lire(await fetch(url, { method: 'POST', body: form }));
   },
   get(url) { return App.api.request('GET', url); },
   post(url, body) { return App.api.request('POST', url, body || {}); },
@@ -489,6 +501,75 @@ App.dateField = function (name, attrs = {}) {
     set: (iso) => { texte.value = isoVersFR(iso); controler(); },
   });
   return hote;
+};
+
+/* ---------- dépôt de fichier ----------
+
+   Le seul chemin d'import était le collage dans un textarea : ouvrir le CSV
+   dans un éditeur, tout sélectionner, copier, coller. Le fichier est pourtant
+   déjà sur le disque.
+
+   La conversion se fait côté serveur et non par `FileReader`, pour une raison
+   précise : un PDF ne se lit pas en JavaScript sans embarquer une bibliothèque
+   entière, alors que Python le fait déjà. Le texte extrait REVIENT dans le
+   champ, visible et modifiable — l'extraction d'un PDF est imparfaite par
+   nature, la cacher reviendrait à demander une confiance aveugle. */
+
+const FORMATS_RELEVE = '.csv,.tsv,.txt,.pdf,text/plain,text/csv,application/pdf';
+
+App.fileDrop = function ({ onText, hint }) {
+  const input = App.h('input', { type: 'file', accept: FORMATS_RELEVE, hidden: true });
+  const etat = App.h('div', { class: 'depot-etat' });
+  const zone = App.h('div', {
+    class: 'depot', role: 'button', tabindex: '0',
+    'aria-label': 'Choisir un fichier de relevé',
+  },
+  App.h('div', { class: 'depot-titre' },
+    'Déposez votre relevé ici, ou cliquez pour le choisir'),
+  App.h('div', { class: 'depot-sub' },
+    hint || 'CSV, TSV, TXT, ou PDF téléchargé depuis votre banque'),
+  etat, input);
+
+  const charger = async (file) => {
+    if (!file) return;
+    zone.classList.add('occupe');
+    App.clear(etat);
+    etat.append(App.h('span', { class: 'sub' }, `Lecture de ${file.name}...`));
+    try {
+      const res = await App.api.upload('/api/imports/text', file);
+      App.clear(etat);
+      etat.append(App.h('span', { class: 'pill ok' }, file.name));
+      onText(res.text, res.nom || file.name);
+    } catch (e) {
+      App.clear(etat);
+      etat.append(App.h('span', { class: 'pill warn' }, e.message));
+    }
+    zone.classList.remove('occupe');
+    // Redéposer le MÊME fichier doit relancer la lecture : sans cette remise à
+    // zéro, `change` ne se déclenche pas une seconde fois.
+    input.value = '';
+  };
+
+  zone.addEventListener('click', () => input.click());
+  zone.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    input.click();
+  });
+  // Sans cela, le clic sur le champ caché remonte a la zone, qui le rouvre.
+  input.addEventListener('click', (e) => e.stopPropagation());
+  input.addEventListener('change', () => charger(input.files[0]));
+
+  for (const nom of ['dragenter', 'dragover']) {
+    zone.addEventListener(nom, (e) => { e.preventDefault(); zone.classList.add('survol'); });
+  }
+  zone.addEventListener('dragleave', () => zone.classList.remove('survol'));
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    zone.classList.remove('survol');
+    charger(e.dataTransfer.files[0]);
+  });
+  return zone;
 };
 
 /* ---------- graphiques ---------- */

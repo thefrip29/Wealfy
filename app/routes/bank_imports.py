@@ -1,10 +1,41 @@
 """Import de releves bancaires."""
-from flask import jsonify
+from flask import jsonify, request
 
 from .. import importer, services
 from ..db import execute, get_setting, new_id, query, rows_to_list
 from ._blueprint import bp
 from ._helpers import as_date, as_float, body, fail
+
+# Un an de releves d'un compte tres actif tient largement dedans. La borne
+# existe pour qu'un fichier depose par erreur ne fasse pas gonfler la memoire.
+TAILLE_MAX = 10 * 1024 * 1024
+
+
+@bp.post("/api/imports/text")
+def import_text():
+    """Texte d'un fichier depose : PDF extrait, sinon decode.
+
+    Renvoie le texte plutot que la previsualisation, pour deux raisons. Le
+    meme point d'entree sert alors aux releves bancaires et aux releves de
+    titres, qui n'ont pas la meme analyse derriere. Et l'utilisateur VOIT ce
+    qui a ete extrait de son PDF, ou l'extraction est imparfaite par nature :
+    il peut le corriger avant d'analyser.
+
+    Aucune ecriture, aucun appel reseau : tout se fait sur la machine.
+    """
+    fichier = request.files.get("fichier")
+    if fichier is None:
+        return fail("Aucun fichier recu.")
+    data = fichier.read(TAILLE_MAX + 1)
+    if len(data) > TAILLE_MAX:
+        return fail("Fichier trop volumineux : 10 Mo au maximum.", 413)
+    try:
+        texte = importer.extract_text(data, fichier.filename or "")
+    except ValueError as exc:
+        return fail(str(exc))
+    if not texte.strip():
+        return fail("Ce fichier est vide.")
+    return jsonify({"text": texte, "nom": fichier.filename or ""})
 
 
 @bp.post("/api/imports/preview")

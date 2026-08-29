@@ -1,4 +1,5 @@
 """Tests du parsing des relevés, de la déduplication et de la classification."""
+import logging
 import os
 import sys
 import unittest
@@ -62,6 +63,110 @@ class TestStatementParsing(unittest.TestCase):
         lines, warnings = importer.parse_statement("   ")
         self.assertEqual(lines, [])
         self.assertTrue(warnings)
+
+
+PDF_DEUX_COLONNES = """
+Date       Libelle                              Debit        Credit
+01/03/2024 SOLDE PRECEDENT                                 1 240,00
+03/03/2024 CB CARREFOUR MARKET                  45,30
+07/03/2024 VIR SEPA SALAIRE ACME                            2 450,00
+15/03/2024 VIR M DUPONT LOYER                                 700,00
+28/03/2024 PRLV NETFLIX                         13,49
+31/03/2024 NOUVEAU SOLDE                                    5 550,37
+"""
+
+PDF_UNE_COLONNE = """
+03/03/2024 CB CARREFOUR 45,30
+05/03/2024 PRLV EDF 118,74
+07/03/2024 VIR SALAIRE +2450,00
+"""
+
+
+def pypdf_silencieux(test):
+    """pypdf journalise sur stderr quand il refuse un PDF. C'est son travail,
+    mais dans une suite de tests cette ligne ressemble a un echec."""
+    logger = logging.getLogger("pypdf")
+    niveau = logger.level
+    logger.setLevel(logging.CRITICAL)
+    test.addCleanup(logger.setLevel, niveau)
+
+
+class TestReleveNonDelimite(unittest.TestCase):
+    """Un releve imprime ou extrait d'un PDF n'a pas de separateur : ses
+    colonnes sont alignees a l'espace, et le sens du montant tient a la colonne
+    ou il se trouve, jamais a un signe."""
+
+    def test_colonnes_debit_credit_par_alignement(self):
+        lines, warnings = importer.parse_statement(PDF_DEUX_COLONNES)
+        montants = {l["description"]: l["amount"] for l in lines}
+        self.assertEqual(montants["CB CARREFOUR MARKET"], -45.30)
+        self.assertEqual(montants["PRLV NETFLIX"], -13.49)
+        self.assertEqual(montants["VIR SEPA SALAIRE ACME"], 2450.00)
+        self.assertEqual(montants["VIR M DUPONT LOYER"], 700.00)
+        self.assertTrue(any("alignement" in w for w in warnings))
+
+    def test_soldes_ecartes(self):
+        """Un solde porte une date et un montant : rien ne le distingue d'une
+        operation sinon son libelle. L'inclure fausserait tous les totaux."""
+        lines, _ = importer.parse_statement(PDF_DEUX_COLONNES)
+        libelles = [l["description"] for l in lines]
+        self.assertEqual(len(lines), 4)
+        self.assertNotIn("SOLDE PRECEDENT", libelles)
+        self.assertNotIn("NOUVEAU SOLDE", libelles)
+
+    def test_une_seule_colonne_lue_en_debit(self):
+        """Sans deuxieme colonne, rien ne dit qu'une ligne est un credit : on
+        lit un debit et on le dit, plutot que d'inventer un sens."""
+        lines, warnings = importer.parse_statement(PDF_UNE_COLONNE)
+        self.assertEqual([l["amount"] for l in lines], [-45.30, -118.74, 2450.00])
+        self.assertEqual(lines[2]["description"], "VIR SALAIRE")
+        self.assertTrue(any("une seule colonne" in w.lower() for w in warnings))
+
+    def test_milliers_sans_separateur(self):
+        """« 2450,00 » ne doit pas se lire « 450,00 », le « 2 » restant colle
+        au libelle."""
+        lines, _ = importer.parse_statement("07/03/2024 VIR SALAIRE -2450,00")
+        self.assertEqual(lines[0]["amount"], -2450.00)
+        self.assertEqual(lines[0]["description"], "VIR SALAIRE")
+
+    def test_dates_sur_deux_chiffres_et_points(self):
+        lines, _ = importer.parse_statement("03.03.24 CB CARREFOUR 45,30")
+        self.assertEqual(lines[0]["date"], "2024-03-03")
+
+    def test_csv_delimite_garde_la_main(self):
+        """La lecture delimitee distingue debit et credit sans deviner : elle
+        reste prioritaire quand elle aboutit."""
+        lines, warnings = importer.parse_statement(LCL_TEXT)
+        self.assertEqual(len(lines), 3)
+        self.assertFalse(any("alignement" in w for w in warnings))
+
+    def test_entete_d_une_seule_colonne_n_est_pas_un_tableau(self):
+        """La virgule decimale des montants suffisait a faire croire a un
+        separateur : le releve entier etait alors lu de travers, chaque ligne
+        atterrissant dans une seule cellule."""
+        lines, _ = importer.parse_statement(PDF_DEUX_COLONNES)
+        for ligne in lines:
+            self.assertIsNone(importer.DATE_LIBRE.match(ligne["description"]))
+            self.assertNotEqual(ligne["amount"], 0.0)
+
+
+class TestExtractionFichier(unittest.TestCase):
+    def test_texte_decode_en_utf8_et_cp1252(self):
+        self.assertEqual(importer.extract_text("café".encode("utf-8")), "café")
+        self.assertEqual(importer.extract_text("café".encode("cp1252")), "café")
+
+    def test_bom_retire(self):
+        bom = bytes([0xEF, 0xBB, 0xBF])
+        self.assertEqual(importer.extract_text(bom + b"Date;Montant"), "Date;Montant")
+
+    def test_fichier_vide(self):
+        self.assertEqual(importer.extract_text(b""), "")
+
+    def test_pdf_illisible_leve_une_erreur_parlante(self):
+        pypdf_silencieux(self)
+        with self.assertRaises(ValueError) as ctx:
+            importer.extract_text(b"%PDF-1.4 nimporte quoi")
+        self.assertIn("PDF", str(ctx.exception))
 
 
 class TestDedup(unittest.TestCase):

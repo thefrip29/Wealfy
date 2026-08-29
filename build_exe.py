@@ -243,8 +243,11 @@ def construire_windows():
         "--version-file", VERSION_FILE,
         *_donnees_embarquees(),
         # PyInstaller ne voit pas ces imports : waitress est charge par nom,
-        # et pywebview choisit son moteur d'affichage a l'execution.
+        # pywebview choisit son moteur d'affichage a l'execution, et pypdf
+        # n'est importe qu'au moment de lire un releve PDF (import tardif,
+        # pour que l'application demarre meme sans lui).
         "--hidden-import", "waitress",
+        "--hidden-import", "pypdf",
         "--hidden-import", "webview.platforms.edgechromium",
         "--hidden-import", "webview.platforms.winforms",
         "--collect-all", "webview",
@@ -282,6 +285,8 @@ def construire_macos():
         "--osx-bundle-identifier", BUNDLE_ID,
         *_donnees_embarquees(),
         "--hidden-import", "waitress",
+        # Importe tardivement par app/importer.py : l'analyse statique le manque.
+        "--hidden-import", "pypdf",
         # Cocoa remplace les moteurs Windows. Les inclure ici ferait echouer
         # l'analyse, faute de pythonnet.
         "--hidden-import", "webview.platforms.cocoa",

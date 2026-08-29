@@ -259,37 +259,53 @@ App.tabs.expenses = {
     });
   },
 
-  /* ---------- import ---------- */
+  /* ---------- import ----------
+
+     Le fichier est lu, puis ANALYSE tout de suite : il n'y a rien a demander
+     de plus, le parseur deduit deja separateur, colonnes et format des
+     montants. Le texte extrait reste affiche en dessous, pour qu'un PDF mal
+     decoupe puisse etre corrige avant confirmation.
+
+     Le menu deroulant « Source » a disparu. Il ne servait qu'a etiqueter le
+     journal des imports, et le nom du fichier le dit mieux qu'une banque
+     choisie dans une liste de quatre. */
   openImport() {
     const textarea = App.h('textarea', {
-      name: 'text', rows: 12,
-      placeholder: 'Collez ici le CSV Revolut, ou le texte formaté extrait de votre relevé LCL…',
+      name: 'text', rows: 10,
+      placeholder: '… ou collez ici le contenu de votre relevé',
     });
-    const source = App.select('source', ['Revolut', 'LCL', 'TradeRepublic', 'Manuel'], 'Revolut');
-
-    const body = App.h('div', {},
-      App.h('div', { class: 'form-grid' },
-        App.field('Source', source),
-        App.h('div', { class: 'field' },
-          App.h('label', {}, 'Aide'),
-          App.h('span', { class: 'hint' },
-            'CSV, TSV ou texte séparé par des points-virgules. '
-            + 'Le séparateur, les colonnes et le format des montants sont détectés automatiquement. '
-            + 'Pour un relevé LCL en PDF, faites-le convertir en texte tabulé, puis collez-le ici.'))),
-      App.h('div', { class: 'field full', style: 'margin-top:12px' },
-        App.h('label', {}, 'Contenu du relevé'), textarea));
+    let source = 'Collé';
 
     const analyse = async () => {
       try {
         const res = await App.api.post('/api/imports/preview', { text: textarea.value });
-        App.tabs.expenses.showPreview(res, source.value);
+        App.tabs.expenses.showPreview(res, source);
       } catch (e) { App.toast(e.message, 'error'); }
     };
 
+    const depot = App.fileDrop({
+      onText: (text, nom) => {
+        textarea.value = text;
+        source = nom || 'Fichier';
+        analyse();
+      },
+    });
+
     App.modal.open({
       title: 'Importer un relevé',
-      body,
       wide: true,
+      body: App.h('div', {},
+        depot,
+        App.h('div', { class: 'field full', style: 'margin-top:14px' },
+          App.h('label', {}, 'Ou coller le contenu'), textarea),
+        App.note('Ce qui est reconnu',
+          App.h('p', {},
+            'Les exports CSV ou TSV de votre banque, et les relevés PDF '
+            + 'téléchargés depuis votre espace client. Le séparateur, les colonnes '
+            + 'et le format des montants sont détectés automatiquement.'),
+          App.h('p', {},
+            'Un PDF scanné ne contient pas de texte, seulement une image : '
+            + 'celui-là ne peut pas être lu.'))),
       footer: [
         App.h('button', { class: 'btn', onclick: () => App.modal.close() }, 'Annuler'),
         App.h('button', { class: 'btn primary', onclick: analyse }, 'Analyser'),

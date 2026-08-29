@@ -1349,8 +1349,8 @@ App.tabs.wealth = {
   /* ---------- import de mouvements de titres ---------- */
   openMovementImport(asset) {
     const textarea = App.h('textarea', {
-      rows: 12,
-      placeholder: 'Collez le relevé (date, ticker/ISIN, quantité, prix unitaire, montant)…',
+      rows: 10,
+      placeholder: '… ou collez le relevé (date, ticker/ISIN, quantité, prix unitaire, montant)',
     });
     const analyse = async () => {
       try {
@@ -1359,6 +1359,12 @@ App.tabs.wealth = {
         App.tabs.wealth.showMovementPreview(asset, res);
       } catch (e) { App.toast(e.message, 'error'); }
     };
+    // Même composant que pour les relevés bancaires : un relevé de titres
+    // arrive dans les mêmes formats, et souvent en PDF.
+    const depot = App.fileDrop({
+      hint: 'CSV, TSV, TXT, ou PDF de votre courtier',
+      onText: (text) => { textarea.value = text; analyse(); },
+    });
     App.modal.open({
       title: `Importer des mouvements — ${asset.label}`,
       wide: true,
@@ -1366,8 +1372,9 @@ App.tabs.wealth = {
         App.h('p', { class: 'hint' },
           'Objectif : récupérer quantité, prix unitaire et ticker de chaque achat pour '
           + 'calculer le PRU et le TRI réels. Colonnes détectées automatiquement.'),
-        App.h('div', { class: 'field full', style: 'margin-top:10px' },
-          App.h('label', {}, 'Contenu'), textarea)),
+        App.h('div', { style: 'margin-top:12px' }, depot),
+        App.h('div', { class: 'field full', style: 'margin-top:14px' },
+          App.h('label', {}, 'Ou coller le contenu'), textarea)),
       footer: [
         App.h('button', { class: 'btn', onclick: () => App.modal.close() }, 'Annuler'),
         App.h('button', { class: 'btn primary', onclick: analyse }, 'Analyser'),

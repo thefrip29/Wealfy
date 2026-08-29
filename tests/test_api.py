@@ -1,4 +1,5 @@
 """Tests de bout en bout : API HTTP + persistance SQLite."""
+import logging
 import os
 import sys
 import tempfile
@@ -377,6 +378,104 @@ class TestImportFlow(ApiTestCase):
         self.post("/api/imports/confirm", {"source": "LCL", "lignes": preview["lignes"]})
         txs = self.get(f"/api/transactions?liability_id={loan['id']}")
         self.assertEqual(len(txs), 1)
+
+
+RELEVE_PDF_TEXTE = """
+Date       Libelle                    Debit      Credit
+03/03/2024 CB CARREFOUR               45,30
+07/03/2024 VIR SALAIRE                           2 450,00
+"""
+
+CSV_SIMPLE = """
+Date;Montant
+Cafe;-2,50
+"""
+
+
+def pypdf_silencieux(test):
+    """pypdf journalise sur stderr quand il refuse un PDF. C'est son travail,
+    mais dans une suite de tests cette ligne ressemble a un echec."""
+    logger = logging.getLogger("pypdf")
+    niveau = logger.level
+    logger.setLevel(logging.CRITICAL)
+    test.addCleanup(logger.setLevel, niveau)
+
+
+class TestDepotDeFichier(ApiTestCase):
+    """Le fichier depose est converti en texte cote serveur, puis rendu a
+    l'utilisateur pour qu'il le VOIE avant analyse : l'extraction d'un PDF est
+    imparfaite par nature."""
+
+    def depose(self, contenu, nom="releve.csv"):
+        import io as _io
+        return self.client.post(
+            "/api/imports/text",
+            data={"fichier": (_io.BytesIO(contenu), nom)},
+            content_type="multipart/form-data",
+        )
+
+    def test_fichier_texte_rendu_tel_quel(self):
+        res = self.depose(CSV_SIMPLE.encode("utf-8"))
+        self.assertEqual(res.status_code, 200)
+        corps = res.get_json()
+        self.assertIn("Cafe", corps["text"])
+        self.assertEqual(corps["nom"], "releve.csv")
+
+    def test_encodage_windows_accepte(self):
+        """Les exports bancaires francais sortent souvent en Windows-1252 :
+        les refuser pour un accent serait absurde."""
+        res = self.depose("Café de la Gare".encode("cp1252"))
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("Café", res.get_json()["text"])
+
+    def test_fichier_vide_refuse(self):
+        self.assertEqual(self.depose(b"   ").status_code, 400)
+
+    def test_sans_fichier_refuse(self):
+        res = self.client.post("/api/imports/text",
+                               data={}, content_type="multipart/form-data")
+        self.assertEqual(res.status_code, 400)
+
+    def test_pdf_illisible_explique_pourquoi(self):
+        pypdf_silencieux(self)
+        res = self.depose(b"%PDF-1.4 pas vraiment un pdf", nom="releve.pdf")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("PDF", res.get_json()["error"])
+
+    def test_releve_aligne_bout_en_bout(self):
+        """Le chemin complet : texte aligne a l'espace, colonnes debit et
+        credit reconnues a leur alignement, puis import reel. Le nom du fichier
+        devient la source du journal — le menu deroulant qui la demandait a
+        disparu de l'interface."""
+        texte = self.depose(RELEVE_PDF_TEXTE.encode("utf-8"),
+                            nom="releve.pdf").get_json()["text"]
+        apercu = self.post("/api/imports/preview", {"text": texte})
+        self.assertEqual(apercu["total"], 2)
+        self.assertEqual(sorted(l["amount"] for l in apercu["lignes"]),
+                         [-45.30, 2450.00])
+        out = self.post("/api/imports/confirm",
+                        {"source": "releve.pdf", "lignes": apercu["lignes"]})
+        self.assertEqual(out["importees"], 2)
+        self.assertEqual(self.get("/api/imports")[0]["source"], "releve.pdf")
+
+
+class TestAccueilBaseVide(ApiTestCase):
+    """Sur une base neuve, la synthese n'a aucun chiffre a montrer : elle
+    affichait un heros a zero, quatre indicateurs vides et deux camemberts
+    « aucun actif », sans dire par ou commencer."""
+
+    def test_base_neuve_signalee_vide(self):
+        self.assertTrue(self.get("/api/overview")["aucune_donnee"])
+
+    def test_un_seul_actif_suffit_a_remplir(self):
+        self.post("/api/assets", {"type": "Livret", "label": "Livret A",
+                                  "valeur_actuelle": 100})
+        self.assertFalse(self.get("/api/overview")["aucune_donnee"])
+
+    def test_une_seule_transaction_suffit_a_remplir(self):
+        self.post("/api/transactions", {"date": "2024-03-01", "amount": -10,
+                                        "description": "Cafe"})
+        self.assertFalse(self.get("/api/overview")["aucune_donnee"])
 
 
 class TestAnalytics(ApiTestCase):

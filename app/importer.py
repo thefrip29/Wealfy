@@ -147,6 +147,166 @@ def _sniff_delimiter(sample: str) -> str:
     return best
 
 
+# --- relevés sans séparateur ---------------------------------------------
+#
+# Un relevé imprimé ou extrait d'un PDF n'a aucun séparateur : ses colonnes sont
+# alignées à l'espace. `csv.reader` n'y voit qu'une seule colonne par ligne, et
+# renvoyait donc zéro transaction — d'où la consigne « faites convertir votre
+# PDF en texte tabulé », qui renvoyait le travail à l'utilisateur.
+
+# Un montant : signe optionnel, puis soit des milliers séparés par une espace
+# (y compris les espaces insécables que produisent les extracteurs PDF) ou un
+# point, soit une suite de chiffres nue — « 2 450,00 » comme « 2450,00 ». La
+# forme groupée est essayée en premier : sans elle, « 2450,00 » ne donnerait
+# que sa fin, « 450,00 », et le « 2 » restant passerait pour la fin du libellé.
+# Les deux gardes empêchent de commencer ou de finir au milieu d'un nombre.
+MONTANT_LIBRE = re.compile(
+    r"(?<![\d,.])[-+]?(?:\d{1,3}(?:[   .]\d{3})+|\d+)[,.]\d{2}(?![\d,.])"
+)
+DATE_LIBRE = re.compile(r"^\s*(\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4})\b")
+
+# Lignes de pied de relevé : elles portent une date et un montant, donc rien ne
+# les distingue d'une opération sinon leur libellé.
+LIBELLES_NON_OPERATION = ("solde", "total", "report", "nouveau solde",
+                          "ancien solde", "sous total")
+
+
+def _date_libre(brut):
+    """Normalise une date de relevé avant `parse_date`, qui ne lit ni les
+    séparateurs par point ni les années sur deux chiffres."""
+    jour, mois, annee = re.split(r"[/.\-]", brut)
+    if len(annee) == 2:
+        # Un relevé bancaire ne remonte pas au siècle dernier.
+        annee = f"20{annee}"
+    return parse_date(f"{int(jour):02d}/{int(mois):02d}/{annee}")
+
+
+def _parse_lignes_libres(text: str):
+    """Lit un relevé aligné à l'espace, une ligne à la fois.
+
+    Le sens du montant vient de sa COLONNE, pas de son signe : un relevé
+    imprimé sépare débit et crédit en deux colonnes et n'écrit jamais de moins.
+    Les montants y sont alignés à droite, donc c'est la position de FIN qui est
+    stable — celle du début varie avec le nombre de chiffres.
+    """
+    warnings = []
+    brutes = []
+    for ligne in text.splitlines():
+        m = DATE_LIBRE.match(ligne)
+        if not m:
+            continue
+        d = _date_libre(m.group(1))
+        if d is None:
+            continue
+        reste = ligne[m.end():]
+        montants = list(MONTANT_LIBRE.finditer(reste))
+        if not montants:
+            continue
+        # Le montant de l'opération est le dernier de la ligne : ce qui le suit
+        # éventuellement (un solde courant) appartient à une autre colonne.
+        dernier = montants[-1]
+        valeur = parse_amount(dernier.group(0))
+        if valeur is None:
+            continue
+        desc = re.sub(r"\s+", " ", reste[:montants[0].start()]).strip(" .-\t")
+        if norm(desc).startswith(LIBELLES_NON_OPERATION):
+            continue
+        brutes.append({
+            "date": iso(d),
+            "description": desc or "(sans libellé)",
+            "valeur": valeur,
+            "signe_ecrit": dernier.group(0).strip()[0] in "-+",
+            "fin": m.end() + dernier.end(),
+            "brut": ligne.strip(),
+        })
+
+    if not brutes:
+        return [], ["Aucune ligne datée suivie d'un montant dans ce contenu."]
+
+    coupure = _coupure_colonnes([b["fin"] for b in brutes])
+    if coupure is None:
+        warnings.append(
+            "Une seule colonne de montants : les lignes sans signe sont lues "
+            "comme des débits. Vérifiez les montants avant de confirmer."
+        )
+    else:
+        warnings.append(
+            "Colonnes débit et crédit reconnues à leur alignement. "
+            "Vérifiez quelques lignes avant de confirmer."
+        )
+
+    lines = []
+    for b in brutes:
+        if b["signe_ecrit"]:
+            amount = b["valeur"]                 # un signe écrit fait foi
+        elif coupure is None:
+            amount = -abs(b["valeur"])
+        else:
+            credit = b["fin"] >= coupure
+            amount = abs(b["valeur"]) if credit else -abs(b["valeur"])
+        lines.append({
+            "date": b["date"],
+            "description": b["description"],
+            "amount": round(amount, 2),
+            "devise": "EUR",
+            "brut": b["brut"],
+        })
+    return lines, warnings
+
+
+def _coupure_colonnes(fins, ecart_min=4):
+    """Position qui sépare la colonne débit de la colonne crédit, ou None.
+
+    On cherche le plus grand trou entre deux fins de montant. En dessous de
+    `ecart_min` caractères, il n'y a qu'une colonne : deux montants voisins de
+    quelques caractères ne sont pas deux colonnes, seulement deux longueurs.
+    """
+    uniques = sorted(set(fins))
+    if len(uniques) < 2:
+        return None
+    trou, coupure = 0, None
+    for a, b in zip(uniques, uniques[1:]):
+        if b - a > trou:
+            trou, coupure = b - a, b
+    return coupure if trou >= ecart_min else None
+
+
+def extract_text(data: bytes, filename: str = "") -> str:
+    """Texte d'un fichier déposé : PDF extrait page à page, sinon décodé.
+
+    L'entête `%PDF` fait autorité plutôt que l'extension : un relevé
+    téléchargé arrive parfois sans extension du tout.
+    """
+    if not data:
+        return ""
+    if data[:5] == b"%PDF-":
+        try:
+            from pypdf import PdfReader
+        except ImportError:  # pragma: no cover - dependance absente
+            raise ValueError(
+                "Lecture des PDF indisponible : le module pypdf n'est pas installé."
+            )
+        try:
+            reader = PdfReader(io.BytesIO(data))
+            pages = [page.extract_text() or "" for page in reader.pages]
+        except Exception as exc:
+            raise ValueError(f"PDF illisible : {exc}")
+        texte = "\n".join(pages).strip()
+        if not texte:
+            raise ValueError(
+                "Ce PDF ne contient pas de texte : c'est une image numérisée. "
+                "Seuls les relevés téléchargés depuis votre banque sont lisibles."
+            )
+        return texte
+    # Les exports bancaires sortent en UTF-8, en Windows-1252, ou avec un BOM.
+    for encodage in ("utf-8-sig", "cp1252", "latin-1"):
+        try:
+            return data.decode(encodage)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
 def parse_statement(text: str):
     """Renvoie (lignes, avertissements).
 
@@ -173,8 +333,14 @@ def parse_statement(text: str):
     idx_state = _match_header(header, STATE_HEADERS)
     idx_currency = _match_header(header, CURRENCY_HEADERS)
 
-    has_header = idx_date is not None and (idx_amount is not None or idx_debit is not None
-                                           or idx_credit is not None)
+    # `len(header) >= 2` : sur un relevé non délimité, la virgule décimale des
+    # montants suffit à faire croire à un séparateur. L'en-tête, lui, n'en
+    # contient pas et reste d'un seul tenant — un tableau d'une seule colonne
+    # n'est pas un tableau, et le reconnaître ici évite de lire tout le relevé
+    # de travers.
+    has_header = (len(header) >= 2 and idx_date is not None
+                  and (idx_amount is not None or idx_debit is not None
+                       or idx_credit is not None))
     body = raw_rows[1:] if has_header else raw_rows
     if not has_header:
         warnings.append(
@@ -229,10 +395,24 @@ def parse_statement(text: str):
             "brut": delimiter.join(row),
         })
 
+    # Second essai en lecture alignée, celle d'un relevé imprimé ou extrait d'un
+    # PDF. La lecture délimitée garde la main quand elle réussit vraiment :
+    # c'est elle qui distingue débit et crédit sans avoir à deviner.
+    #
+    # Deux cas la déclarent en échec. Aucune ligne, évidemment. Mais aussi des
+    # lignes dont le libellé commence lui-même par une date : le découpage n'a
+    # alors rien découpé, la ligne entière a atterri dans une seule cellule, et
+    # ce qui en sort ressemble à des transactions sans en être.
+    if not lines or sum(bool(DATE_LIBRE.match(l["description"]))
+                        for l in lines) * 2 >= len(lines):
+        libres, avertissements_libres = _parse_lignes_libres(text)
+        if libres:
+            return libres, avertissements_libres
+
     if skipped:
         warnings.append(f"{skipped} ligne(s) ignorée(s) (date ou montant illisible).")
     if not lines:
-        warnings.append("Aucune transaction reconnue dans le contenu collé.")
+        warnings.append("Aucune transaction reconnue dans ce contenu.")
     return lines, warnings
 
 

@@ -11,6 +11,10 @@ App.tabs.overview = {
     App.tabs.overview.expanded = null;
     App.els('#tab-overview .card.expanded').forEach((c) => c.classList.remove('expanded'));
     App.els('#tab-overview .card-extra').forEach(App.clear);
+    // Base vide : on s'arrete la. Rendre un heros a zero, quatre indicateurs a
+    // « — » et deux camemberts « aucun actif » ne dit rien, et le masquage des
+    // montants floute ces zeros par-dessus le marché.
+    if (App.tabs.overview.renderAccueil(data)) return;
     App.tabs.overview.renderHero(data);
     App.tabs.overview.renderAlertes(data.alertes || []);
     App.tabs.overview.renderKpis(data);
@@ -20,6 +24,34 @@ App.tabs.overview = {
     App.tabs.overview.renderCategories(data.mois);
     App.tabs.overview.renderRepartition(data.repartition, data.metrics);
     App.tabs.overview.renderFlows(data.depenses_serie);
+  },
+
+  /* Accueil d'une base vide.
+
+     Les deux points d'entree existaient deja, mais sur les onglets Patrimoine
+     et Depenses : invisibles depuis l'ecran ou l'application s'ouvre. */
+  renderAccueil(data) {
+    const panneau = App.el('#tab-overview');
+    const host = App.el('#ov-vide');
+    App.clear(host);
+    panneau.classList.toggle('vide', !!data.aucune_donnee);
+    if (!data.aucune_donnee) return false;
+
+    host.append(App.h('div', { class: 'empty-cta accueil' },
+      App.h('h2', {}, 'Rien n’est encore enregistré'),
+      App.h('p', {},
+        'Deux façons de commencer, dans l’ordre que vous voulez. '
+        + 'Tout reste modifiable ensuite.'),
+      App.h('div', { class: 'actions' },
+        App.h('button', {
+          class: 'btn primary big',
+          onclick: () => App.tabs.wealth.openAddChooser(),
+        }, 'Déclarer mon patrimoine'),
+        App.h('button', {
+          class: 'btn big',
+          onclick: () => App.tabs.expenses.openImport(),
+        }, 'Importer un relevé bancaire'))));
+    return true;
   },
 
   /* Observations factuelles.

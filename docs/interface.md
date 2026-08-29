@@ -284,6 +284,22 @@ navigation suivante.
 `prefers-reduced-motion: reduce` désactive tout, fond animé compris.
 
 
+## Le premier lancement
+
+Sur une base vide, la synthèse n'a **aucun chiffre à montrer**. Elle en affichait
+quand même : un héros à 0 €, quatre indicateurs à « — », deux camemberts
+« aucun actif » et une répartition « aucune poche définie ». Et comme le masquage
+des montants est actif par défaut, ce zéro arrivait **flouté**. Les deux points
+d'entrée existaient bien, mais sur les onglets *Patrimoine* et *Dépenses* :
+invisibles depuis l'écran où l'application s'ouvre.
+
+Le panneau ne montre donc plus que deux boutons — *Déclarer mon patrimoine* et
+*Importer un relevé bancaire* — tant qu'il n'existe ni actif, ni passif, ni
+transaction. Le serveur tranche (`aucune_donnee` dans `/api/overview`, trois
+lectures à une ligne) plutôt que l'interface, qui ne voit que le mois affiché et
+croirait la base vide dès qu'on recule d'un mois.
+
+
 ## Les 4 onglets
 
 **Vue d'ensemble** — dépensé ce mois vs mois précédent, patrimoine net et sa
@@ -291,7 +307,9 @@ courbe sur 12 mois, répartition cible vs réelle, camembert des catégories,
 détail des métriques.
 
 **Dépenses** — un bandeau en tête d'onglet rappelle le dernier relevé importé et
-porte le bouton **« + Ajouter un relevé »**. En dessous : transactions du mois,
+porte le bouton **« + Ajouter un relevé »**, qui ouvre une zone de dépôt :
+le fichier y est lâché ou choisi, puis analysé sans second clic (voir
+[donnees.md](donnees.md)). En dessous : transactions du mois,
 catégorie modifiable directement dans la liste, ajout manuel, tendance 6 mois.
 Un mois vide propose directement l'import plutôt qu'un tableau nu.
 

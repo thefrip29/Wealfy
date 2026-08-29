@@ -9,17 +9,54 @@ Faire entrer ses données, et ce que l'application en fait.
 
 ## Import de relevés
 
-Coller le contenu dans *Dépenses → Importer un relevé*. Le séparateur (`,` `;`
-tabulation `|`), les colonnes (FR/EN, montant unique ou débit/crédit séparés) et
-le format des montants (`1 234,56` / `1,234.56` / `(12,00)`) sont détectés
-automatiquement.
+Déposez le fichier dans *Dépenses → Ajouter un relevé*, ou cliquez pour le
+choisir. Il est lu, puis **analysé sans second clic** : il n'y a rien à
+demander de plus. Le collage reste possible dans le champ en dessous, pour un
+extrait pris à la main.
 
-- **Revolut** : export CSV natif, collé tel quel. Les lignes `REVERTED`,
+Le séparateur (`,` `;` tabulation `|`), les colonnes (FR/EN, montant unique ou
+débit/crédit séparés) et le format des montants (`1 234,56` / `1,234.56` /
+`(12,00)`) sont détectés automatiquement. **Il n'y a plus de menu « Source »** :
+il ne servait qu'à étiqueter le journal des imports, et le nom du fichier le dit
+mieux qu'une banque choisie dans une liste de quatre.
+
+- **Revolut** : export CSV natif, déposé tel quel. Les lignes `REVERTED`,
   `DECLINED` ou `PENDING` sont écartées, les frais déduits du montant.
-- **LCL** : pas de parsing PDF dans l'app. Faites extraire le relevé en texte
-  tabulé (une conversation Claude suffit), puis collez-le au même endroit.
+- **LCL et relevés PDF** : le PDF téléchargé depuis votre espace client se
+  dépose directement. Plus de conversion préalable. Un PDF **scanné** ne
+  contient qu'une image et reste illisible — l'application le dit plutôt que de
+  renvoyer une liste vide.
 - **Trade Republic / courtier** : *Patrimoine → fiche du compte → Mes supports →
-  Importer un relevé*. Voir la section dédiée ci-dessous.
+  Importer un relevé*, même zone de dépôt. Voir la section dédiée ci-dessous.
+
+### Relevés sans séparateur
+
+Un relevé imprimé ou extrait d'un PDF n'a aucun séparateur : ses colonnes sont
+alignées à l'espace. `csv.reader` n'y voyait qu'une colonne par ligne et
+renvoyait zéro transaction. Une seconde lecture prend le relais, ligne à ligne :
+date en tête, montant en fin.
+
+**Le sens du montant vient de sa colonne, pas de son signe.** Un relevé imprimé
+sépare débit et crédit en deux colonnes et n'écrit jamais de moins. Les montants
+y sont alignés à droite : c'est donc la position de **fin** qui est stable, pas
+celle du début, et le plus grand écart entre deux fins sépare les deux colonnes.
+À défaut de seconde colonne, la ligne est lue comme un débit — et l'application
+le dit, plutôt que d'inventer un sens.
+
+Les lignes de solde (« solde précédent », « nouveau solde », « report ») portent
+une date et un montant comme les autres : seul leur libellé les distingue. Elles
+sont écartées, sans quoi tous les totaux seraient faux.
+
+La lecture délimitée garde la priorité quand elle aboutit vraiment : c'est elle
+qui distingue débit et crédit sans avoir à deviner. Deux signes la déclarent en
+échec : aucune ligne reconnue, ou des libellés qui commencent eux-mêmes par une
+date — preuve que le découpage n'a rien découpé et que la ligne entière a atterri
+dans une seule cellule.
+
+Le fichier déposé est converti en texte **sur votre machine** (`POST
+/api/imports/text`, aucun appel réseau) et le texte extrait revient dans le
+champ, visible et modifiable : l'extraction d'un PDF est imparfaite par nature,
+la cacher reviendrait à demander une confiance aveugle.
 
 Chaque ligne reçoit un hash `date + montant + libellé normalisé`. Les doublons
 sont signalés et décochés avant confirmation ; un index unique en base bloque

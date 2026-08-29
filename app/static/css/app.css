@@ -1238,11 +1238,44 @@ input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
 }
 
 /* ==========================================================================
+   Dépôt de fichier
+
+   Le trait discontinu dit « posez quelque chose ici » sans avoir à l'écrire.
+   Il devient continu au survol d'un fichier : c'est le seul moment où la zone
+   attend vraiment un geste.
+   ========================================================================== */
+
+.depot {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-s);
+  background: var(--bg-surface);
+  padding: var(--space-5) var(--space-4);
+  text-align: center; cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease),
+              background var(--t-fast) var(--ease);
+}
+.depot:hover { border-color: var(--accent); }
+.depot.survol {
+  border-style: solid; border-color: var(--accent);
+  background: var(--action-subtle);
+}
+.depot.occupe { pointer-events: none; opacity: .7; }
+.depot-titre { font-size: var(--fs-sm); color: var(--text); }
+.depot-sub { font-size: var(--fs-xs); color: var(--muted); margin-top: 4px; }
+.depot-etat:not(:empty) { margin-top: var(--space-3); }
+
+/* ==========================================================================
    États vides
    ========================================================================== */
 
 .empty-cta { text-align: center; padding: var(--space-7) var(--space-4); }
 .empty-cta p { color: var(--muted); margin: 0 0 var(--space-4); }
+
+/* Accueil d'une base vide : le panneau ne montre que lui. */
+#tab-overview.vide > *:not(#ov-vide) { display: none; }
+#ov-vide:empty { display: none; }
+.accueil h2 { margin: 0 0 var(--space-2); font-size: var(--fs-lg); }
+.accueil .actions { justify-content: center; }
 
 /* ==========================================================================
    Notifications

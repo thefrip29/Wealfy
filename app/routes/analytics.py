@@ -28,6 +28,15 @@ def overview():
     }
     return jsonify({
         "as_of": finance.iso(as_of),
+        # Base entierement vide : la synthese n'a alors aucun chiffre a
+        # montrer, et un ecran de zeros n'indique pas par ou commencer.
+        # Trois lectures a une ligne, moins couteuses que les COUNT(*)
+        # complets dont on n'a pas besoin ici.
+        "aucune_donnee": not (
+            query("SELECT 1 FROM transactions LIMIT 1")
+            or query("SELECT 1 FROM assets LIMIT 1")
+            or query("SELECT 1 FROM liabilities LIMIT 1")
+        ),
         # Observations factuelles, calculees sur ce qui vient d'etre mesure.
         "alertes": advisor.alertes(snap, metrics, repartition, etat_marche,
                                    at_date=as_of),
