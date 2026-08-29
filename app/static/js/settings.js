@@ -76,7 +76,7 @@ App.settings = {
   /* Reglages qui ne changent RIEN de ce qui est affiche a l'instant : ils
      n'agissent que sur de futurs imports ou de futurs appels reseau. */
   CLES_SANS_RENDU: ['market_api_key', 'market_auto_refresh',
-    'market_cache_ttl_hours', 'mots_cles_transfert'],
+    'market_cache_ttl_hours'],
 
   /* Chaque case cochee relancait un PUT, un `loadMeta` ET un `refreshAll`
      complet — derriere une modale ouverte, ou rien de tout cela ne se voit.
@@ -189,39 +189,6 @@ App.settings = {
           tbody));
     };
 
-    /* Mots-clés qui trahissent un virement entre comptes de l'utilisateur. */
-    const motsHost = App.h('div', { class: 'actions' });
-    const renderMots = () => {
-      App.clear(motsHost);
-      for (const mot of settings.mots_cles_transfert || []) {
-        motsHost.append(App.h('span', { class: 'pill accent' }, mot, ' ',
-          App.h('a', {
-            href: '#', style: 'color:var(--perte);text-decoration:none',
-            onclick: async (e) => {
-              e.preventDefault();
-              settings.mots_cles_transfert = (settings.mots_cles_transfert || [])
-                .filter((m) => m !== mot);
-              renderMots();
-              await App.settings.save(
-                { mots_cles_transfert: settings.mots_cles_transfert }, 'Mot-clé supprimé');
-            },
-          }, '×')));
-      }
-    };
-    renderMots();
-    const motInput = App.input('mot', { placeholder: 'ex : revolut, virement interne…' });
-    const addMot = async () => {
-      const value = motInput.value.trim();
-      if (!value) return;
-      settings.mots_cles_transfert = [...(settings.mots_cles_transfert || []), value];
-      motInput.value = '';
-      renderMots();
-      await App.settings.save(
-        { mots_cles_transfert: settings.mots_cles_transfert }, 'Mot-clé ajouté');
-    };
-    motInput.addEventListener('keydown',
-      (e) => { if (e.key === 'Enter') { e.preventDefault(); addMot(); } });
-
     return App.h('div', {},
       build('categories_depenses', 'Catégories de dépenses'),
       build('categories_revenus', 'Catégories de revenus'),
@@ -240,15 +207,7 @@ App.settings = {
           + 'ni comme revenu, ni comme épargne.')),
       tableRoles(),
 
-      App.h('div', { class: 'section-title' }, 'Mots-clés de détection à l’import'),
-      App.note('Comment ils sont utilisés',
-        'Cherchés dans le libellé, sans casse ni accents. Vos règles de classification '
-        + 'restent prioritaires. Après un import, l’application propose d’elle-même les '
-        + 'paires débit/crédit qu’elle a repérées entre deux relevés : c’est ce '
-        + 'rapprochement qui rattrape ce que les mots-clés manquent.'),
-      App.h('div', { style: 'margin:10px 0' }, motsHost),
-      App.h('div', { class: 'actions' },
-        motInput, App.h('button', { class: 'btn', onclick: addMot }, 'Ajouter')));
+      tableRoles());
   },
 
   /* ---------- règles ---------- */
@@ -313,9 +272,23 @@ App.settings = {
 
     return App.h('div', {},
       App.h('p', { class: 'hint' },
-        'Le motif est cherché dans le libellé, sans tenir compte de la casse ni des accents. '
-        + 'La règle de plus petite priorité gagne. Le remboursement de prêt est détecté '
-        + 'automatiquement par le montant et la date, sans règle.'),
+        'Le motif est cherché dans le libellé, sans tenir compte de la casse ni des '
+        + 'accents. La règle de plus petite priorité gagne. Le remboursement de prêt, '
+        + 'lui, est détecté par le montant et la date, sans règle.'),
+      App.note('Classer un virement entre vos comptes',
+        App.h('p', {},
+          'C’est une règle comme une autre : donnez le motif qui revient dans le '
+          + 'libellé — « revolut », « virement interne » — et choisissez une '
+          + 'catégorie marquée « virement interne » dans le tableau des rôles.'),
+        App.h('p', {},
+          'Il y avait ici un second écran, une liste de mots-clés séparée, qui '
+          + 'faisait exactement cela avec son propre vocabulaire. Vos mots-clés '
+          + 'sont devenus des règles ordinaires, visibles et modifiables dans le '
+          + 'tableau ci-dessous.'),
+        App.h('p', {},
+          'Après un import, l’application propose de son côté les paires '
+          + 'débit/crédit qu’elle repère entre deux relevés : ce rapprochement '
+          + 'rattrape ce qu’aucun motif ne décrit.')),
       App.h('div', { class: 'table-wrap scroll-y', style: 'margin-top:10px' },
         App.h('table', { class: 'table' },
           App.h('thead', {}, App.h('tr', {},

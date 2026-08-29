@@ -145,14 +145,26 @@ non plus, mais il **compte comme épargne**. Les deux réglages se règlent dans
 
 ### Deux mécanismes de détection
 
-**1. Mots-clés, à l'import.** `mots_cles_transfert` (par défaut `revolut`,
-`virement interne`, `topup`, `transfert compte`…) est cherché dans le libellé,
-sans casse ni accents. Attrape les deux sens : le `VIR SEPA VERS REVOLUT` côté
-LCL comme le `Top-Up by card` côté Revolut. Vos règles de classification restent
-prioritaires.
+**1. Une règle de classification.** Un motif (`revolut`, `virement interne`,
+`topup`, `transfert compte`…) est cherché dans le libellé, sans casse ni
+accents, et attribue une catégorie marquée « virement interne ». Attrape les
+deux sens : le `VIR SEPA VERS REVOLUT` côté LCL comme le `Top-Up by card` côté
+Revolut.
+
+C'était un réglage séparé, `mots_cles_transfert`, avec son propre écran et son
+propre vocabulaire — alors qu'une règle fait exactement cela : chercher un texte
+dans un libellé pour attribuer une catégorie. **Deux mécanismes pour une seule
+idée.** Les motifs sont donc devenus des règles ordinaires : visibles dans le
+tableau des règles, modifiables et supprimables comme les autres.
+
+Ils portent la priorité **200**, au-dessus de la valeur par défaut de 100 : ils
+passent donc après les règles que vous écrivez, exactement comme les mots-clés
+passaient après elles. Une base existante est convertie au premier démarrage
+(`_fondre_mots_cles_dans_les_regles`, `app/db.py`), une base neuve reçoit les
+mêmes motifs directement en règles.
 
 **2. Rapprochement par paires**, proposé **juste après un import**. Pour les
-libellés opaques que les mots-clés ne peuvent pas attraper (`VIR M SAMUEL 88213`
+libellés opaques qu'aucun motif ne décrit (`VIR M SAMUEL 88213`
 → `Payment from SAMUEL`), on apparie un débit et un crédit de même montant, à
 quelques jours d'écart. Les paires sont proposées avec leur écart de date, à
 cocher avant application — rien n'est reclassé sans votre accord.

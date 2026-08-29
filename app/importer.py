@@ -577,22 +577,18 @@ def parse_movements(text: str):
     return lines, warnings
 
 
-def looks_like_transfer(description, keywords) -> bool:
-    """Vrai si le libellé trahit un mouvement entre comptes de l'utilisateur.
-
-    Vaut pour les deux sens : le débit côté LCL comme le crédit côté Revolut.
-    """
-    text = norm(description)
-    return any(norm(kw) and norm(kw) in text for kw in (keywords or []))
-
-
-def classify(line, rules, liabilities, tolerance=2.0, day_tolerance=6,
-             transfer_keywords=None, transfer_category="Transfert interne"):
+def classify(line, rules, liabilities, tolerance=2.0, day_tolerance=6):
     """Renvoie (category, liability_id, origine).
 
-    Ordre : règles utilisateur, puis échéance de prêt, puis virement interne,
-    puis mots-clés intégrés. Les règles gardent la priorité : c'est
-    l'utilisateur qui a le dernier mot sur sa propre classification.
+    Ordre : règles utilisateur, puis échéance de prêt, puis mots-clés intégrés.
+    Les règles gardent la priorité : c'est l'utilisateur qui a le dernier mot
+    sur sa propre classification.
+
+    Il y avait ici une quatrième étape, une liste de mots-clés qui marquaient
+    un virement interne. Elle faisait exactement ce qu'une règle fait — chercher
+    un texte dans le libellé pour attribuer une catégorie — avec son propre
+    écran et son propre vocabulaire. Ces mots sont devenus des règles
+    ordinaires (voir `_fondre_mots_cles_dans_les_regles` dans db.py).
     """
     amount = line["amount"]
     value, _rule_id = _apply_rules(line["description"], rules)
@@ -604,8 +600,6 @@ def classify(line, rules, liabilities, tolerance=2.0, day_tolerance=6,
         return value, liability_id, "regle"
     if liability_id:
         return "Remboursement pret", liability_id, "pret"
-    if looks_like_transfer(line["description"], transfer_keywords):
-        return transfer_category, None, "transfert"
     keyword = _apply_keywords(line["description"], amount)
     if keyword:
         return keyword, None, "mot-cle"

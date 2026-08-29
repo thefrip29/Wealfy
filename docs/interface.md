@@ -386,7 +386,7 @@ aussi, alors qu'il vivait dans le module de l'Historique sans y être rendu. Un
 import peut être annulé : ses transactions sont supprimées avec lui.
 
 **Paramètres** (icône engrenage) — quatre sections dont le contenu correspond au
-titre : *Classement des dépenses* (catégories, rôles, mots-clés, règles),
+titre : *Classement des dépenses* (catégories, rôles, règles),
 *Objectifs* (répartition cible, frais, crédit des intérêts), *Cours de marché*,
 et *Général* (types d'actifs personnalisés, sauvegardes). « Types d'actifs
 personnalisés » était logé sous *Cours de marché*, avec lesquels il n'a rien à
@@ -407,6 +407,23 @@ machine. Un réglage à conséquence se confirme.
 
 Les champs à saisie libre (frais, poches) s'écrivent à la **sortie du champ** et
 non à la frappe : sinon « 1 » serait enregistré avant « 120 ».
+
+### Un seul mécanisme de détection
+
+« Règles de classification » et « Mots-clés de détection à l'import » cherchaient
+tous les deux un texte dans le libellé d'une opération. Le premier attribuait
+une catégorie, le second marquait un virement interne — or une règle sait
+attribuer une catégorie de virement. **Le second n'était qu'un cas particulier
+du premier**, avec son écran, son vocabulaire et ses mots invisibles dans le
+tableau des règles.
+
+Les motifs de virement sont devenus des règles ordinaires. On peut enfin les
+voir, en corriger un, en supprimer un. Ils portent la priorité 200 pour rester
+après les règles écrites à la main, comme avant. Voir
+[donnees.md](donnees.md) pour la conversion.
+
+L'origine annoncée dans la prévisualisation d'import suit : il n'y a plus de
+pastille « virement interne », ces lignes répondent « règle » comme les autres.
 
 ### Le rôle d'une catégorie, en un tableau
 

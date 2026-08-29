@@ -46,8 +46,6 @@ def preview_import():
     liabs = services.liabilities_with_summary()
     tol = float(get_setting("tolerance_mensualite", 2.0) or 2.0)
     tol_days = int(get_setting("tolerance_jours_echeance", 6) or 6)
-    mots_transfert = get_setting("mots_cles_transfert", []) or []
-    cat_transfert = (get_setting("categories_transfert", []) or ["Transfert interne"])[0]
 
     existing = {r["dedup_hash"] for r in query(
         "SELECT dedup_hash FROM transactions WHERE dedup_hash IS NOT NULL"
@@ -60,7 +58,7 @@ def preview_import():
         if duplicate:
             doublons += 1
         category, liability_id, origine = importer.classify(
-            line, rules, liabs, tol, tol_days, mots_transfert, cat_transfert
+            line, rules, liabs, tol, tol_days
         )
         out.append({
             **line,

@@ -502,10 +502,11 @@ App.tabs.expenses = {
       const cat = App.select('c', App.categoriesAll(), line.category);
       cat.addEventListener('change', () => { line.category = cat.value; });
 
+      // Plus d'origine « transfert » : les motifs de virement sont devenus
+      // des regles ordinaires, et repondent donc « regle » comme les autres.
       const badge = {
         regle: ['accent', 'règle'],
         pret: ['ok', 'prêt détecté'],
-        transfert: ['ok', 'virement interne'],
         'mot-cle': ['', 'mot-clé'],
         defaut: ['', '—'],
       }[line.origine] || ['', ''];

@@ -158,8 +158,6 @@ def apply_rules_now():
     liabs = services.liabilities_with_summary()
     tol = float(get_setting("tolerance_mensualite", 2.0) or 2.0)
     tol_days = int(get_setting("tolerance_jours_echeance", 6) or 6)
-    mots_transfert = get_setting("mots_cles_transfert", []) or []
-    cat_transfert = (get_setting("categories_transfert", []) or ["Transfert interne"])[0]
     only_uncategorised = body().get("seulement_non_categorise", True)
 
     sql = "SELECT * FROM transactions"
@@ -169,7 +167,7 @@ def apply_rules_now():
     for tx in rows_to_list(query(sql)):
         line = {"date": tx["date"], "description": tx["description"], "amount": tx["amount"]}
         category, liability_id, _ = importer.classify(
-            line, rules, liabs, tol, tol_days, mots_transfert, cat_transfert)
+            line, rules, liabs, tol, tol_days)
         if category != tx["category"] or (liability_id and liability_id != tx["liability_id"]):
             execute(
                 "UPDATE transactions SET category = ?, liability_id = ? WHERE id = ?",

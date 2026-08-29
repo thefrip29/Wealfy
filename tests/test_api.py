@@ -712,7 +712,20 @@ class TestInternalTransfers(ApiTestCase):
         preview = self.post("/api/imports/preview", {"text": text})
         line = preview["lignes"][0]
         self.assertEqual(line["category"], "Transfert interne")
-        self.assertEqual(line["origine"], "transfert")
+        # Depuis la fusion, un motif de virement EST une regle : meme resultat,
+        # mais annonce comme tel, et visible dans le tableau des regles.
+        self.assertEqual(line["origine"], "regle")
+        self.assertIn("revolut", [r["pattern"] for r in self.get("/api/rules")])
+
+    def test_motif_de_virement_supprimable(self):
+        """Ces motifs etaient caches dans un reglage : on ne pouvait ni les
+        voir dans le tableau des regles, ni en retirer un seul."""
+        regle = next(r for r in self.get("/api/rules") if r["pattern"] == "revolut")
+        self.client.delete("/api/rules/" + regle["id"])
+        text = ("Date,Description,Amount" + chr(10)
+                + month_key() + "-10,VIR SEPA VERS REVOLUT,-500.00" + chr(10))
+        preview = self.post("/api/imports/preview", {"text": text})
+        self.assertNotEqual(preview["lignes"][0]["category"], "Transfert interne")
 
     def test_pair_detection_across_two_statements(self):
         month = month_key()
