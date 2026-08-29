@@ -20,10 +20,9 @@ App.tabs.overview = {
     App.tabs.overview.renderKpis(data);
     App.tabs.overview.renderNetWorth(data.patrimoine_serie);
     App.tabs.overview.renderPatrimoine(data.patrimoine_par_famille);
-    App.tabs.overview.renderDepenses(data.depenses_serie);
+    App.tabs.overview.renderFlux(data.depenses_serie);
     App.tabs.overview.renderCategories(data.mois);
     App.tabs.overview.renderRepartition(data.repartition, data.metrics);
-    App.tabs.overview.renderFlows(data.depenses_serie);
   },
 
   /* Accueil d'une base vide.
@@ -196,12 +195,10 @@ App.tabs.overview = {
       App.tabs.overview.renderNetWorth(data.patrimoine_serie);
     } else if (kind === 'patrimoine') {
       App.tabs.overview.renderPatrimoine(data.patrimoine_par_famille);
-    } else if (kind === 'depenses') {
-      App.tabs.overview.renderDepenses(data.depenses_serie);
+    } else if (kind === 'flux') {
+      App.tabs.overview.renderFlux(data.depenses_serie);
     } else if (kind === 'categories') {
       App.tabs.overview.renderCategories(data.mois);
-    } else if (kind === 'flows') {
-      App.tabs.overview.renderFlows(data.depenses_serie);
     }
     const c = App.state.charts[`chart-${kind}`];
     if (c) c.resize();
@@ -217,12 +214,11 @@ App.tabs.overview = {
     if (kind === 'patrimoine') {
       host.append(App.tabs.overview.tablePatrimoine(data.patrimoine_par_famille));
     }
-    // Douze mois pour la courbe, six pour l'histogramme : chacun son tableau.
-    if (kind === 'depenses') host.append(App.tabs.overview.tableFlows(data.depenses_serie));
+    // Le tableau porte les DOUZE mois, alors que les barres n'en montrent que
+    // six : c'est la période du trait de moyenne, et agrandir sert justement à
+    // voir ce que le graphique résume.
+    if (kind === 'flux') host.append(App.tabs.overview.tableFlows(data.depenses_serie));
     if (kind === 'categories') host.append(App.tabs.overview.tableCategories(data.mois));
-    if (kind === 'flows') {
-      host.append(App.tabs.overview.tableFlows((data.depenses_serie || []).slice(-6)));
-    }
     return null;
   },
 
@@ -387,10 +383,12 @@ App.tabs.overview = {
     // au lieu de le répéter.
     host.append(
       App.tabs.overview.kpi('Dépensé ce mois', App.fmt.eur(cur.depenses), deltaText, deltaClass),
+      // `nb_transactions` comptait TOUT le mois, dépenses comprises : sous
+      // « Revenus du mois », le nombre ne parlait de rien.
       App.tabs.overview.kpi('Revenus du mois', App.fmt.eur(cur.revenus),
         cur.transferts_internes
           ? `hors ${App.fmt.eur(cur.transferts_internes)} de virements internes`
-          : `${cur.nb_transactions} transaction(s)`),
+          : `${cur.nb_revenus} ligne(s) de revenu`),
       App.tabs.overview.kpi("Taux d'épargne",
         cur.taux_epargne === null ? '—' : App.fmt.ratio(cur.taux_epargne),
         `${App.fmt.eur(cur.epargne)} épargnés sur ${App.fmt.eur(cur.revenus)} de revenus`,
@@ -477,46 +475,6 @@ App.tabs.overview = {
     });
   },
 
-  /* Courbe de dépenses sur douze mois, avec la moyenne en repère.
-
-     L'histogramme du bas montre déjà dépenses, revenus et épargne côte à côte
-     sur six mois ; celui-ci ne suit qu'une grandeur, sur une année pleine —
-     assez pour qu'une saison se voie. */
-  renderDepenses(serie) {
-    const points = serie || [];
-    const moyenne = points.length
-      ? points.reduce((s, p) => s + p.depenses, 0) / points.length : 0;
-    App.chart('chart-depenses', {
-      type: 'line',
-      data: {
-        labels: points.map((p) => App.fmt.month(p.mois)),
-        datasets: [
-          {
-            label: 'Dépenses', data: points.map((p) => p.depenses),
-            borderColor: App.chartColors[4],
-            backgroundColor: 'transparent',
-            fill: false, tension: .3, borderWidth: 2, pointRadius: 2,
-          },
-          {
-            label: 'Moyenne 12 mois', data: points.map(() => Math.round(moyenne * 100) / 100),
-            borderColor: App.chartColors[8],
-            borderDash: [5, 4], borderWidth: 1.5,
-            pointRadius: 0, fill: false,
-          },
-        ],
-      },
-      options: {
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          tooltip: {
-            callbacks: { label: (c) => `${c.dataset.label} : ${App.fmt.eur(c.parsed.y)}` },
-          },
-        },
-        scales: { y: { ticks: { callback: (v) => App.fmt.eur(v, true) } } },
-      },
-    });
-  },
-
   renderCategories(month) {
     App.el('#ov-cat-month').textContent = App.fmt.month(month.mois);
     const cats = month.par_categorie;
@@ -588,15 +546,27 @@ App.tabs.overview = {
     host.append(App.h('div', { class: 'rep-legend' },
       App.h('span', {}, `Base : ${App.fmt.eur(rep.base)}`),
       rep.hors_poches ? App.h('span', {}, `Hors poches : ${App.fmt.eur(rep.hors_poches)}`) : null,
-      App.h('span', {}, '| trait vertical = cible')));
+      App.h('span', {}, 'Trait vertical : la cible')));
   },
 
-  renderFlows(series) {
-    // La serie arrive sur douze mois pour la courbe de depenses ; cet
-    // histogramme en montre trois grandeurs a la fois, et devient illisible
-    // au-dela de six colonnes.
-    const s6 = (series || []).slice(-6);
-    App.chart('chart-flows', {
+  /* Une seule carte de flux.
+
+     Il y en avait deux : une courbe « Dépenses — 12 mois » et un histogramme
+     « Dépenses / revenus — 6 mois », dans deux rangées différentes. La dépense
+     y était tracée deux fois, sur deux échelles, et il fallait faire l'aller-
+     retour pour savoir si un mois était au-dessus de l'ordinaire.
+
+     Les barres donnent les trois flux du mois, le trait la moyenne des douze
+     derniers : la tendance longue devient un repère posé sur le détail court.
+     Six colonnes au maximum — au-delà, trois grandeurs côte à côte deviennent
+     illisibles. Le tableau de la vue agrandie porte les douze mois. */
+  renderFlux(series) {
+    const points = series || [];
+    const s6 = points.slice(-6);
+    const moyenne = points.length
+      ? Math.round((points.reduce((s, p) => s + p.depenses, 0) / points.length) * 100) / 100
+      : 0;
+    App.chart('chart-flux', {
       type: 'bar',
       data: {
         labels: s6.map((p) => App.fmt.month(p.mois)),
@@ -604,14 +574,23 @@ App.tabs.overview = {
           { label: 'Revenus', data: s6.map((p) => p.revenus), backgroundColor: App.chartColors[1], borderRadius: 4 },
           { label: 'Dépenses', data: s6.map((p) => p.depenses), backgroundColor: App.chartColors[4], borderRadius: 4 },
           { label: 'Épargne', data: s6.map((p) => p.epargne), backgroundColor: App.chartColors[0], borderRadius: 4 },
+          {
+            type: 'line',
+            label: 'Dépense moyenne sur 12 mois',
+            data: s6.map(() => moyenne),
+            borderColor: App.chartColors[8],
+            borderDash: [5, 4], borderWidth: 1.5,
+            pointRadius: 0, fill: false,
+          },
         ],
       },
       options: {
+        interaction: { mode: 'index', intersect: false },
         plugins: {
           tooltip: { callbacks: { label: (c) => `${c.dataset.label} : ${App.fmt.eur(c.parsed.y)}` } },
         },
         scales: { y: { ticks: { callback: (v) => App.fmt.eur(v, true) } } },
       },
     });
-  }
+  },
 };

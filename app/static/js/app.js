@@ -263,6 +263,11 @@ App.showTab = async function (name, sens) {
   App.currentTab = name;
   App.els('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   App.els('.panel').forEach((p) => p.classList.toggle('active', p.id === `tab-${name}`));
+  // L'archive est multi-mois par nature : un sélecteur de mois n'a rien à y
+  // commander. Il y restait pourtant, et en changer jouait l'animation de
+  // carrousel sur un tableau identique. Les trois autres onglets s'y réfèrent
+  // vraiment, Patrimoine compris depuis qu'il prend sa photo à cette date.
+  App.el('.month-picker').hidden = name === 'history';
   // Le trait part tout de suite, avec le changement de libellé : il accompagne
   // le clic au lieu d'attendre la fin du chargement des données.
   App.placeIndicator();

@@ -302,9 +302,28 @@ croirait la base vide dès qu'on recule d'un mois.
 
 ## Les 4 onglets
 
-**Vue d'ensemble** — dépensé ce mois vs mois précédent, patrimoine net et sa
-courbe sur 12 mois, répartition cible vs réelle, camembert des catégories,
-détail des métriques.
+**Vue d'ensemble** — patrimoine net et sa courbe sur 12 mois, répartition du
+patrimoine, dépenses et revenus sur 6 mois, camembert des catégories,
+répartition cible vs réelle. **Cinq cartes, quatre graphiques** : « Dépenses —
+12 mois » et « Dépenses / revenus — 6 mois » traçaient la même grandeur deux
+fois, dans deux rangées différentes, sur deux échelles. Les barres donnent
+maintenant les trois flux du mois et le trait la moyenne des douze derniers : la
+tendance longue est un repère posé sur le détail court, plutôt qu'une carte à
+elle seule.
+
+### Le sélecteur de mois ne ment plus
+
+Il était **inerte** sur *Patrimoine* et sur *Historique* : en changer y jouait
+l'animation de carrousel sur un contenu identique, parce que les deux `load()`
+ignoraient `App.state.month`.
+
+*Patrimoine* prend désormais sa photo à la **date d'arrêt du mois affiché** —
+son dernier jour, ou aujourd'hui si le mois est en cours. C'est la règle que
+`/api/overview` appliquait déjà côté serveur, et `/api/assets` acceptait déjà le
+paramètre `date`. Reculer d'un mois montre le patrimoine tel qu'il était.
+
+*Historique* est multi-mois par nature : le sélecteur y est masqué. Un contrôle
+qui ne commande rien ne doit pas rester à l'écran.
 
 **Dépenses** — un bandeau en tête d'onglet rappelle le dernier relevé importé et
 porte le bouton **« + Ajouter un relevé »**, qui ouvre une zone de dépôt :
@@ -355,8 +374,13 @@ large, avec des angles supplémentaires :
 | Graphique | Vues disponibles |
 |---|---|
 | Patrimoine net | *Total* (net, actifs, dettes) et **Par actif** — une courbe par produit |
-| Dépenses par catégorie | *Camembert* et *Tableau* : montant, part, nombre d'opérations, panier moyen |
-| Dépenses / revenus | *Barres* et *Tableau* : revenus, dépenses, solde, épargne et taux, mois par mois |
+| Répartition du patrimoine | *Camembert* et *Tableau* : montant et part par famille |
+| Dépenses et revenus | *Barres* et *Tableau* : revenus, dépenses, solde, épargne et taux, sur **douze** mois |
+| Dépenses par catégorie | *Camembert* et *Tableau* : montant, part, nombre d'opérations |
+
+Le tableau des flux porte douze mois quand les barres n'en montrent que six :
+c'est la période du trait de moyenne, et agrandir sert justement à voir ce que
+le graphique résume.
 
 La vue **Par actif** répond à une question que la courbe du net ne pose même
 pas : elle dit *combien*, celle-ci dit *d'où ça vient*. Chaque courbe démarre à
@@ -483,3 +507,14 @@ Les tableaux de détail restent lisibles : tout flouter rendrait l'application
 inutilisable au quotidien, alors que le risque réel est le grand nombre qu'un
 regard de passage attrape en premier. C'est un cache-écran, **pas un
 chiffrement** : les valeurs restent dans la page.
+
+**Il ne floute que des montants.** La règle portait sur toute valeur de liste
+(`.m-value`) et atteignait ce qui n'en est pas un : « État : activé » et
+« Cours en cache : 128 » dans les réglages, « Ouvert le 12/03/2020 » sur une
+fiche, « Échéances payées : 24 / 240 » sur un prêt. La marque est maintenant
+posée par `App.metricList`, sur les seules valeurs qui portent un symbole
+monétaire — ce que `App.fmt.eur` produit, et rien d'autre. Un pourcentage ou une
+date restent lisibles.
+
+Au passage, ce même helper remplace un bloc « libellé / valeur » qui était
+réécrit à la main à sept endroits.

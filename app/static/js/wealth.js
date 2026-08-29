@@ -7,8 +7,13 @@ App.tabs.wealth = {
 
   async load() {
     const archived = App.el('#we-archived').checked ? '1' : '0';
+    // Le sélecteur de mois de la barre du haut était INERTE ici : en changer
+    // jouait l'animation de carrousel sur un contenu identique, puisque cette
+    // fonction ignorait `App.state.month`. La photo est désormais prise à la
+    // date d'arrêt du mois affiché, comme la vue d'ensemble.
+    const arrete = App.monthAsOf(App.state.month);
     const [snap, market] = await Promise.all([
-      App.api.get(`/api/assets?archived=${archived}`),
+      App.api.get(`/api/assets?archived=${archived}&date=${arrete}`),
       App.api.get('/api/market/status'),
     ]);
     App.state.portfolio = snap;
@@ -60,21 +65,36 @@ App.tabs.wealth = {
     btn.classList.remove('busy');
   },
 
+  /* Patrimoine net, et sa décomposition. Deux cases ne s'affichent que
+     lorsqu'elles ont quelque chose à dire.
+
+     « Capital restant dû » à zéro juste au-dessus d'un tableau qui annonce
+     « Aucun prêt enregistré » n'apprenait rien. Et une plus-value n'existe pas
+     sur un patrimoine qui n'est fait que de livrets : ceux-ci rapportent des
+     intérêts, affichés ligne par ligne, pas une plus-value latente.
+
+     Le sous-titre de la plus-value a disparu : il portait le poids de la crypto,
+     sujet sans rapport, et divisait par `patrimoine_net` alors que la condition
+     d'affichage testait `total_actif` — un net nul donnait l'infini. */
   renderKpis(snap) {
     const host = App.el('#we-kpis');
     App.clear(host);
     const kpi = App.tabs.overview.kpi;
-    const crypto = snap.assets.filter((a) => a.type === 'Crypto')
-      .reduce((s, a) => s + a.valeur, 0);
     const pv = snap.assets.reduce((s, a) => s + a.plus_value, 0);
-    host.append(
+    const cotables = snap.assets.some((a) => a.valeur_source !== 'taux');
+    // `.filter(Boolean)` : `Element.append()` transforme un null en texte
+    // « null », contrairement à `App.h` qui filtre ses enfants.
+    host.append(...[
       kpi('Patrimoine net', App.fmt.eur(snap.patrimoine_net)),
       kpi('Total actifs', App.fmt.eur(snap.total_actif), `${snap.assets.length} actif(s)`),
-      kpi('Capital restant dû', App.fmt.eur(snap.total_passif), `${snap.liabilities.length} prêt(s)`),
-      kpi('Plus-value latente', App.fmt.signed(pv),
-        snap.total_actif ? `crypto : ${App.fmt.pct(100 * crypto / snap.patrimoine_net)} du net` : null,
-        pv >= 0 ? 'good' : 'bad'),
-    );
+      snap.liabilities.length
+        ? kpi('Capital restant dû', App.fmt.eur(snap.total_passif),
+          `${snap.liabilities.length} prêt(s)`)
+        : null,
+      cotables
+        ? kpi('Plus-value latente', App.fmt.signed(pv), null, pv >= 0 ? 'good' : 'bad')
+        : null,
+    ].filter(Boolean));
   },
 
   renderAssets(snap) {
@@ -300,7 +320,6 @@ App.tabs.wealth = {
 
     // Chiffres de synthèse en tête : ils occupaient auparavant deux onglets
     // séparés (« Résumé » et « PRU & TRI ») pour les mêmes lignes.
-    const resume = App.h('div', { class: 'metric-list' });
     const rows = [
       ['Capital investi', App.fmt.eur(positions.investi_total)],
       ['Valeur de marché', positions.valeur_totale == null
@@ -315,10 +334,7 @@ App.tabs.wealth = {
     if (marche.tri_pct != null) {
       rows.push(['TRI annualisé', App.fmt.pct(marche.tri_pct, 2)]);
     }
-    for (const [l, v] of rows) {
-      resume.append(App.h('div', { class: 'metric-row' },
-        App.h('span', { class: 'm-label' }, l), App.h('span', { class: 'm-value' }, v)));
-    }
+    const resume = App.metricList(rows);
 
     const benchHost = App.h('div', {});
     const loadBenchmark = async (btn) => {
@@ -1009,11 +1025,7 @@ App.tabs.wealth = {
         ['Valeur saisie manuellement', a.valeur_actuelle === null ? 'non (reconstituée)' : App.fmt.eur(a.valeur_actuelle)],
         ['Mouvements enregistrés', String(a.nb_mouvements)],
       ];
-    const list = App.h('div', { class: 'metric-list' });
-    for (const [l, v] of rows) {
-      list.append(App.h('div', { class: 'metric-row' },
-        App.h('span', { class: 'm-label' }, l), App.h('span', { class: 'm-value' }, v)));
-    }
+    const list = App.metricList(rows);
 
     // Le taux est déjà dans le tableau ci-dessus pour un produit à taux : le
     // répéter dans « Champs spécifiques » ferait doublon.
@@ -1024,13 +1036,10 @@ App.tabs.wealth = {
 
     return App.h('div', {}, list,
       metaEntries.length ? App.h('div', { class: 'section-title' }, 'Champs spécifiques') : null,
-      metaEntries.length ? App.h('div', { class: 'metric-list' },
-        ...metaEntries.map(([k, v]) => {
-          const [label, fmt] = App.tabs.wealth.META_LABELS[k];
-          return App.h('div', { class: 'metric-row' },
-            App.h('span', { class: 'm-label' }, label),
-            App.h('span', { class: 'm-value' }, fmt(v)));
-        })) : null,
+      metaEntries.length ? App.metricList(metaEntries.map(([k, v]) => {
+        const [label, fmt] = App.tabs.wealth.META_LABELS[k];
+        return [label, fmt(v)];
+      })) : null,
       data.transactions.length ? App.h('div', { class: 'section-title' }, 'Transactions rattachées') : null,
       data.transactions.length ? App.tabs.wealth.txTable(data.transactions) : null);
   },
@@ -1147,11 +1156,7 @@ App.tabs.wealth = {
         [`Performance de ${ligne.indice_label}`, App.fmt.pct(ligne.perf_indice, 2)],
         ['Écart', `${ligne.ecart > 0 ? '+' : ''}${App.fmt.pct(ligne.ecart, 2)}`],
       ];
-      const list = App.h('div', { class: 'metric-list' });
-      for (const [l, v] of rows) {
-        list.append(App.h('div', { class: 'metric-row' },
-          App.h('span', { class: 'm-label' }, l), App.h('span', { class: 'm-value' }, v)));
-      }
+      const list = App.metricList(rows);
       host.append(
         App.h('div', { class: 'section-title' }, `${ligne.symbole} vs ${ligne.indice_label}`),
         list,
@@ -1199,11 +1204,7 @@ App.tabs.wealth = {
       ['Rendement après mensualités',
         p.rendement_net_pct === null ? '—' : App.fmt.pct(p.rendement_net_pct, 2)],
     ];
-    const list = App.h('div', { class: 'metric-list' });
-    for (const [l, v] of rows) {
-      list.append(App.h('div', { class: 'metric-row' },
-        App.h('span', { class: 'm-label' }, l), App.h('span', { class: 'm-value' }, v)));
-    }
+    const list = App.metricList(rows);
     const out = App.h('div', {}, list,
       App.note('Pourquoi deux rendements',
         App.h('p', {},
@@ -1236,11 +1237,7 @@ App.tabs.wealth = {
       ['Intérêts totaux', App.fmt.eur(loan.interets_totaux)],
       ['Coût total du crédit', App.fmt.eur(loan.cout_total)],
     ];
-    const list = App.h('div', { class: 'metric-list' });
-    for (const [l, v] of rows) {
-      list.append(App.h('div', { class: 'metric-row' },
-        App.h('span', { class: 'm-label' }, l), App.h('span', { class: 'm-value' }, v)));
-    }
+    const list = App.metricList(rows);
     const tbody = App.h('tbody', {});
     for (const e of loan.echeancier || []) {
       tbody.append(App.h('tr', {},

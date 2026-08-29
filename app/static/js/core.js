@@ -209,6 +209,26 @@ App.field = function (label, input, opts = {}) {
     opts.hint ? App.h('span', { class: 'hint' }, opts.hint) : null);
 };
 
+/* Liste « libellé / valeur ». Le même bloc était réécrit à la main sept fois.
+
+   Il porte aussi la marque des MONTANTS, et c'est le point important : le
+   masquage de la barre du haut floutait tout `.m-value`, donc « État : activé »
+   dans les réglages, « Ouvert le 12/03/2020 » sur une fiche, ou « Échéances
+   payées : 24 / 240 » sur un prêt. Rien de tout cela n'est un montant.
+
+   La marque est déduite du symbole monétaire, que seul `App.fmt.eur` produit.
+   Un pourcentage ou une date n'en portent pas, et ne sont donc pas masqués. */
+App.metricList = function (rows) {
+  const list = App.h('div', { class: 'metric-list' });
+  for (const [label, valeur] of rows) {
+    const monetaire = typeof valeur === 'string' && valeur.includes('€');
+    list.append(App.h('div', { class: 'metric-row' },
+      App.h('span', { class: 'm-label' }, label),
+      App.h('span', { class: `m-value${monetaire ? ' montant' : ''}` }, valeur)));
+  }
+  return list;
+};
+
 /* Explication repliée : présente pour qui la cherche, silencieuse sinon.
    Réservée au pédagogique — un avertissement reste toujours visible. */
 App.note = function (summary, ...children) {
@@ -770,6 +790,18 @@ App.deepMerge = function (a, b) {
    avec le serveur qui, lui, lit `date.today()` a l'heure locale. */
 App.todayISO = () => isoDepuis(new Date());
 App.monthISO = () => App.todayISO().slice(0, 7);
+
+/* Date d'arrêt d'un mois : son dernier jour, ou aujourd'hui si le mois est en
+   cours. C'est la règle que `/api/overview` applique déjà côté serveur
+   (`min(dernier_jour, date.today())`) ; l'onglet Patrimoine s'y aligne pour que
+   les deux écrans parlent du même instant. */
+App.monthAsOf = function (ym) {
+  const [y, m] = String(ym || '').split('-').map(Number);
+  if (!y || !m) return App.todayISO();
+  const dernier = new Date(y, m, 0);          // jour 0 du mois suivant
+  const aujourdhui = new Date();
+  return isoDepuis(dernier < aujourdhui ? dernier : aujourdhui);
+};
 
 App.shiftMonth = function (ym, delta) {
   const [y, m] = ym.split('-').map(Number);

@@ -369,6 +369,12 @@ def month_flows(year, month, cache=None):
         "epargne": versements,
         "taux_epargne": round(versements / revenus, 6) if revenus > 0 else None,
         "nb_transactions": len(txs),
+        # Le detail par sens. `nb_transactions` compte TOUT le mois, depenses
+        # comprises : affiche sous « Revenus du mois », il ne parlait de rien.
+        "nb_revenus": sum(1 for t in txs if t["amount"] > 0 and compte(t)),
+        "nb_depenses": sum(
+            1 for t in txs
+            if t["amount"] < 0 and compte(t) and t["category"] not in excluded),
         "par_categorie": sorted(
             ({"category": k, "montant": round(v, 2), "nb": nb_categorie[k]}
              for k, v in par_categorie.items()),

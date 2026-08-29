@@ -35,10 +35,13 @@ App.tabs.expenses = {
     App.clear(host);
     const kpi = App.tabs.overview.kpi;
     host.append(
-      kpi('Revenus', App.fmt.eur(f.revenus), `${f.nb_transactions} transaction(s)`),
+      // Compter TOUT le mois sous « Revenus » ne disait rien : le nombre
+      // englobait les dépenses.
+      kpi('Revenus', App.fmt.eur(f.revenus), `${f.nb_revenus} ligne(s)`),
       kpi('Dépenses', App.fmt.eur(f.depenses),
         f.transferts_internes
-          ? `hors ${App.fmt.eur(f.transferts_internes)} de virements internes` : null),
+          ? `hors ${App.fmt.eur(f.transferts_internes)} de virements internes`
+          : `${f.nb_depenses} ligne(s)`),
       kpi('Solde', App.fmt.signed(f.solde), null, f.solde >= 0 ? 'good' : 'bad'),
       kpi('Épargne', App.fmt.eur(f.epargne),
         f.taux_epargne === null ? null : `taux ${App.fmt.ratio(f.taux_epargne)}`),

@@ -688,7 +688,7 @@ App.settings = {
     };
     renderSecurities();
 
-    const statusLine = App.h('div', { class: 'metric-list' });
+    const statusLine = App.h('div', {});
     const renderStatus = (s) => {
       App.clear(statusLine);
       const rows = [
@@ -700,10 +700,7 @@ App.settings = {
         ['Tickers sans correspondance', s.tickers_non_mappes.length
           ? s.tickers_non_mappes.join(', ') : 'aucun'],
       ];
-      for (const [l, v] of rows) {
-        statusLine.append(App.h('div', { class: 'metric-row' },
-          App.h('span', { class: 'm-label' }, l), App.h('span', { class: 'm-value' }, v)));
-      }
+      statusLine.append(App.metricList(rows));
     };
     renderStatus(status);
 
