@@ -5,19 +5,12 @@ App.tabs.wealth = {
   RATE: ['Livret', 'LDDS', 'LEP', 'LivretJeune', 'PEL', 'CEL', 'DepotTerme'],
   openGroups: new Set(),
 
+  /* Ne lit plus le serveur : `App.loadRefs` vient de le faire, avec le mois
+     affiche et l'etat des archives. Les deux memes appels partaient ici une
+     seconde fois apres chaque ecriture. */
   async load() {
-    const archived = App.el('#we-archived').checked ? '1' : '0';
-    // Le sélecteur de mois de la barre du haut était INERTE ici : en changer
-    // jouait l'animation de carrousel sur un contenu identique, puisque cette
-    // fonction ignorait `App.state.month`. La photo est désormais prise à la
-    // date d'arrêt du mois affiché, comme la vue d'ensemble.
-    const arrete = App.monthAsOf(App.state.month);
-    const [snap, market] = await Promise.all([
-      App.api.get(`/api/assets?archived=${archived}&date=${arrete}`),
-      App.api.get('/api/market/status'),
-    ]);
-    App.state.portfolio = snap;
-    App.state.market = market;
+    const snap = App.state.portfolio;
+    const market = App.state.market;
     App.tabs.wealth.renderKpis(snap);
     App.tabs.wealth.renderAssets(snap);
     App.tabs.wealth.renderLiabilities(snap.liabilities);

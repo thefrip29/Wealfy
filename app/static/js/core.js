@@ -172,7 +172,7 @@ App.modal = {
      geste est donc redemandé — un second Échap, ou un second clic à côté, dans
      les quelques secondes qui suivent. Le bouton « Annuler » ferme toujours du
      premier coup : lui est explicite. */
-  open({ title, body, footer, wide, garder }) {
+  open({ title, body, footer, wide, garder, onClose }) {
     App.el('#modal-title').textContent = title || '';
     const bodyHost = App.el('#modal-body');
     const footHost = App.el('#modal-foot');
@@ -184,6 +184,7 @@ App.modal = {
     document.body.style.overflow = 'hidden';
     App.modal.garder = !!garder;
     App.modal.abandonArme = false;
+    App.modal.onClose = onClose || null;
     // Où revenir en fermant : sans cela, le focus repart au début du document
     // et la navigation au clavier recommence de zéro à chaque modale.
     App.modal.retour = document.activeElement;
@@ -223,6 +224,10 @@ App.modal = {
     const retour = App.modal.retour;
     App.modal.retour = null;
     if (retour && retour.isConnected && retour.focus) retour.focus();
+    // Apres le nettoyage : le rappel peut rouvrir une modale.
+    const apres = App.modal.onClose;
+    App.modal.onClose = null;
+    if (apres) apres();
   },
 
   /* Enferme la tabulation dans la modale. Sans cela, Tab en sort et parcourt

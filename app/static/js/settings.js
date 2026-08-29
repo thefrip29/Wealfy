@@ -25,6 +25,8 @@ App.settings = {
         App.settings.panelTaux(settings))],
       ['Cours de marché', App.settings.panelMarket(settings, market)],
       ['Général', App.h('div', {},
+        App.h('div', { class: 'section-title' }, 'Apparence'),
+        App.settings.panelApparence(),
         App.h('div', { class: 'section-title' }, 'Types d’actifs personnalisés'),
         App.settings.panelAssetTypes(settings),
         App.h('div', { class: 'section-title' }, 'Sauvegardes'),
@@ -59,17 +61,39 @@ App.settings = {
         App.h('p', { class: 'hint', style: 'margin-bottom:12px' },
           'Vos modifications sont enregistrées au fur et à mesure.'),
         nav, stack),
+      onClose: async () => {
+        if (!App.settings.aRafraichir) return;
+        App.settings.aRafraichir = false;
+        await App.refreshAll();
+      },
       footer: [App.h('button', { class: 'btn primary', onclick: () => App.modal.close() }, 'Fermer')],
     });
   },
 
+  /* Reglages dont dependent les listes de reference de l'application. */
+  CLES_META: ['categories_depenses', 'categories_revenus', 'types_actifs_custom'],
+
+  /* Reglages qui ne changent RIEN de ce qui est affiche a l'instant : ils
+     n'agissent que sur de futurs imports ou de futurs appels reseau. */
+  CLES_SANS_RENDU: ['market_api_key', 'market_auto_refresh',
+    'market_cache_ttl_hours', 'mots_cles_transfert'],
+
+  /* Chaque case cochee relancait un PUT, un `loadMeta` ET un `refreshAll`
+     complet — derriere une modale ouverte, ou rien de tout cela ne se voit.
+     Cocher six charges fixes, c'etait six fois trente lectures pour rien.
+
+     Le rafraichissement est donc reporte a la fermeture des reglages : une
+     seule fois, au moment ou l'on revient a la page. */
   async save(patch, message = 'Paramètres enregistrés') {
     try {
       await App.api.put('/api/settings', patch);
       Object.assign(App.state.settings, patch);
       App.toast(message, 'success');
-      await App.loadMeta();
-      await App.refreshAll();
+      const cles = Object.keys(patch);
+      if (cles.some((c) => App.settings.CLES_META.includes(c))) await App.loadMeta();
+      if (!cles.every((c) => App.settings.CLES_SANS_RENDU.includes(c))) {
+        App.settings.aRafraichir = true;
+      }
     } catch (e) { App.toast(e.message, 'error'); }
   },
 
@@ -820,6 +844,45 @@ App.settings = {
         'Livrets et dépôts à terme n’utilisent pas d’API : renseignez leur taux annuel '
         + 'dans la fiche de l’actif, les intérêts sont calculés par quinzaines. '
         + 'L’immobilier se réévalue par indice INSEE ou par un taux annuel saisi.'));
+  },
+
+  /* ---------- apparence ----------
+
+     `App.setAnimations` existait, `App.animationsEconomes` aussi, et RIEN ne
+     les appelait : le mode économe n'était atteignable qu'en écrivant dans
+     `localStorage` depuis une console — que l'application, ouverte dans sa
+     propre fenêtre, n'offre pas. Voici l'interrupteur qui manquait.
+
+     Le réglage ne passe pas par le serveur : il vaut pour cette machine, pas
+     pour ces données, et une sauvegarde restaurée ailleurs n'a pas à imposer
+     le mode d'affichage d'un autre écran. */
+  panelApparence() {
+    const reduit = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const cb = App.h('input', { type: 'checkbox', disabled: reduit || null });
+    cb.checked = App.animationsEconomes() || reduit;
+    cb.addEventListener('change', () => {
+      App.setAnimations(cb.checked);
+      App.toast(cb.checked ? 'Animations allégées' : 'Animations complètes', 'success');
+    });
+
+    return App.h('div', {},
+      App.h('div', { class: 'form-grid' },
+        App.field('Animations économes', cb, {
+          hint: reduit
+            ? 'Imposé par votre système (« réduire les animations »)'
+            : 'Supprime les flous animés et fige le fond',
+        })),
+      App.note('Ce que le mode économe change',
+        App.h('p', {},
+          'Les trajectoires et les durées ne bougent pas. Seuls disparaissent le '
+          + 'flou d’amorce et le mouvement du fond : ce sont les deux seuls postes '
+          + 'qui coûtent une re-rastérisation à chaque image. Le reste est traité '
+          + 'par le compositeur et ne pèse quasiment rien.'),
+        App.h('p', {},
+          'Le mode complet est le défaut partout. Une version précédente estimait '
+          + 'la puissance de la machine avec `navigator.deviceMemory`, que WebKit '
+          + 'n’implémente pas : tout Mac basculait en économe sans moyen d’en '
+          + 'sortir. C’est à vous de décider.')));
   },
 
   /* ---------- types d'actifs personnalisés ---------- */

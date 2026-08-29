@@ -187,7 +187,7 @@ contenu s'en va. C'est ce qui arrivait au filet sous le héros : `.hero` y
 figurait alors qu'il porte un `border-bottom`, et la ligne grise restait figée à
 l'écran le temps de la transition. Le héros s'anime désormais d'un seul tenant.
 
-### Deux niveaux d'animation selon la machine
+### Deux niveaux d'animation, au choix de l'utilisateur
 
 `data-anim` sur `<html>`, posé **avant le premier rendu** (la première
 apparition se joue dès le chargement, un réglage plus tardif arriverait après
@@ -207,20 +207,24 @@ jusqu'à dix blocs s'animent ensemble. En dessous de 60 images par seconde, un
 flou animé ne se lit plus comme un flou mais comme des saccades. Le mode économe
 garde donc les mêmes trajectoires et les mêmes courbes, sans le flou.
 
-Le mode est estimé d'après `hardwareConcurrency` et `deviceMemory`, puis
-**corrigé par une mesure réelle** : `App.mesurerFluidite()` échantillonne une
-trentaine d'images pendant la première apparition et rétrograde si la médiane
-dépasse 22 ms. Médiane et non moyenne — une seule image longue ne doit pas
-condamner la machine. La décision est mémorisée : elle vaut pour la machine, pas
-pour la session.
+**Il n'y a plus aucune détection automatique**, et c'est délibéré. Deux
+mécanismes décidaient à la place de l'utilisateur :
 
-Pour forcer un mode, dans la console :
+- une estimation d'après `hardwareConcurrency` et `deviceMemory`. Cette seconde
+  API n'existe pas dans WebKit : elle valait `undefined`, le repli donnait 4, et
+  le test était `<= 4`. **Tout Mac** basculait donc en mode économe, un M5 comme
+  le reste, sans aucun moyen d'en sortir ;
+- une mesure de fluidité sur les premières images, qui rétrogradait puis
+  **mémorisait** sa décision. Une machine momentanément occupée se retrouvait
+  durablement en mode dégradé, sans que rien ne le signale.
 
-```js
-localStorage.setItem('patrimoine.animations', 'economes')   // ou 'completes'
-```
+Le mode complet est le défaut partout, et le mode économe un choix assumé,
+depuis *Paramètres → Apparence*. Une machine qui peine, c'est à son propriétaire
+de le constater.
 
-`prefers-reduced-motion` force le mode économe et coupe en plus le fond animé.
+`prefers-reduced-motion` reste prioritaire : c'est une préférence système
+explicite, posée par quelqu'un que le mouvement gêne. Elle force le mode économe
+et coupe en plus le fond animé.
 
 Le détail qui compte : la découpe se fait au bord de `main`, alors que le
 panneau est en retrait de la marge interne. Une première version faisait

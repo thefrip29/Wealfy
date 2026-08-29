@@ -5,9 +5,18 @@ App.loadMeta = async function () {
   App.state.meta = await App.api.get('/api/meta');
 };
 
+/* Donnees de reference, lues UNE fois par navigation.
+
+   `/api/assets` et `/api/market/status` etaient demandes deux fois apres
+   chaque ecriture : une fois ici, une fois par `wealth.load()`. Cette
+   fonction est desormais seule a les lire, et porte les parametres dont
+   l'onglet Patrimoine a besoin — le mois affiche et les archives. */
 App.loadRefs = async function () {
+  const archives = App.el('#we-archived');
+  const archived = archives && archives.checked ? '1' : '0';
+  const arrete = App.monthAsOf(App.state.month);
   const [portfolio, liabilities, market] = await Promise.all([
-    App.api.get('/api/assets'),
+    App.api.get(`/api/assets?archived=${archived}&date=${arrete}`),
     App.api.get('/api/liabilities'),
     App.api.get('/api/market/status'),
   ]);
@@ -16,6 +25,11 @@ App.loadRefs = async function () {
   App.state.portfolio = portfolio;
   App.state.market = market;
 };
+
+/* Onglets qui lisent `App.state.assets` ou `App.state.liabilities` au rendu.
+   La vue d'ensemble et l'archive tirent tout de leur propre appel : leur
+   imposer trois lectures de plus n'apporterait rien. */
+App.BESOIN_REFS = { expenses: true, wealth: true };
 
 /* Rangées dont les cellules entrent une par une, au lieu d'arriver d'un bloc
    au milieu du déroulement.
@@ -279,6 +293,7 @@ App.showTab = async function (name, sens) {
   App.el(`#tab-${name}`).classList.add('attente');
 
   try {
+    if (App.BESOIN_REFS[name]) await App.loadRefs();
     await App.tabs[name].load();
   } catch (e) {
     App.toast(e.message, 'error');
@@ -292,10 +307,21 @@ App.showTab = async function (name, sens) {
   App.playReveal(sens);
 };
 
-/* Recharge l'onglet courant. */
+/* Recharge l'onglet courant. Les references suivent, dans `showTab`, et
+   seulement pour les onglets qui les lisent. */
 App.refresh = async function () {
-  await App.loadRefs();
   await App.showTab(App.currentTab);
+};
+
+/* Redessine les graphiques de l'onglet courant depuis les donnees deja
+   chargees. Sert au changement de theme : les couleurs sont lues au rendu. */
+App.redessinerGraphiques = function () {
+  if (App.currentTab !== 'overview' || !App.tabs.overview.dernier) return;
+  // `redraw` connait deja le cas d'une carte agrandie, qu'il ne doit pas
+  // remettre a plat.
+  for (const kind of ['networth', 'patrimoine', 'flux', 'categories']) {
+    App.tabs.overview.redraw(kind);
+  }
 };
 
 /* Recharge tout ce qui est visible après une écriture. */
@@ -393,14 +419,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     () => App.tabs.overview.toggleChart(b.dataset.zoom)));
   App.el('#toggle-privacy').addEventListener('click',
     () => App.setPrivacy(!App.privacyOn()));
-  App.el('#toggle-theme').addEventListener('click', async () => {
+  App.el('#toggle-theme').addEventListener('click', () => {
     // Cycle système -> clair -> sombre -> système. Passer par « système »
     // à chaque tour est ce qui permet de revenir au suivi automatique ;
     // l'ancien bouton à deux positions l'interdisait définitivement.
     const suivant = App.THEMES[(App.THEMES.indexOf(App.themeChoisi()) + 1) % App.THEMES.length];
     App.setTheme(suivant);
-    // Les graphiques lisent leurs couleurs au moment du rendu : on les refait.
-    await App.showTab(App.currentTab);
+    // Les graphiques lisent leurs couleurs au rendu : on les refait, et rien
+    // d'autre. Recharger l'onglet entier rejouait toute l'apparition et
+    // redemandait au serveur des séries qu'on avait déjà en mémoire.
+    App.redessinerGraphiques();
   });
 
   App.el('#ex-add').addEventListener('click', () => App.tabs.expenses.openForm(null));
@@ -419,7 +447,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   App.el('#we-refresh-quotes').addEventListener('click',
     (e) => App.tabs.wealth.refreshQuotes(e.target));
   App.el('#we-add').addEventListener('click', () => App.tabs.wealth.openAddChooser());
-  App.el('#we-archived').addEventListener('change', () => App.tabs.wealth.load());
+  // `App.refresh` et non `wealth.load()` : depuis que `loadRefs` est seul à
+  // lire les actifs, c'est lui qui porte le paramètre `archived`.
+  App.el('#we-archived').addEventListener('change', () => App.refresh());
 
   App.state.month = localStorage.getItem('patrimoine.month') || App.monthISO();
   App.setMonthLabel(App.state.month);
