@@ -91,6 +91,7 @@ App.playReveal = function (sens) {
   }
   void panneau.offsetWidth;          // reflow : l'animation peut repartir
   panneau.classList.add('revealing');
+  App.doserFond(panneau);
 
   // Même image, même instant : la page qui part et celle qui arrive doivent
   // se mettre en mouvement ensemble, sinon ce n'est plus un défilement.
@@ -165,6 +166,21 @@ App.snapshotPanel = function () {
   // La copie est posée figée : sa sortie sera armée par `playReveal`, une fois
   // le nouveau contenu prêt, pour que les deux mouvements partent ensemble.
   zone.append(copie);
+};
+
+/* Intensité du fond animé, selon ce que la page a à montrer.
+
+   Sur un panneau long, les masses ne se voient que dans les marges et le
+   mouvement reste un décor. Sur l'accueil vide ou sur un patrimoine de trois
+   lignes, elles occupent presque toute la surface : le contenu flotte dessus
+   au lieu de s'y poser.
+
+   Le seuil est la hauteur de la fenêtre — au-delà, il y a de quoi remplir
+   l'écran. `--lava-opacity` existe déjà et pilote seule l'intensité : rien
+   d'autre à toucher, et la transition CSS fait le reste. */
+App.doserFond = function (panneau) {
+  const court = panneau.scrollHeight < window.innerHeight * 0.9;
+  document.documentElement.dataset.fond = court ? 'court' : 'long';
 };
 
 App.dropSnapshot = function () {
@@ -305,6 +321,51 @@ App.showTab = async function (name, sens) {
   App.playReveal(sens);
 };
 
+/* Raccourcis clavier.
+
+   Il n'y en avait aucun : sur une application de bureau ouverte tous les jours,
+   changer de mois demandait la souris à chaque fois.
+
+   Trois refus, dans cet ordre : une modale ouverte (le clavier lui appartient),
+   un champ de saisie qui a le focus (taper « 2 » dans un montant ne doit pas
+   changer d'onglet), une touche de modification enfoncée (Ctrl+1 appartient au
+   navigateur). */
+App.CHAMPS = 'input, select, textarea, [contenteditable]';
+
+App.raccourcis = function (e) {
+  if (!App.el('#modal-backdrop').hidden) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target && e.target.closest && e.target.closest(App.CHAMPS)) return;
+
+  const onglets = App.els('.tab').map((b) => b.dataset.tab);
+  const index = '1234'.indexOf(e.key);
+  if (index >= 0 && onglets[index]) {
+    e.preventDefault();
+    if (onglets[index] !== App.currentTab) App.showTab(onglets[index]);
+    return;
+  }
+
+  // Les flèches ne font rien là où le sélecteur de mois est masqué : on
+  // rendrait au clavier ce qu'on vient de retirer à la souris.
+  if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight')
+      && !App.el('.month-picker').hidden) {
+    e.preventDefault();
+    const sens = e.key === 'ArrowRight' ? 1 : -1;
+    App.setMonth(App.shiftMonth(App.state.month, sens), sens > 0 ? 'next' : 'prev');
+    return;
+  }
+
+  if (e.key === '/') {
+    e.preventDefault();
+    const chercher = () => {
+      const champ = App.el('#ex-search');
+      if (champ) champ.focus();
+    };
+    if (App.currentTab === 'expenses') chercher();
+    else App.showTab('expenses').then(chercher);
+  }
+};
+
 /* Recharge l'onglet courant. Les references suivent, dans `showTab`, et
    seulement pour les onglets qui les lisent. */
 App.refresh = async function () {
@@ -373,6 +434,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (e.key === 'Escape' && !App.el('#modal-backdrop').hidden) App.modal.demanderFermeture();
   });
   document.addEventListener('keydown', App.modal.piegerFocus);
+  document.addEventListener('keydown', App.raccourcis);
 
   // Un fichier lâché à côté de la zone de dépôt ferait quitter la page pour
   // l'afficher, et la saisie en cours partirait avec elle. Tout dépôt hors

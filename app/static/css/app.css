@@ -741,6 +741,16 @@ body.privacy .metric-row .m-value.montant {
   .alerte-action { grid-column: 2; }
 }
 
+/* Budget depasse : la barre change de couleur, pas seulement la pastille —
+   on doit le voir sans lire le chiffre. */
+.rep-real.depasse { background: var(--perte); }
+.budget-cell input { text-align: right; font-family: var(--font-mono); }
+
+/* Fond animé atténué quand le contenu ne remplit pas l'écran : sinon les
+   masses dominent et la page flotte dessus. Posé par `App.doserFond`. */
+.lava { transition: opacity var(--t-slow) var(--ease); }
+[data-fond="court"] .lava { opacity: .45; }
+
 /* ==========================================================================
    Contrôles
    ========================================================================== */
@@ -1110,6 +1120,42 @@ input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
 .asset-row:hover { background: var(--card-2); }
 .asset-row .a-name { font-weight: var(--weight-medium); }
 .asset-row .a-meta { font-size: var(--fs-micro); color: var(--muted); margin-top: 2px; }
+
+/* Reste à vivre : le chiffre qui domine sa carte, un cran sous le héros. */
+.reste { padding-bottom: var(--space-4); margin-bottom: var(--space-2); }
+.reste-label {
+  font-size: var(--fs-xs); color: var(--muted);
+  text-transform: uppercase; letter-spacing: .06em;
+}
+.reste-value {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 30px; font-weight: var(--weight-medium);
+  margin-top: 2px; transition: filter var(--t) var(--ease);
+}
+body.privacy .reste-value { filter: blur(10px); user-select: none; }
+
+/* Part d'un produit DANS SA FAMILLE. L'en-tete de groupe donne déjà la part
+   de la famille dans l'ensemble : enchaîner deux échelles se lirait mal.
+
+   Le filet se pose sous la ligne et non derrière le texte — un fond teinté
+   gênerait la lecture des montants, qui sont le sujet de l'écran. */
+.part-bar {
+  grid-column: 1 / -1; height: 2px; margin-top: 6px;
+  background: var(--line-soft); border-radius: 2px; overflow: hidden;
+}
+.part-bar > span {
+  display: block; height: 100%; background: var(--accent);
+  border-radius: 2px; transition: width var(--t) var(--ease);
+}
+
+/* Produits clotures : pose sous la liste, visiblement a part, parce qu'ils
+   ne comptent pas dans les totaux affiches au-dessus. */
+.archives { border-top: 1px solid var(--line); margin-top: var(--space-4); }
+.archives-tete {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-3); padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5);
+}
+.archives-liste .asset-row { opacity: .65; }
 
 /* ==========================================================================
    Listes de métriques

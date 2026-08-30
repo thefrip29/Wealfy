@@ -646,6 +646,110 @@ class TestGainAnnuel(ApiTestCase):
         self.assertEqual(self.gain()["montant"], 0.0)
 
 
+class TestResteAVivre(ApiTestCase):
+    """`services.metrics()` produit vingt-deux grandeurs, l'interface en
+    affichait sept. Le reste a vivre avait sa section dans la documentation et
+    n'apparaissait nulle part, alors que la colonne « Charge fixe » des reglages
+    n'existe que pour l'alimenter.
+    """
+
+    def un_mois(self):
+        mois = month_key()
+        self.post("/api/transactions", {
+            "date": mois + "-01", "amount": 2000, "description": "Salaire",
+            "category": "Salaire"})
+        self.post("/api/transactions", {
+            "date": mois + "-05", "amount": -700, "description": "Loyer",
+            "category": "Logement"})
+        self.post("/api/transactions", {
+            "date": mois + "-06", "amount": -100, "description": "Courses",
+            "category": "Alimentation"})
+        return mois
+
+    def metrics(self, mois):
+        return self.get("/api/overview?month=" + mois)["metrics"]
+
+    def test_les_six_grandeurs_sont_exposees(self):
+        m = self.metrics(self.un_mois())
+        for cle in ("reste_a_vivre_mois", "charges_fixes_mois", "part_charges_fixes",
+                    "taux_endettement", "mensualites_mois", "revenus_mois"):
+            self.assertIn(cle, m)
+
+    def test_le_reste_a_vivre_suit_les_charges_fixes(self):
+        """Le lien que l'interface ne montrait pas : cocher une categorie
+        change le chiffre."""
+        mois = self.un_mois()
+        self.client.put("/api/settings", json={"categories_charges_fixes": []})
+        sans = self.metrics(mois)
+        self.assertEqual(sans["charges_fixes_mois"], 0)
+
+        self.client.put("/api/settings", json={"categories_charges_fixes": ["Logement"]})
+        avec = self.metrics(mois)
+        self.assertEqual(avec["charges_fixes_mois"], 700.0)
+        self.assertEqual(avec["reste_a_vivre_mois"], sans["reste_a_vivre_mois"] - 700.0)
+
+
+class TestBudgets(ApiTestCase):
+    """Le patrimoine avait ses cibles avec l'ecart affiche ; les depenses
+    n'avaient ni objectif global ni plafond par categorie."""
+
+    def test_vide_par_defaut(self):
+        self.assertEqual(self.get("/api/meta")["budgets"], {})
+
+    def test_aller_retour_du_reglage(self):
+        self.client.put("/api/settings",
+                        json={"budgets_categories": {"Alimentation": 400}})
+        self.assertEqual(self.get("/api/meta")["budgets"], {"Alimentation": 400})
+        self.assertEqual(
+            self.get("/api/settings")["budgets_categories"], {"Alimentation": 400})
+
+    def test_le_consomme_vient_de_par_categorie(self):
+        """Aucun calcul serveur n'est ajoute : la comparaison se fait sur
+        `par_categorie`, que `month_flows` renvoyait deja."""
+        mois = month_key()
+        self.post("/api/transactions", {
+            "date": mois + "-03", "amount": -450, "description": "Courses",
+            "category": "Alimentation"})
+        flows = self.get("/api/month?month=" + mois)
+        par_cat = {c["category"]: c["montant"] for c in flows["par_categorie"]}
+        self.assertEqual(par_cat["Alimentation"], 450.0)
+
+
+class TestCloture(ApiTestCase):
+    """La colonne `archived`, la route et la pastille existaient ; aucun
+    ecran ne permettait d'archiver quoi que ce soit."""
+
+    def deux_actifs(self):
+        a = self.post("/api/assets", {"type": "Livret", "label": "Ouvert",
+                                      "valeur_actuelle": 1000})
+        b = self.post("/api/assets", {"type": "Livret", "label": "A clore",
+                                      "valeur_actuelle": 500})
+        return a["id"], b["id"]
+
+    def test_un_produit_cloture_sort_du_patrimoine(self):
+        _, bid = self.deux_actifs()
+        self.assertEqual(self.get("/api/assets")["total_actif"], 1500.0)
+        self.client.put("/api/assets/" + bid, json={"archived": True})
+        snap = self.get("/api/assets")
+        self.assertEqual(snap["total_actif"], 1000.0)
+        self.assertEqual(snap["nb_archives"], 1)
+        self.assertNotIn("A clore", [a["label"] for a in snap["assets"]])
+
+    def test_il_reste_consultable(self):
+        _, bid = self.deux_actifs()
+        self.client.put("/api/assets/" + bid, json={"archived": True})
+        tous = self.get("/api/assets?archived=1")
+        self.assertIn("A clore", [a["label"] for a in tous["assets"]])
+
+    def test_rouvrir_le_ramene(self):
+        _, bid = self.deux_actifs()
+        self.client.put("/api/assets/" + bid, json={"archived": True})
+        self.client.put("/api/assets/" + bid, json={"archived": False})
+        snap = self.get("/api/assets")
+        self.assertEqual(snap["total_actif"], 1500.0)
+        self.assertEqual(snap["nb_archives"], 0)
+
+
 class TestAnalytics(ApiTestCase):
     def seed(self):
         self.post("/api/assets", {

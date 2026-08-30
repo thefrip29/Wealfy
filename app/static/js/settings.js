@@ -71,7 +71,8 @@ App.settings = {
   },
 
   /* Reglages dont dependent les listes de reference de l'application. */
-  CLES_META: ['categories_depenses', 'categories_revenus', 'types_actifs_custom'],
+  CLES_META: ['categories_depenses', 'categories_revenus', 'types_actifs_custom',
+    'budgets_categories'],
 
   /* Reglages qui ne changent RIEN de ce qui est affiche a l'instant : ils
      n'agissent que sur de futurs imports ou de futurs appels reseau. */
@@ -159,10 +160,11 @@ App.settings = {
         App.clear(tbody);
         const cats = settings.categories_depenses || [];
         if (!cats.length) {
-          tbody.append(App.h('tr', {}, App.h('td', { colspan: 4, class: 'empty' },
+          tbody.append(App.h('tr', {}, App.h('td', { colspan: 5, class: 'empty' },
             'Aucune catégorie de dépense.')));
           return;
         }
+        const budgets = Object.assign({}, settings.budgets_categories || {});
         for (const cat of cats) {
           const cellules = ROLES.map(([key, , titre]) => {
             const cb = App.h('input', { type: 'checkbox', title: titre });
@@ -175,7 +177,23 @@ App.settings = {
             });
             return App.h('td', { class: 'center' }, cb);
           });
-          tbody.append(App.h('tr', {}, App.h('td', {}, cat), ...cellules));
+          // Le budget vit dans le meme tableau que les roles : c'est la meme
+          // question posee a la meme ligne — ce que fait cette categorie, et
+          // combien j'y mets. Enregistre a la sortie du champ, pas a la frappe.
+          const montant = App.input('b', {
+            type: 'number', step: '1', placeholder: '\u2014',
+            value: budgets[cat] ?? '',
+          });
+          montant.addEventListener('change', async () => {
+            const v = parseFloat(montant.value);
+            if (Number.isFinite(v) && v > 0) budgets[cat] = v;
+            else delete budgets[cat];
+            settings.budgets_categories = budgets;
+            await App.settings.save({ budgets_categories: budgets },
+              'Budgets mis \u00e0 jour');
+          });
+          tbody.append(App.h('tr', {}, App.h('td', {}, cat), ...cellules,
+            App.h('td', { class: 'budget-cell' }, montant)));
         }
       };
       render();
@@ -185,7 +203,11 @@ App.settings = {
             App.h('th', {}, 'Catégorie'),
             ...ROLES.map(([, libelle, titre]) => App.h('th', {
               class: 'center', title: titre,
-            }, libelle)))),
+            }, libelle)),
+            App.h('th', {
+              class: 'right', style: 'width:130px',
+              title: 'Montant mensuel vis\u00e9 ; laiss\u00e9 vide, aucun budget',
+            }, 'Budget / mois'))),
           tbody));
     };
 

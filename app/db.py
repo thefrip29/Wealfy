@@ -38,6 +38,11 @@ DEFAULT_SETTINGS = {
     # tout. Exclues des DEUX cotes, sinon le meme euro serait compte en depense
     # sur un compte et en revenu sur l'autre.
     "categories_transfert": ["Transfert interne"],
+    # Montant mensuel vise par categorie de depense, {categorie: montant}.
+    # Le patrimoine avait ses cibles (`repartition_cible`) et l'ecart etait
+    # affiche ; les depenses n'avaient rien. Vide par defaut : un budget qu'on
+    # n'a pas choisi ne veut rien dire.
+    "budgets_categories": {},
     # Tolerance de rapprochement automatique des paires de virements.
     "transfert_jours_tolerance": 4,
     "tolerance_mensualite": 2.0,

@@ -153,11 +153,80 @@ App.tabs.wealth = {
             App.h('button', {
               class: 'btn small',
               onclick: () => App.tabs.wealth.openAssetDetail(a.id),
-            }, 'Détail'))));
+            }, 'Détail')),
+          // La part se lisait uniquement en chiffres, à comparer de tête.
+          //
+          // Seul dans sa famille, un produit en fait 100 % : le filet serait
+          // plein et ne dirait rien. Il faut au moins deux lignes pour qu'une
+          // proportion se compare.
+          assets.length > 1 && total > 0
+            ? App.h('div', { class: 'part-bar' },
+              App.h('span', { style: `width:${Math.min(100, 100 * a.valeur / total)}%` }))
+            : null));
       }
       group.append(bodyNode);
       host.append(group);
     }
+    App.tabs.wealth.renderArchives(host, snap);
+  },
+
+  /* Les produits clôturés, à la demande.
+
+     Ils ne comptent pas dans le patrimoine — l'appel principal les exclut — et
+     le dire ici évite de faire chercher une erreur de total. Ils ne sont
+     chargés que si on les demande : un second appel, jamais au premier rendu.
+
+     `nb_archives` vient de `services.portfolio()`, qui le déduit de son cache
+     sans lecture supplémentaire. */
+  archivesOuvertes: false,
+
+  async renderArchives(host, snap) {
+    if (!snap.nb_archives) return;
+    const n = snap.nb_archives;
+    const bloc = App.h('div', { class: 'archives' });
+    host.append(bloc);
+
+    const lien = App.h('button', {
+      class: 'btn small',
+      onclick: async () => {
+        App.tabs.wealth.archivesOuvertes = !App.tabs.wealth.archivesOuvertes;
+        await App.tabs.wealth.peindreArchives(bloc, lien, n);
+      },
+    });
+    bloc.append(App.h('div', { class: 'archives-tete' },
+      App.h('span', { class: 'sub' },
+        `${n} produit(s) clôturé(s), hors du patrimoine`),
+      lien));
+    await App.tabs.wealth.peindreArchives(bloc, lien, n);
+  },
+
+  async peindreArchives(bloc, lien, n) {
+    App.els('.archives-liste', bloc).forEach((el) => el.remove());
+    lien.textContent = App.tabs.wealth.archivesOuvertes ? 'Masquer' : 'Afficher';
+    if (!App.tabs.wealth.archivesOuvertes) return;
+
+    let tous;
+    try {
+      tous = await App.api.get(
+        `/api/assets?archived=1&date=${App.monthAsOf(App.state.month)}`);
+    } catch (e) { return App.toast(e.message, 'error'); }
+
+    const liste = App.h('div', { class: 'archives-liste' });
+    for (const a of tous.assets.filter((x) => x.archived)) {
+      liste.append(App.h('div', { class: 'asset-row' },
+        App.h('div', {},
+          App.h('div', { class: 'a-name' }, a.label),
+          App.h('div', { class: 'a-meta' },
+            `${a.type} · clôturé, ne compte pas dans le total`)),
+        App.h('div', { class: 'right num' }, App.fmt.eur(a.valeur)),
+        App.h('div', {}),
+        App.h('div', { class: 'right' },
+          App.h('button', {
+            class: 'btn small',
+            onclick: () => App.tabs.wealth.openAssetDetail(a.id),
+          }, 'Détail'))));
+    }
+    bloc.append(liste);
   },
 
   /* Colonne de droite : plus-value pour un actif coté, intérêts pour un
@@ -1084,11 +1153,42 @@ App.tabs.wealth = {
       body: App.h('div', {}, nav, stack),
       wide: true,
       footer: [
+        // « Cloturer » et non « archiver » : c'est le mot d'un livret ferme.
+        // La colonne `archived`, la route et la pastille existaient depuis
+        // toujours ; aucun ecran ne permettait de s'en servir.
+        App.h('button', {
+          class: 'btn',
+          onclick: () => App.tabs.wealth.basculerArchive(a),
+        }, a.archived ? 'Rouvrir' : 'Clôturer'),
         App.h('button', { class: 'btn', onclick: () => App.tabs.wealth.openAssetForm(a) }, 'Modifier'),
         App.h('button', { class: 'btn', onclick: () => App.tabs.wealth.openRevalue(a) }, 'Valoriser'),
         App.h('button', { class: 'btn primary', onclick: () => App.modal.close() }, 'Fermer'),
       ],
     });
+  },
+
+  /* Clôture d'un produit : il sort du patrimoine sans perdre son passé.
+
+     Un livret fermé, une crypto revendue, un véhicule vendu n'ont plus à
+     compter dans le total, mais leur historique reste une partie de la vôtre.
+     Supprimer l'actif effacerait ses mouvements ; le clôturer ne fait que le
+     retirer de la photo du jour. */
+  async basculerArchive(a) {
+    const clore = !a.archived;
+    const suite = async () => {
+      try {
+        await App.api.put(`/api/assets/${a.id}`, { archived: clore });
+        App.modal.close();
+        App.toast(clore ? `${a.label} clôturé` : `${a.label} rouvert`, 'success');
+        App.tabs.wealth.archivesOuvertes = false;
+        await App.refreshAll();
+      } catch (e) { App.toast(e.message, 'error'); }
+    };
+    if (!clore) return suite();
+    App.confirm(
+      `Clôturer « ${a.label} » ? Il sortira du patrimoine, ses mouvements sont `
+      + 'conservés, et vous pourrez le rouvrir.',
+      suite, 'Clôturer');
   },
 
   /* Libellés des champs de `metadata`, qui s'affichaient jusqu'ici sous leur

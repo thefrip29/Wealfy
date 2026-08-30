@@ -23,6 +23,77 @@ App.tabs.overview = {
     App.tabs.overview.renderFlux(data.depenses_serie);
     App.tabs.overview.renderCategories(data.mois);
     App.tabs.overview.renderRepartition(data.repartition, data.metrics);
+    App.tabs.overview.renderMois(data);
+  },
+
+  /* Ce que le mois laisse une fois les charges fixes et l'épargne mises de
+     côté : le reste à vivre.
+
+     `services.metrics()` produit vingt-deux grandeurs ; l'interface en
+     affichait sept. Celle-ci a sa propre section dans `docs/interface.md` et
+     n'apparaissait sur aucun écran — alors que la colonne « Charge fixe » du
+     tableau des rôles n'a pas d'autre raison d'être que de l'alimenter. On
+     cochait donc des catégories pour nourrir un chiffre que personne ne
+     montrait.
+
+     Rien n'est calculé ici : tout arrive déjà dans `/api/overview`. */
+  renderMois(data) {
+    const host = App.el('#ov-mois');
+    const label = App.el('#ov-mois-label');
+    App.clear(host);
+    if (label) label.textContent = App.fmt.month(data.mois.mois);
+
+    const m = data.metrics;
+    const fixes = m.charges_fixes_mois || 0;
+    const configurees = ((App.state.meta || {}).categories_charges_fixes || []).length;
+
+    // Deux situations que le même zéro ne sépare pas, et qui n'appellent pas la
+    // même phrase : le réglage n'a jamais été fait, ou il l'est mais ce mois-ci
+    // ne porte rien. Inviter à configurer ce qui l'est déjà ferait chercher un
+    // écran qu'on a sous les yeux.
+    if (!configurees) {
+      host.append(
+        App.h('p', { class: 'muted' },
+          'Marquez vos catégories de charges fixes — loyer, assurances, '
+          + 'abonnements — pour connaître ce qui vous reste une fois le '
+          + 'récurrent et l’épargne mis de côté.'),
+        App.h('div', { class: 'actions', style: 'margin-top:12px' },
+          App.h('button', {
+            class: 'btn',
+            onclick: () => App.settings.open('classement'),
+          }, 'Choisir mes charges fixes')));
+      return;
+    }
+
+    // Sans revenu sur le mois, le reste à vivre serait un négatif sans objet :
+    // il se compte SUR des revenus.
+    if (!m.revenus_mois) {
+      host.append(App.h('p', { class: 'muted' },
+        `Aucun revenu enregistré en ${App.fmt.month(data.mois.mois)}. `
+        + 'Le reste à vivre se compte sur les revenus du mois.'));
+      return;
+    }
+
+    // Un chiffre domine, le reste descend d'un cran.
+    host.append(App.h('div', { class: 'reste' },
+      App.h('div', { class: 'reste-label' }, 'Reste à vivre'),
+      App.h('div', { class: 'reste-value' }, App.fmt.eur(m.reste_a_vivre_mois)),
+      App.h('div', { class: 'hero-meta' },
+        App.h('span', {}, 'une fois les charges fixes et l’épargne mises de côté'))));
+
+    const lignes = [
+      ['Revenus', App.fmt.eur(m.revenus_mois)],
+      ['Charges fixes', App.fmt.eur(fixes)
+        + (m.part_charges_fixes === null ? ''
+          : ` · ${App.fmt.pct(m.part_charges_fixes, 0)} des revenus`)],
+      ['Épargne', App.fmt.eur(m.epargne_mois)],
+    ];
+    if (m.mensualites_mois) {
+      lignes.push(['Mensualités de prêt', App.fmt.eur(m.mensualites_mois)
+        + (m.taux_endettement === null ? ''
+          : ` · ${App.fmt.pct(m.taux_endettement, 0)} des revenus`)]);
+    }
+    host.append(App.metricList(lignes));
   },
 
   /* Accueil d'une base vide.

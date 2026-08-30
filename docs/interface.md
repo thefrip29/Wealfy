@@ -315,6 +315,95 @@ maintenant les trois flux du mois et le trait la moyenne des douze derniers : la
 tendance longue est un repère posé sur le détail court, plutôt qu'une carte à
 elle seule.
 
+### Le reste à vivre, enfin branché
+
+`services.metrics()` produit **vingt-deux grandeurs** ; l'interface en affichait
+**sept**. Parmi les absentes : `reste_a_vivre_mois`, `charges_fixes_mois`,
+`part_charges_fixes`, `taux_endettement`, `mensualites_mois`.
+
+La première avait sa propre section dans ce fichier et n'apparaissait sur aucun
+écran. Pire : la colonne « Charge fixe » du tableau des rôles n'a **pas d'autre
+raison d'être** que de l'alimenter. On cochait donc des catégories pour nourrir
+un chiffre que personne ne montrait.
+
+Une carte *Mon mois* les affiche, dans la rangée qui n'avait qu'une carte et
+laissait un vide. Le reste à vivre domine, le reste descend d'un cran. **Rien
+n'est calculé en plus** : tout arrivait déjà dans `/api/overview`.
+
+Deux états vides distincts, parce que **le même zéro recouvre deux situations**
+qui n'appellent pas la même phrase : aucune catégorie marquée charge fixe (le
+réglage n'a jamais été fait, on y emmène), ou aucun revenu sur le mois (le reste
+à vivre se compte SUR des revenus). Inviter à configurer ce qui l'est déjà
+ferait chercher un écran qu'on a sous les yeux — d'où `categories_charges_fixes`
+dans `/api/meta`, qui sépare les deux cas.
+
+### Des budgets de dépenses
+
+Le patrimoine avait ses cibles, avec l'écart affiché (`repartition_cible`). Les
+dépenses n'avaient **ni objectif global ni plafond par catégorie**.
+
+Le budget se saisit dans le **tableau des rôles**, une colonne à droite des
+trois cases : c'est la même question posée à la même ligne — ce que fait cette
+catégorie, et combien j'y mets. Une carte *Budgets* sur l'onglet Dépenses montre
+le consommé sur le prévu, **repliée tant qu'aucun budget n'est fixé**.
+
+Aucun calcul serveur : `month_flows` renvoyait déjà `par_categorie`. Le motif de
+barre est celui de la répartition cible — même question, même forme. Un
+dépassement change la **couleur de la barre** et pas seulement la pastille : il
+doit se voir sans lire le chiffre.
+
+### Clôturer un produit
+
+La colonne `assets.archived`, la route `PUT` et la pastille « archivé »
+existaient depuis toujours. **Aucun écran ne permettait de s'en servir** : la
+case « Voir archivés » montrait un ensemble impossible à remplir, elle a été
+retirée, et la capacité est restée morte.
+
+La fiche d'un actif porte maintenant **Clôturer** — le mot d'un livret fermé,
+pas celui d'un classeur. Un produit clôturé sort du patrimoine sans perdre son
+passé : supprimer l'actif effacerait ses mouvements, le clôturer ne fait que le
+retirer de la photo du jour.
+
+On les retrouve sous la liste, dans un bloc à part qui **dit qu'ils ne comptent
+pas dans les totaux** — sans quoi on chercherait une erreur d'addition. Ils ne
+sont chargés qu'à la demande ; `nb_archives`, déduit du cache de
+`services.portfolio()` sans lecture supplémentaire, suffit à savoir s'il faut
+proposer le lien.
+
+### Raccourcis clavier
+
+Il n'y en avait aucun : seuls Échap et le piège à tabulation existaient.
+
+| Touche | Effet |
+|---|---|
+| `←` `→` | Mois précédent / suivant |
+| `1` à `4` | Onglet |
+| `/` | Recherche des transactions |
+
+Trois refus, dans cet ordre : une modale ouverte (le clavier lui appartient), un
+champ de saisie qui a le focus (taper « 2 » dans un montant ne doit pas changer
+d'onglet), une touche de modification enfoncée (Ctrl+1 appartient au
+navigateur). Les flèches ne font rien sur *Historique* : on rendrait au clavier
+ce qu'on vient de retirer à la souris.
+
+La **recherche** ne portait que sur le libellé. Elle balaie aussi le montant —
+brut et formaté, pour que « 45,30 » comme « 45.3 » trouvent — la catégorie, et
+le libellé du produit ou du prêt rattaché.
+
+### Deux retouches visuelles
+
+**Le fond s'efface quand la page est courte.** Sur un panneau long, les masses ne
+se voient que dans les marges et le mouvement reste un décor ; sur l'accueil vide
+ou un patrimoine de trois lignes, elles occupaient presque toute la surface et le
+contenu flottait dessus. `App.doserFond` compare la hauteur du panneau à celle de
+la fenêtre et pose `data-fond` sur `<html>` ; `--lava-opacity` fait le reste.
+
+**Un filet de proportion par produit.** La part de chaque ligne ne se lisait
+qu'en chiffres, à comparer de tête. Le filet se rapporte au total de **sa
+famille** — l'en-tête de groupe donne déjà la part de la famille dans
+l'ensemble, et enchaîner deux échelles se lirait mal. Il disparaît quand la
+famille n'a qu'un produit : un filet plein à 100 % ne dit rien.
+
 ### Le gain de l'année, et non le cumul d'une vie
 
 La dernière case de l'onglet *Patrimoine* donnait la **plus-value cumulée**

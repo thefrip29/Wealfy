@@ -196,6 +196,10 @@ def portfolio(at_date=None, include_archived=False, ctx=None, cache=None):
     return {
         "date": finance.iso(at_date),
         "assets": assets,
+        # Permet a l'interface de proposer « N produit(s) cloture(s) » sans
+        # second appel. Le cache porte deja les deux listes : la difference
+        # suffit, aucune lecture de plus.
+        "nb_archives": len(cache["assets_archived"]) - len(cache["assets"]),
         "liabilities": liabilities,
         "total_actif": total_actif,
         "total_passif": total_passif,

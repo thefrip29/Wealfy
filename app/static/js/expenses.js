@@ -13,6 +13,7 @@ App.tabs.expenses = {
     App.el('#ex-month-label').textContent = App.fmt.month(month);
     App.tabs.expenses.renderLastImport(imports);
     App.tabs.expenses.renderKpis(flows);
+    App.tabs.expenses.renderBudgets(flows);
     App.tabs.expenses.fillCategoryFilter();
     App.tabs.expenses.renderTable();
     App.tabs.expenses.renderImports(imports);
@@ -47,6 +48,49 @@ App.tabs.expenses = {
     );
   },
 
+  /* Consomme sur prevu, par categorie budgetee.
+
+     Le patrimoine avait des cibles et son ecart affiche ; les depenses
+     n'avaient ni objectif global ni plafond par categorie. Le budget se saisit
+     dans le tableau des roles, a cote de ce que fait la categorie.
+
+     Aucun calcul serveur : `month_flows` renvoie deja `par_categorie`. Le motif
+     de barre est celui de la repartition cible — meme question, meme forme. */
+  renderBudgets(flows) {
+    const carte = App.el('#ex-budgets-card');
+    const host = App.el('#ex-budgets');
+    App.clear(host);
+    const budgets = (App.state.meta && App.state.meta.budgets) || {};
+    const noms = Object.keys(budgets).sort();
+    carte.hidden = !noms.length;
+    if (!noms.length) return;
+
+    App.el('#ex-budgets-mois').textContent = App.fmt.month(flows.mois);
+    const depense = Object.fromEntries(
+      (flows.par_categorie || []).map((c) => [c.category, c.montant]));
+
+    for (const cat of noms) {
+      const prevu = budgets[cat];
+      const reel = depense[cat] || 0;
+      const part = prevu > 0 ? (100 * reel) / prevu : 0;
+      const depasse = reel > prevu;
+      host.append(App.h('div', { class: 'rep-row' },
+        App.h('div', { class: 'rep-head' },
+          App.h('span', {}, cat),
+          App.h('span', {},
+            App.h('span', { class: `pill ${depasse ? 'warn' : 'ok'}` },
+              depasse ? `+${App.fmt.eur(reel - prevu)}` : App.fmt.eur(prevu - reel)),
+            ' ',
+            App.h('span', { class: 'sub' },
+              `${App.fmt.eur(reel)} / ${App.fmt.eur(prevu)}`))),
+        App.h('div', { class: 'rep-bars' },
+          App.h('div', {
+            class: `rep-real${depasse ? ' depasse' : ''}`,
+            style: `width:${Math.min(100, part)}%`,
+          }))));
+    }
+  },
+
   /* Le filtre gagne « À classer » en tête : c'est le geste principal après un
      import, et il n'y avait aucun moyen d'isoler ces lignes. */
   NON_CATEGORISE: 'Non categorise',
@@ -67,11 +111,27 @@ App.tabs.expenses = {
      filtrer, cocher, changer de filtre, cocher encore, agir une seule fois. */
   selection: new Set(),
 
+  /* La recherche ne portait que sur le libellé : taper un montant ou le nom
+     d'un actif rattaché ne donnait rien. Elle balaie maintenant aussi le
+     montant — brut et formaté, pour que « 45,30 » comme « 45.3 » trouvent — et
+     le libellé du produit ou du prêt lié. */
+  texteCherchable(t) {
+    const assets = App.state.assets || [];
+    const liabs = App.state.liabilities || [];
+    const lie = t.asset_id
+      ? (assets.find((a) => a.id === t.asset_id) || {}).label
+      : (t.liability_id
+        ? ((liabs.find((l) => l.id === t.liability_id) || {}).label || 'Prêt') : '');
+    return [t.description, t.category, lie,
+      String(t.amount), App.fmt.eur(t.amount)]
+      .filter(Boolean).join(' ').toLowerCase();
+  },
+
   lignesFiltrees() {
     const q = (App.el('#ex-search').value || '').trim().toLowerCase();
     const cat = App.el('#ex-filter-cat').value;
     return App.tabs.expenses.cache.transactions.filter((t) => (
-      (!q || t.description.toLowerCase().includes(q))
+      (!q || App.tabs.expenses.texteCherchable(t).includes(q))
       && (!cat || t.category === cat)
     ));
   },
