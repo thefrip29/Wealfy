@@ -61,6 +61,10 @@ CREATE TABLE IF NOT EXISTS asset_movements (
     quantite      REAL,
     prix_unitaire REAL,
     ticker        TEXT,
+    -- Frais payes SUR ce mouvement (courtage, frais de reseau), en euros et
+    -- toujours positifs. Ils n'entrent jamais dans `montant` : cet argent
+    -- n'est pas alle dans le produit, il est alle au courtier.
+    frais         REAL NOT NULL DEFAULT 0,
     note          TEXT,
     -- Empreinte anti-doublon, comme sur transactions : reimporter un releve
     -- qui chevauche le precedent doublerait sinon les quantites en silence.

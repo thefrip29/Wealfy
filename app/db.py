@@ -184,7 +184,8 @@ def _migrate_columns(con):
     wanted = {
         "securities": [("kind", "TEXT NOT NULL DEFAULT 'titre'"),
                        ("taux_annuel", "REAL")],
-        "asset_movements": [("dedup_hash", "TEXT")],
+        "asset_movements": [("dedup_hash", "TEXT"),
+                            ("frais", "REAL NOT NULL DEFAULT 0")],
     }
     for table, columns in wanted.items():
         try:

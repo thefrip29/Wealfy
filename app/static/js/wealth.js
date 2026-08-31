@@ -375,14 +375,28 @@ App.tabs.wealth = {
         }, gain == null ? '—' : App.fmt.signed(gain),
           ligne.ecart_pru_pct == null ? null
             : App.h('div', { class: 'a-meta' }, App.fmt.pct(ligne.ecart_pru_pct, 2))),
-        App.h('td', { class: 'right' },
+        // Une quantite ne pouvait qu'augmenter : il n'y avait que « + Achat ».
+        // Le serveur acceptait pourtant deja un `type` (`add_position`), et
+        // `finance.quantity_held` soustrait deja tout ce qui n'est pas un
+        // versement. Seul le formulaire n'envoyait jamais autre chose.
+        App.h('td', { class: 'right nowrap' },
           App.h('button', {
             class: 'btn small',
             title: `Ajouter un ${kind === 'crypto' ? 'achat' : 'versement'} sur cette ${mot}`,
             onclick: () => App.tabs.wealth.openPositionForm(asset, host, {
               ticker: ligne.ticker, symbol: ligne.symbole, label: ligne.libelle,
             }),
-          }, '+ Achat'))));
+          }, '+ Achat'),
+          ' ',
+          // Un support hors cote se tient en euros, pas en parts : « vendre une
+          // quantite » n'y veut rien dire.
+          ligne.kind === 'non_cote' ? null : App.h('button', {
+            class: 'btn small',
+            title: `Vendre, retirer ou passer des frais sur cette ${mot}`,
+            onclick: () => App.tabs.wealth.openPositionForm(asset, host, {
+              ticker: ligne.ticker, symbol: ligne.symbole, label: ligne.libelle,
+            }, { sens: 'retrait', detenu: ligne.quantite }),
+          }, '\u2212 Vendre'))));
     }
 
     // Chiffres de synthèse en tête : ils occupaient auparavant deux onglets
@@ -609,10 +623,13 @@ App.tabs.wealth = {
      Quand l'instrument vient de la recherche, tout est déjà connu : on ne
      demande que combien et à quel prix. Les champs techniques (place, devise,
      indice) se replient — ils ne servent qu'à la saisie manuelle. */
-  openPositionForm(asset, host, instrument) {
+  openPositionForm(asset, host, instrument, options) {
     const kind = asset.type === 'Crypto' ? 'crypto' : 'titre';
     const item = instrument || {};
     const choisi = !!item.ticker;
+    const opt = options || {};
+    const vente = opt.sens === 'retrait';
+    const detenu = opt.detenu;
 
     // « Nom affiché » vit ici et non dans les détails repliés : les
     // référentiels ne connaissent que les raisons sociales, jamais les marques
@@ -621,12 +638,23 @@ App.tabs.wealth = {
     const principal = App.h('div', { class: 'form-grid' },
       App.field('Nom affiché', App.input('label', { value: item.label || '' }),
         { full: true, hint: 'Le nom du référentiel. Remplacez-le par le vôtre.' }),
-      App.field('Quantité', App.input('quantite', {
+      App.field(vente ? 'Quantité vendue' : 'Quantité', App.input('quantite', {
         type: 'number', step: '0.00000001', required: true,
-      })),
+      }), vente && detenu != null
+        ? { hint: `Vous en détenez ${App.fmt.num(detenu, 8)}` } : {}),
       App.field('Prix unitaire (€)', App.input('prix_unitaire', {
         type: 'number', step: '0.0001',
       }), { hint: 'Sert au PRU et au TRI' }),
+      // Le frais appartient à l'opération qui l'a causé. Il n'entre pas dans le
+      // montant — cet argent n'est pas allé dans le produit, il est allé au
+      // courtier — mais il gonfle votre prix de revient.
+      App.field('Frais (€)', App.input('frais', {
+        type: 'number', step: '0.01', placeholder: '0',
+      }), {
+        hint: kind === 'crypto'
+          ? 'Frais de réseau ou de plateforme'
+          : 'Courtage. Compte dans le prix de revient',
+      }),
       App.field('Date', App.dateField('date', { value: App.todayISO() })));
 
     const avance = App.h('div', { class: 'form-grid' },
@@ -658,10 +686,17 @@ App.tabs.wealth = {
       const ticker = (v.ticker || item.ticker || '').trim();
       if (!ticker) return App.invalide(form, 'ticker', 'Indiquez un instrument.');
       if (!v.quantite) return App.invalide(form, 'quantite', 'Indiquez une quantité.');
+      // Vendre plus qu'on ne detient produit une quantite negative, qui
+      // traverse ensuite toute la valorisation sans que rien ne l'arrete.
+      if (vente && detenu != null && parseFloat(v.quantite) > detenu + 1e-9) {
+        return App.invalide(form, 'quantite',
+          `Vous n\u2019en détenez que ${App.fmt.num(detenu, 8)}.`);
+      }
       try {
         await App.api.post(`/api/assets/${asset.id}/positions`, {
           ...v,
           ticker,
+          type: vente ? 'retrait' : 'versement',
           symbol: item.symbol || ticker,
           currency: v.currency || item.currency || 'EUR',
           // La colonne `securities.isin` existait mais restait toujours NULL :
@@ -669,14 +704,16 @@ App.tabs.wealth = {
           isin: item.isin || '',
         });
         App.modal.close();
-        App.toast('Position ajoutée', 'success');
+        App.toast(vente ? 'Vente enregistrée' : 'Position ajoutée', 'success');
         await App.tabs.wealth.renderPositions(host, asset);
         await App.refreshOthers();
       } catch (e) { App.toast(e.message, 'error'); }
     };
 
     App.modal.open({
-      title: item.label ? `${item.label} — combien ?` : 'Ajouter une position',
+      title: vente
+        ? `${item.label || item.ticker} — combien en sort-il ?`
+        : (item.label ? `${item.label} — combien ?` : 'Ajouter une position'),
       body: App.h('div', {},
         choisi ? App.h('p', { class: 'hint', style: 'margin-bottom:14px' },
           [item.code, item.exchange, item.currency].filter(Boolean).join(' · ')) : null,
@@ -684,11 +721,12 @@ App.tabs.wealth = {
       footer: [
         App.h('button', {
           class: 'btn',
-          onclick: () => (choisi
+          onclick: () => (choisi && !vente
             ? App.tabs.wealth.openInstrumentSearch(asset, host)
             : App.modal.close()),
-        }, choisi ? 'Retour' : 'Annuler'),
-        App.h('button', { class: 'btn primary', onclick: save }, 'Ajouter'),
+        }, choisi && !vente ? 'Retour' : 'Annuler'),
+        App.h('button', { class: 'btn primary', onclick: save },
+          vente ? 'Enregistrer la vente' : 'Ajouter'),
       ],
     });
   },
@@ -1005,6 +1043,12 @@ App.tabs.wealth = {
       if (App.tabs.wealth.MARKET.includes(t) && t !== 'Crypto') {
         add('Courtier', 'courtier');
         add('Numéro de compte', 'numero_compte');
+        add('TER annuel (%)', 'ter_annuel', { type: 'number', step: '0.01' });
+        metaHost.append(App.h('p', { class: 'hint', style: 'grid-column:1/-1' },
+          'Le TER n’est jamais prélevé : il est intégré au cours du support et '
+          + 'ne sort d’aucun compte. Aucun mouvement ne peut donc le porter — '
+          + 'c’est une estimation, appliquée à la valeur du produit, et comptée '
+          + 'à part des frais réellement payés.'));
       }
       if (t === 'Crypto') {
         add('Identifiant CoinGecko', 'coingecko_id', { placeholder: 'ex : bitcoin' });
@@ -1200,6 +1244,7 @@ App.tabs.wealth = {
     taux_revalorisation_annuel: ['Revalorisation annuelle', (v) => `${App.fmt.num(v, 2)} %`],
     indice_insee: ['Indice INSEE', String],
     coingecko_id: ['Identifiant CoinGecko', String],
+    ter_annuel: ['TER annuel (estimé)', (v) => `${App.fmt.num(v, 2)} %`],
     quantite: ['Quantité détenue', (v) => App.fmt.num(v, 6)],
     isin: ['ISIN', String],
     surface: ['Surface', (v) => `${App.fmt.num(v, 0)} m²`],
@@ -1229,6 +1274,9 @@ App.tabs.wealth = {
         ['Valeur saisie manuellement', a.valeur_actuelle === null ? 'non (reconstituée)' : App.fmt.eur(a.valeur_actuelle)],
         ['Mouvements enregistrés', String(a.nb_mouvements)],
       ];
+    if (data.frais_payes) {
+      rows.push(['Frais payés depuis l’origine', App.fmt.eur(data.frais_payes)]);
+    }
     const list = App.metricList(rows);
 
     // Le taux est déjà dans le tableau ci-dessus pour un produit à taux : le
@@ -1271,7 +1319,7 @@ App.tabs.wealth = {
     const rebuild = () => {
       App.clear(tbody);
       if (!data.movements.length) {
-        tbody.append(App.h('tr', {}, App.h('td', { colspan: 7, class: 'empty' }, 'Aucun mouvement.')));
+        tbody.append(App.h('tr', {}, App.h('td', { colspan: 8, class: 'empty' }, 'Aucun mouvement.')));
       }
       for (const m of data.movements) {
         tbody.append(App.h('tr', {},
@@ -1281,6 +1329,8 @@ App.tabs.wealth = {
           App.h('td', { class: 'right num' }, m.quantite === null ? '—' : App.fmt.num(m.quantite, 6)),
           App.h('td', { class: 'right num' }, m.prix_unitaire === null ? '—' : App.fmt.eur(m.prix_unitaire)),
           App.h('td', { class: `right num ${m.montant < 0 ? 'neg' : ''}` }, App.fmt.eur(m.montant)),
+          App.h('td', { class: 'right num' },
+            m.frais ? App.fmt.eur(m.frais) : '—'),
           App.h('td', { class: 'right' }, App.h('button', {
             class: 'icon-btn',
             onclick: () => App.confirm('Supprimer ce mouvement ?', async () => {
@@ -1302,11 +1352,20 @@ App.tabs.wealth = {
       // proposer les deux revenait à demander de choisir entre deux mots pour
       // un seul geste. Les valorisations déjà enregistrées restent listées
       // au-dessus : c'est leur historique.
-      App.field('Type', App.select('type', [['versement', 'Versement / achat'], ['retrait', 'Retrait / vente']], 'versement')),
+      App.field('Type', App.select('type', [
+        ['versement', 'Versement / achat'],
+        ['retrait', 'Retrait / vente'],
+        // Frais de gestion, droits de garde : aucune transaction ne les porte,
+        // ils sortent du produit tout seuls.
+        ['frais', 'Frais prélevés'],
+      ], 'versement')),
       App.field('Montant (€)', App.input('montant', { type: 'number', step: '0.01' })),
       isMarket ? App.field('Ticker / ISIN', App.input('ticker')) : null,
       isMarket ? App.field('Quantité', App.input('quantite', { type: 'number', step: '0.000001' })) : null,
       isMarket ? App.field('Prix unitaire (€)', App.input('prix_unitaire', { type: 'number', step: '0.0001' })) : null,
+      App.field('Frais sur ce mouvement (€)', App.input('frais', {
+        type: 'number', step: '0.01', placeholder: '0',
+      }), { hint: 'Courtage ou commission payés en plus du montant' }),
       App.field('Note', App.input('note'), { full: true }));
 
     const add = async () => {
@@ -1330,7 +1389,8 @@ App.tabs.wealth = {
             App.h('th', {}, 'Date'), App.h('th', {}, 'Type'), App.h('th', {}, 'Ticker'),
             App.h('th', { class: 'right' }, 'Quantité'),
             App.h('th', { class: 'right' }, 'Prix unit.'),
-            App.h('th', { class: 'right' }, 'Montant'), App.h('th', {}))),
+            App.h('th', { class: 'right' }, 'Montant'),
+            App.h('th', { class: 'right' }, 'Frais'), App.h('th', {}))),
           tbody)),
       App.h('div', { class: 'section-title' }, 'Ajouter un mouvement'),
       form,

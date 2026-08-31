@@ -83,13 +83,17 @@ def add_position(aid):
 
     sens = (data.get("type") or "versement").strip()
     montant = abs(montant) if sens == "versement" else -abs(montant)
+    # Frais payes sur cette operation : courtage d'un achat, frais de reseau
+    # d'un envoi crypto. Ils n'entrent pas dans `montant` — cet argent n'est pas
+    # alle dans le produit — mais gonflent le prix de revient.
+    frais = abs(as_float(data.get("frais"), 0.0) or 0.0)
     execute(
         "INSERT INTO asset_movements(id, asset_id, date, montant, type, quantite, "
-        "prix_unitaire, ticker, note) VALUES (?,?,?,?,?,?,?,?,?)",
+        "prix_unitaire, ticker, frais, note) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (
             new_id(), aid, as_date(data.get("date"), date.today().isoformat()),
             round(montant, 2), sens,
-            abs(quantite) if quantite else None, prix, ticker,
+            abs(quantite) if quantite else None, prix, ticker, round(frais, 2),
             (data.get("note") or "").strip() or None,
         ),
     )

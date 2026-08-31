@@ -19,8 +19,6 @@ App.settings = {
         App.settings.panelRules(rules, settings))],
       ['Objectifs', App.h('div', {},
         App.settings.panelRepartition(settings),
-        App.h('div', { class: 'section-title' }, 'Frais annuels'),
-        App.settings.panelFees(settings),
         App.h('div', { class: 'section-title' }, 'Crédit des intérêts'),
         App.settings.panelTaux(settings))],
       ['Cours de marché', App.settings.panelMarket(settings, market)],
@@ -440,58 +438,6 @@ App.settings = {
         App.h('p', {},
           'Elle vaut pour le Livret A, le LDDS, le LEP, le Livret Jeune, le PEL et '
           + 'le CEL, qui créditent tous au 31 décembre.')));
-  },
-
-  panelFees(settings) {
-    const fees = Object.assign({}, settings.frais_annuels || {});
-    const year = String(new Date().getFullYear());
-    const yearIn = App.input('annee', { type: 'number', value: year });
-    const terIn = App.input('ter', { type: 'number', step: '0.01', value: (fees[year] || {}).ter ?? '' });
-    const cIn = App.input('courtage', { type: 'number', step: '0.01', value: (fees[year] || {}).courtage ?? '' });
-
-    const tbody = App.h('tbody', {});
-    const render = () => {
-      App.clear(tbody);
-      const years = Object.keys(fees).sort().reverse();
-      if (!years.length) {
-        tbody.append(App.h('tr', {}, App.h('td', { colspan: 4, class: 'empty' }, 'Aucun frais saisi.')));
-      }
-      for (const y of years) {
-        const f = fees[y] || {};
-        const total = (parseFloat(f.ter) || 0) + (parseFloat(f.courtage) || 0);
-        tbody.append(App.h('tr', {},
-          App.h('td', {}, y),
-          App.h('td', { class: 'right num' }, App.fmt.eur(f.ter || 0)),
-          App.h('td', { class: 'right num' }, App.fmt.eur(f.courtage || 0)),
-          App.h('td', { class: 'right num' }, App.fmt.eur(total))));
-      }
-    };
-    render();
-
-    const save = async () => {
-      const y = String(parseInt(yearIn.value, 10) || new Date().getFullYear());
-      fees[y] = { ter: parseFloat(terIn.value) || 0, courtage: parseFloat(cIn.value) || 0 };
-      render();
-      await App.settings.save({ frais_annuels: fees }, 'Frais enregistrés');
-    };
-    // À la sortie du champ, pas à la frappe : sinon chaque chiffre tapé
-    // déclencherait un enregistrement, et « 1 » serait écrit avant « 120 ».
-    for (const champ of [yearIn, terIn, cIn]) champ.addEventListener('change', save);
-
-    return App.h('div', {},
-      App.h('p', { class: 'hint' },
-        'TER des ETF + frais de courtage, saisis une fois par an. Le total est rapporté '
-        + 'à l’encours dans la vue d’ensemble.'),
-      App.h('div', { class: 'form-grid', style: 'margin-top:12px' },
-        App.field('Année', yearIn),
-        App.field('TER (€)', terIn),
-        App.field('Courtage (€)', cIn)),
-      App.h('div', { class: 'table-wrap', style: 'margin-top:14px' },
-        App.h('table', { class: 'table' },
-          App.h('thead', {}, App.h('tr', {},
-            App.h('th', {}, 'Année'), App.h('th', { class: 'right' }, 'TER'),
-            App.h('th', { class: 'right' }, 'Courtage'), App.h('th', { class: 'right' }, 'Total'))),
-          tbody)));
   },
 
   /* ---------- sauvegardes CSV ---------- */

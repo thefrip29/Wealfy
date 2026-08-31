@@ -504,7 +504,7 @@ import peut être annulé : ses transactions sont supprimées avec lui.
 
 **Paramètres** (icône engrenage) — quatre sections dont le contenu correspond au
 titre : *Classement des dépenses* (catégories, rôles, règles),
-*Objectifs* (répartition cible, frais, crédit des intérêts), *Cours de marché*,
+*Objectifs* (répartition cible, crédit des intérêts), *Cours de marché*,
 et *Général* (types d'actifs personnalisés, sauvegardes). « Types d'actifs
 personnalisés » était logé sous *Cours de marché*, avec lesquels il n'a rien à
 voir.

@@ -63,6 +63,98 @@ sont signalés et décochés avant confirmation ; un index unique en base bloque
 l'insertion même si on force.
 
 
+## Les frais, rattachés à ce qui les cause
+
+Il n'y avait qu'un réglage **global** : `frais_annuels`, deux montants tapés à
+la main pour tout le patrimoine. Rien ne rattachait un courtage au PEA qui
+l'avait payé, ni un frais de réseau au portefeuille crypto. Le total mélangeait
+des coûts sans rapport, et « combien me coûte ce produit » restait sans réponse.
+
+### Deux écritures, parce que l'argent ne circule pas pareil
+
+| | Effet sur la valeur | Effet sur le capital investi |
+|---|---|---|
+| Colonne `frais` sur un versement / retrait | aucun — cet argent n'est jamais entré dans le produit | **ajouté** |
+| Mouvement de type `frais` | **retiré** — l'argent sort du produit | aucun |
+
+- **Un courtage** part chez le courtier : il ne rentre pas dans le produit, mais
+  il gonfle votre prix de revient. Achat 1 000 € + 5 € → valeur 1 000, investi
+  1 005, plus-value −5.
+- **Des frais de gestion** sortent du produit : sa valeur baisse. Investi
+  inchangé, plus-value −12.
+
+Les deux baissent la plus-value du montant du frais, ce qui est le résultat
+attendu. Ce sont deux écritures, pas deux conventions.
+
+**Le piège** : compter le montant d'un mouvement `frais` dans
+`invested_amount` annulerait son effet et le ferait disparaître des comptes.
+Un test le garde.
+
+### Le courtage entre dans le PRU
+
+C'est la convention française, celle d'une déclaration fiscale — et celle que
+`pru_par_ligne` tenait déjà pour les ventes. Sans lui, le PRU affiché serait
+plus bas que celui de votre relevé de courtier.
+
+### Des frais prélevés en nature
+
+Les frais de réseau d'un envoi crypto sont prélevés **en jetons**. Un mouvement
+`frais` qui porte un ticker et une quantité réduit donc la quantité détenue,
+comme une cession — le PRU ne bouge pas, le prix de revient baisse au prorata.
+
+Un frais **en euros**, lui, ne nomme aucune ligne : il ne doit pas en fabriquer
+une. Sans ce garde-fou, des frais de gestion créaient une ligne « (sans
+ticker) » à zéro part dans la liste des positions.
+
+### Un frais doit se voir
+
+Pour la date du jour, `asset_value_at` rend `valeur_actuelle` telle quelle sans
+regarder les mouvements : le montant déclaré en dernier fait autorité. Un frais
+enregistré ne changeait donc **rien à l'écran**. Enregistrer des frais prélevés
+diminue désormais le solde déclaré du produit — un frais qu'on ne voit pas n'est
+pas comptabilisé.
+
+### Le TER, qui n'est jamais prélevé
+
+Un TER n'est pas une transaction : il est **intégré au cours** du support et ne
+sort d'aucun compte. Aucun mouvement ne peut le porter.
+
+Il reste donc une **estimation**, saisie en pourcentage sur la fiche du produit
+(`ter_annuel` dans ses `metadata`), appliquée à sa valeur. Elle est rendue à
+part — `ter_estime` — pour ne jamais être confondue avec les frais réellement
+payés.
+
+### Ce que devient l'ancien réglage
+
+Il ne se saisit plus. Ce qu'il portait déjà n'est pas perdu pour autant : il est
+compté sous le nom **« Non rattachés (ancien réglage) »**. On ne sait pas à quel
+produit ces montants appartenaient — c'est précisément le défaut qu'on corrige —
+et leur en inventer un serait pire que de le dire.
+
+`services.frais_par_produit(annee)` rend le détail, `metrics.frais_annuels` le
+total. Il est désormais **calculé**, là où il était tapé.
+
+
+## Vendre, retirer, réduire une quantité
+
+L'écran des positions n'offrait que **« + Achat »** : une quantité ne pouvait
+qu'augmenter. Impossible d'enregistrer une vente, ni des frais de réseau qui
+réduisent réellement le nombre de jetons.
+
+Le manque était **entièrement dans l'écran**. `add_position`
+(`app/routes/positions.py`) acceptait déjà un `type` et gérait le signe du
+montant ; `finance.quantity_held` soustrait depuis toujours toute quantité qui
+n'est pas un versement. Seul le formulaire n'envoyait jamais autre chose.
+
+Chaque ligne porte donc **« − Vendre »** à côté de « + Achat ». Une vente
+supérieure à la quantité détenue est refusée, avec le solde rappelé : sans ce
+contrôle, une faute de frappe produit une quantité négative qui traverse ensuite
+toute la valorisation sans que rien ne l'arrête.
+
+Un support **hors cote** — un fonds euro — se tient en euros et non en parts :
+« vendre une quantité » n'y veut rien dire, le bouton n'y apparaît pas.
+
+
 ## Un solde declare est date du jour ou on le declare
 
 Le formulaire demande **« Montant aujourd'hui »** et **« Depuis le »**, en

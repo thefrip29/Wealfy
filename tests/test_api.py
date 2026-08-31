@@ -750,6 +750,164 @@ class TestCloture(ApiTestCase):
         self.assertEqual(snap["nb_archives"], 0)
 
 
+class TestFrais(ApiTestCase):
+    """Les frais n'avaient qu'un endroit ou vivre, et il etait global : deux
+    montants tapes a la main pour tout le patrimoine. Rien ne rattachait un
+    courtage au PEA qui l'avait paye.
+
+    Deux ecritures, parce que l'argent ne circule pas pareil. Un courtage ne
+    rentre jamais dans le produit : il part chez le courtier et gonfle le prix
+    de revient. Des frais de gestion, eux, sortent du produit et font baisser
+    sa valeur. Les deux baissent la plus-value du montant du frais.
+    """
+
+    def compte(self):
+        return self.post("/api/assets", {
+            "type": "CTO", "label": "Compte-titres",
+            "date_acquisition": "2024-01-10", "valeur_acquisition": 0,
+        })["id"]
+
+    def fiche(self, aid):
+        return self.get("/api/assets/" + aid)
+
+    def test_un_courtage_gonfle_le_prix_de_revient(self):
+        aid = self.compte()
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "CW8", "quantite": 10, "prix_unitaire": 100, "frais": 5,
+            "date": "2024-02-01",
+        })
+        a = self.fiche(aid)["asset"]
+        self.assertEqual(a["investi"], 1005.0)
+        self.assertEqual(a["valeur"], 1000.0)
+        self.assertEqual(a["plus_value"], -5.0)
+
+    def test_un_frais_autonome_fait_baisser_la_valeur(self):
+        """Et surtout : son montant N'ENTRE PAS dans le capital investi. L'y
+        compter annulerait son effet et le ferait disparaitre des comptes."""
+        aid = self.compte()
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "CW8", "quantite": 10, "prix_unitaire": 100,
+            "date": "2024-02-01",
+        })
+        avant = self.fiche(aid)["asset"]
+        self.post("/api/assets/" + aid + "/movements", {
+            "date": "2024-06-30", "type": "frais", "montant": 12,
+            "note": "Droits de garde",
+        })
+        apres = self.fiche(aid)["asset"]
+        self.assertEqual(apres["investi"], avant["investi"])
+        self.assertEqual(apres["valeur"], avant["valeur"] - 12)
+        self.assertEqual(apres["plus_value"], avant["plus_value"] - 12)
+
+    def test_un_frais_se_voit_meme_sur_un_solde_declare(self):
+        """Pour la date du jour, `asset_value_at` rend `valeur_actuelle` sans
+        regarder les mouvements : un frais y restait invisible."""
+        aid = self.post("/api/assets", {
+            "type": "AssuranceVie", "label": "AV", "valeur_actuelle": 5000,
+        })["id"]
+        avant = self.fiche(aid)["asset"]["valeur"]
+        self.post("/api/assets/" + aid + "/movements", {
+            "date": date.today().isoformat(), "type": "frais", "montant": 42.5,
+        })
+        self.assertEqual(self.fiche(aid)["asset"]["valeur"], round(avant - 42.5, 2))
+
+    def test_le_courtage_entre_dans_le_pru(self):
+        """Sans lui, le PRU affiche serait plus bas que celui du releve de
+        courtier."""
+        aid = self.compte()
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "CW8", "quantite": 10, "prix_unitaire": 100, "frais": 5,
+            "date": "2024-02-01",
+        })
+        lignes = self.get("/api/assets/" + aid + "/positions")["lignes"]
+        self.assertAlmostEqual(lignes[0]["pru"], 100.5, places=4)
+
+    def test_frais_payes_remontes_sur_la_fiche(self):
+        aid = self.compte()
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "CW8", "quantite": 10, "prix_unitaire": 100, "frais": 5,
+            "date": "2024-02-01",
+        })
+        self.post("/api/assets/" + aid + "/movements", {
+            "date": "2024-06-30", "type": "frais", "montant": 12,
+        })
+        self.assertEqual(self.fiche(aid)["frais_payes"], 17.0)
+
+    def test_le_total_annuel_est_calcule_par_produit(self):
+        """Il etait tape a la main pour tout le patrimoine."""
+        aid = self.compte()
+        annee = date.today().year
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "CW8", "quantite": 10, "prix_unitaire": 100, "frais": 7,
+            "date": f"{annee}-02-01",
+        })
+        m = self.get("/api/metrics")
+        self.assertEqual(m["frais_annuels"], 7.0)
+        detail = m["frais_annuels_detail"]
+        self.assertEqual(detail[0]["label"], "Compte-titres")
+        self.assertEqual(detail[0]["payes"], 7.0)
+
+    def test_le_ter_est_estime_et_compte_a_part(self):
+        """Un TER n'est jamais preleve : il est integre au cours et ne sort
+        d'aucun compte. Aucun mouvement ne peut le porter."""
+        annee = date.today().year
+        aid = self.post("/api/assets", {
+            "type": "CTO", "label": "PEA ETF", "valeur_actuelle": 10000,
+            "metadata": {"ter_annuel": 0.2},
+        })["id"]
+        detail = self.get("/api/metrics")["frais_annuels_detail"]
+        ligne = next(f for f in detail if f["asset_id"] == aid)
+        self.assertEqual(ligne["ter_estime"], 20.0)
+        self.assertEqual(ligne["payes"], 0.0)
+
+
+class TestReduireUneQuantite(ApiTestCase):
+    """Une quantite ne pouvait qu'augmenter : l'ecran n'offrait que
+    « + Achat ». Le serveur acceptait pourtant deja un type."""
+
+    def portefeuille(self):
+        aid = self.post("/api/assets", {
+            "type": "Crypto", "label": "Crypto",
+            "date_acquisition": "2024-01-10", "valeur_acquisition": 0,
+        })["id"]
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "bitcoin", "quantite": 0.5, "prix_unitaire": 40000,
+            "date": "2024-02-01",
+        })
+        return aid
+
+    def test_une_vente_reduit_la_quantite(self):
+        aid = self.portefeuille()
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "bitcoin", "quantite": 0.2, "prix_unitaire": 50000,
+            "type": "retrait", "date": "2024-08-01",
+        })
+        ligne = self.get("/api/assets/" + aid + "/positions")["lignes"][0]
+        self.assertAlmostEqual(ligne["quantite"], 0.3, places=8)
+
+    def test_le_pru_ne_bouge_pas_a_la_vente(self):
+        """Convention francaise, deja tenue par `pru_par_ligne`."""
+        aid = self.portefeuille()
+        avant = self.get("/api/assets/" + aid + "/positions")["lignes"][0]["pru"]
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "bitcoin", "quantite": 0.2, "prix_unitaire": 50000,
+            "type": "retrait", "date": "2024-08-01",
+        })
+        apres = self.get("/api/assets/" + aid + "/positions")["lignes"][0]["pru"]
+        self.assertAlmostEqual(avant, apres, places=4)
+
+    def test_des_frais_en_nature_reduisent_la_quantite(self):
+        """Les frais de reseau sont preleves EN crypto : ils reduisent le
+        nombre de jetons, pas seulement un montant en euros."""
+        aid = self.portefeuille()
+        self.post("/api/assets/" + aid + "/movements", {
+            "date": "2024-08-01", "type": "frais", "montant": 3,
+            "ticker": "bitcoin", "quantite": 0.0001,
+        })
+        ligne = self.get("/api/assets/" + aid + "/positions")["lignes"][0]
+        self.assertAlmostEqual(ligne["quantite"], 0.4999, places=8)
+
+
 class TestAnalytics(ApiTestCase):
     def seed(self):
         self.post("/api/assets", {
@@ -1002,8 +1160,14 @@ class TestSettingsAndRules(ApiTestCase):
         })
         settings = self.get("/api/settings")
         self.assertEqual(settings["repartition_cible"][0]["pct"], 100)
+        # Les frais sont desormais CALCULES depuis les mouvements, produit par
+        # produit. L'ancien reglage global ne se saisit plus, mais ce qu'il
+        # portait deja n'est pas perdu : il est compte a part, sous son nom,
+        # parce qu'on ne sait pas a quel produit l'attribuer.
         m = self.get("/api/metrics")
         self.assertEqual(m["frais_annuels"], 57.0)
+        detail = m["frais_annuels_detail"]
+        self.assertEqual([f["label"] for f in detail], ["Non rattaches (ancien reglage)"])
 
     def test_apply_rules_to_existing_transactions(self):
         self.post("/api/transactions", {

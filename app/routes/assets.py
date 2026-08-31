@@ -32,6 +32,12 @@ def get_asset_detail(aid):
     ctx = services.market_context(at)
     detail = services.asset_detail(asset, movements, at, ctx)
     payload = {"asset": detail, "movements": movements}
+    # Ce que ce produit a coute, tous frais confondus : ceux portes par une
+    # transaction et ceux qui font mouvement a eux seuls.
+    payload["frais_payes"] = round(sum(
+        finance.frais_de(mv)
+        + (abs(float(mv["montant"] or 0)) if mv["type"] == "frais" else 0.0)
+        for mv in movements), 2)
     if asset["type"] in ("PEA", "CTO", "Crypto", "AssuranceVie", "PER"):
         payload["marche"] = services.market_asset_detail(aid, at, ctx)
     if asset["type"] in ("Immobilier", "SCPI", "Vehicule"):

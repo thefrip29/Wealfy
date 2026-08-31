@@ -667,7 +667,10 @@ def _flux_ligne(movements, ticker):
     return [
         (mv["date"], float(mv["montant"] or 0))
         for mv in movements
-        if mv["type"] in ("versement", "retrait")
+        if mv["type"] in ("versement", "retrait", "frais")
+        # Un frais qui ne nomme aucune ligne (frais de gestion en euros) ne se
+        # rattache a aucun support : il ne doit pas peser sur leur valeur.
+        and not (mv["type"] == "frais" and not (mv["ticker"] or "").strip())
         and ((mv["ticker"] or "").strip() or "(sans ticker)") == ticker
     ]
 

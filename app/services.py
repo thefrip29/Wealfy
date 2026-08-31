@@ -601,11 +601,8 @@ def metrics(at_date=None):
         -t["amount"] for t in transactions_between(debut, fin)
         if t["amount"] < 0 and t["category"] in fixes), 2)
 
-    frais = get_setting("frais_annuels", {}) or {}
-    frais_annee = frais.get(str(at_date.year), {})
-    frais_total = round(
-        float(frais_annee.get("ter", 0) or 0) + float(frais_annee.get("courtage", 0) or 0), 2
-    )
+    frais_annee = frais_par_produit(at_date.year, snap)
+    frais_total = round(sum(f["total"] for f in frais_annee), 2)
 
     return {
         "patrimoine_net": net,
@@ -630,11 +627,74 @@ def metrics(at_date=None):
         "part_charges_fixes": (
             round(100 * charges_fixes / revenus, 2) if revenus > 0 else None),
         "frais_annuels": frais_total,
+        # Le detail par produit, la ou il n'y avait qu'un total global.
         "frais_annuels_detail": frais_annee,
         "frais_pct_encours": (
             round(100 * frais_total / snap["total_actif"], 4) if snap["total_actif"] else None
         ),
     }
+
+
+def frais_par_produit(annee, snap=None, cache=None):
+    """Ce que chaque produit a coute dans l'annee.
+
+    Il n'y avait qu'un reglage global — deux montants tapes a la main pour tout
+    le patrimoine, `frais_annuels`. Rien ne rattachait un courtage au PEA qui
+    l'avait paye, ni un frais de reseau au portefeuille crypto, et le total
+    melangeait des couts sans rapport.
+
+    Deux sources, et elles ne se comptent pas pareil :
+
+    - les frais **payes**, lus sur les mouvements. Ceux portes par une
+      transaction (`frais_de`) et ceux qui font mouvement a eux seuls (type
+      `frais`). Ce sont des faits.
+    - le **TER** d'un support, qui n'est jamais preleve : il est integre au
+      cours et ne sort d'aucun compte. Aucun mouvement ne peut le porter, donc
+      il reste une ESTIMATION — taux saisi sur la fiche, applique a la valeur
+      du produit. Il est rendu a part pour ne pas etre confondu avec le reste.
+    """
+    cache = shared_cache(cache)
+    if snap is None:
+        snap = portfolio(date(annee, 12, 31), cache=cache)
+    grouped = cache["movements"]
+    out = []
+
+    # L'ancien reglage global, s'il porte encore quelque chose. On ne sait pas a
+    # quel produit ces montants appartenaient — c'est precisement le defaut
+    # qu'on corrige — donc on ne leur en invente pas un. Ils sont comptes a
+    # part, sous leur nom, plutot que de disparaitre en silence.
+    ancien = (get_setting("frais_annuels", {}) or {}).get(str(annee), {}) or {}
+    hors = round(float(ancien.get("ter", 0) or 0)
+                 + float(ancien.get("courtage", 0) or 0), 2)
+    if hors:
+        out.append({
+            "asset_id": None, "label": "Non rattaches (ancien reglage)",
+            "payes": hors, "ter_estime": 0.0, "total": hors,
+        })
+    for asset in snap["assets"]:
+        payes = 0.0
+        for mv in grouped.get(asset["id"], []):
+            d = finance.parse_date(mv["date"])
+            if not d or d.year != annee:
+                continue
+            payes += finance.frais_de(mv)
+            if mv["type"] == "frais":
+                payes += abs(float(mv["montant"] or 0))
+        taux = (asset.get("metadata") or {}).get("ter_annuel")
+        try:
+            ter = round(float(taux) / 100 * float(asset["valeur"] or 0), 2) if taux else 0.0
+        except (TypeError, ValueError):
+            ter = 0.0
+        if not payes and not ter:
+            continue
+        out.append({
+            "asset_id": asset["id"],
+            "label": asset["label"],
+            "payes": round(payes, 2),
+            "ter_estime": ter,
+            "total": round(payes + ter, 2),
+        })
+    return sorted(out, key=lambda f: -f["total"])
 
 
 def net_worth_series(months=12, reference=None):

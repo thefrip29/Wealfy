@@ -194,7 +194,9 @@ def asset_value_at(asset, movements, at_date=None, use_manual_current=True) -> f
     flows = 0.0
     for mv in ordered:
         d = parse_date(mv["date"])
-        if d and base_date < d <= at_date and mv["type"] in ("versement", "retrait"):
+        # `frais` compris : l'argent d'un frais autonome quitte reellement le
+        # produit, sa valeur doit baisser d'autant.
+        if d and base_date < d <= at_date and mv["type"] in ("versement", "retrait", "frais"):
             flows += float(mv["montant"] or 0)
     return round(base + flows, 2)
 
@@ -309,7 +311,7 @@ def valeur_livret(asset, movements, taux_annuel, at_date=None, credit=None) -> f
         total = base
         for mv in movements:
             d = parse_date(mv["date"])
-            if d and d <= at_date and mv["type"] in ("versement", "retrait"):
+            if d and d <= at_date and mv["type"] in ("versement", "retrait", "frais"):
                 total += float(mv["montant"] or 0)
         return round(total, 2)
 
@@ -343,7 +345,10 @@ def valeur_livret(asset, movements, taux_annuel, at_date=None, credit=None) -> f
         montant = float(mv["montant"] or 0)
         if mv["type"] == "versement":
             events.append((_quinzaine(d) + 1, abs(montant)))
-        elif mv["type"] == "retrait":
+        elif mv["type"] in ("retrait", "frais"):
+            # Un retrait comme un frais quittent le livret a la quinzaine
+            # PRECEDENTE : la reglementation ne fait pas de cadeau sur la
+            # quinzaine entamee.
             events.append((_quinzaine(d) - 1, -abs(montant)))
     events.sort()
     # La quinzaine en cours n'entre dans le calcul que le jour ou elle s'acheve.
@@ -423,6 +428,18 @@ def valeur_capitalisee(flux, taux_annuel, at_date=None):
     return round(solde, 2)
 
 
+def frais_de(mv) -> float:
+    """Frais portes par un mouvement. Zero si la colonne n'existe pas encore.
+
+    Une base creee avant l'ajout de la colonne renvoie des lignes qui ne la
+    portent pas : la migration la pose, mais un objet deja lu en memoire, non.
+    """
+    try:
+        return abs(float(mv["frais"] or 0))
+    except (KeyError, IndexError, TypeError, ValueError):
+        return 0.0
+
+
 def invested_amount(asset, movements, at_date=None) -> float:
     """Capital net reellement investi (acquisition + versements - retraits).
 
@@ -438,13 +455,19 @@ def invested_amount(asset, movements, at_date=None) -> float:
     at_date = parse_date(at_date)
     total = float(asset["valeur_acquisition"] or 0)
     for mv in movements:
-        if mv["type"] not in ("versement", "retrait"):
-            continue
         if at_date is not None:
             d = parse_date(mv["date"])
             if d is None or d > at_date:
                 continue
-        total += float(mv["montant"] or 0)
+        # Un frais d'acquisition fait partie du prix de revient : 1 000 EUR
+        # d'achat plus 5 EUR de courtage, c'est 1 005 EUR sortis de votre poche.
+        # Sur une cession, meme logique en sens inverse : vous avez recu 5 EUR
+        # de moins, donc recupere moins de capital.
+        if mv["type"] in ("versement", "retrait"):
+            total += float(mv["montant"] or 0) + frais_de(mv)
+        # Un frais AUTONOME (gestion, droits de garde) est deja pris en compte
+        # par la baisse de valeur qu'il provoque. Compter aussi son montant ici
+        # l'annulerait purement et simplement.
     return round(total, 2)
 
 
@@ -460,7 +483,9 @@ def pru(movements):
         q, p = mv["quantite"], mv["prix_unitaire"]
         if q in (None, 0) or p is None:
             continue
-        cost += float(q) * float(p)
+        # Le courtage fait partie du prix paye : l'exclure donnerait un PRU
+        # plus bas que celui du releve de courtier.
+        cost += float(q) * float(p) + frais_de(mv)
         qty += float(q)
     if qty <= 0:
         return None
@@ -483,19 +508,29 @@ def pru_par_ligne(movements):
     """PRU, quantite et montant investi ligne par ligne (ticker)."""
     lignes = {}
     for mv in movements:
-        if mv["type"] not in ("versement", "retrait"):
+        # `frais` compris : des frais de reseau sont preleves EN crypto, ils
+        # font donc sortir des jetons. Les ignorer laissait la quantite detenue
+        # au-dessus du portefeuille reel.
+        #
+        # Mais SEULEMENT s'ils nomment une ligne. Des frais de gestion en euros
+        # ne designent aucun support : les faire entrer ici leur fabriquait une
+        # ligne « (sans ticker) », a zero part, dans la liste des positions.
+        if mv["type"] == "frais" and not (mv["ticker"] or "").strip():
+            continue
+        if mv["type"] not in ("versement", "retrait", "frais"):
             continue
         ticker = (mv["ticker"] or "").strip() or "(sans ticker)"
         lg = lignes.setdefault(ticker, {"ticker": ticker, "cost": 0.0, "qty": 0.0, "invest": 0.0})
         q = float(mv["quantite"] or 0)
         p = float(mv["prix_unitaire"] or 0)
-        lg["invest"] += float(mv["montant"] or 0)
+        lg["invest"] += float(mv["montant"] or 0) + frais_de(mv)
         if mv["type"] == "versement":
-            lg["cost"] += q * p
+            lg["cost"] += q * p + frais_de(mv)
             lg["qty"] += q
         else:
-            # Vente : le PRU ne bouge pas, le prix de revient total baisse au
-            # prorata des parts cédées (convention française).
+            # Vente ou frais preleves en nature : le PRU ne bouge pas, le prix
+            # de revient total baisse au prorata des parts sorties (convention
+            # francaise).
             sold = min(abs(q), lg["qty"]) if lg["qty"] > 0 else abs(q)
             if lg["qty"] > 0:
                 lg["cost"] -= lg["cost"] * sold / lg["qty"]
@@ -568,7 +603,12 @@ def asset_xirr(asset, movements, current_value, at_date=None):
         flows.append((acq, -float(asset["valeur_acquisition"])))
     for mv in movements:
         if mv["type"] in ("versement", "retrait"):
-            flows.append((parse_date(mv["date"]), -float(mv["montant"] or 0)))
+            flows.append((parse_date(mv["date"]),
+                          -float(mv["montant"] or 0) - frais_de(mv)))
+        elif mv["type"] == "frais":
+            # L'argent est sorti sans rien acheter : c'est un versement a fonds
+            # perdu du point de vue du rendement.
+            flows.append((parse_date(mv["date"]), -abs(float(mv["montant"] or 0))))
     if not flows:
         return None
     flows.append((at_date, float(current_value or 0)))
