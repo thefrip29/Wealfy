@@ -3,7 +3,7 @@ from datetime import date
 
 from flask import jsonify, request
 
-from .. import importer, market, services
+from .. import finance, importer, market, services
 from ..db import execute, get_setting, new_id, query, rows_to_list
 from ._blueprint import bp
 from ._helpers import as_date, as_float, body, fail
@@ -26,6 +26,87 @@ def list_positions(aid):
         "complet": bool(lignes) and all(l["valeur"] is not None for l in lignes),
         "kind": "crypto" if asset["type"] in market.CRYPTO_ASSET_TYPES else "titre",
     })
+
+
+@bp.post("/api/assets/<aid>/swap")
+def swap_position(aid):
+    """Echange une ligne contre une autre, a l'interieur du meme produit.
+
+    Un swap n'est ni un achat ni une vente : aucun euro n'entre ni ne sort du
+    produit, deux lignes changent de taille. On ne pouvait donc pas l'exprimer,
+    et le frais de la plateforme n'avait nulle part ou se poser.
+
+    Deux mouvements de MEME montant, en sens inverse : le capital investi ne
+    bouge pas — c'est bien le meme argent — seul le frais l'augmente. Les
+    quantites, elles, suivent chaque ligne.
+
+    Le frais est porte par l'entree, comme un courtage d'achat : il fait partie
+    du prix de revient de ce que vous recevez.
+    """
+    asset = services.get_asset(aid)
+    if not asset:
+        return fail("Actif introuvable.", 404)
+    data = body()
+    sortant = (data.get("de") or "").strip()
+    entrant = (data.get("vers") or "").strip()
+    if not sortant or not entrant:
+        return fail("Indiquez la ligne de depart et celle d'arrivee.")
+    if sortant == entrant:
+        return fail("Les deux lignes sont identiques.")
+
+    q_sortie = as_float(data.get("quantite_sortie"))
+    q_recue = as_float(data.get("quantite_recue"))
+    if not q_sortie or not q_recue:
+        return fail("Indiquez les deux quantites.")
+
+    # La valeur de l'echange sert a transferer le prix de revient d'une ligne a
+    # l'autre. Sans elle, on ne saurait pas a quel prix la nouvelle ligne entre.
+    valeur = as_float(data.get("valeur"))
+    if valeur is None or valeur <= 0:
+        return fail("Indiquez la valeur de l'echange.")
+    frais = abs(as_float(data.get("frais"), 0.0) or 0.0)
+    d = as_date(data.get("date"), date.today().isoformat())
+
+    detenu = _quantite_detenue(aid, sortant)
+    if detenu is not None and q_sortie > detenu + 1e-9:
+        return fail(f"Vous ne detenez que {detenu} sur cette ligne.")
+
+    kind = "crypto" if asset["type"] in market.CRYPTO_ASSET_TYPES else "titre"
+    market.upsert_security(
+        entrant,
+        symbol=(data.get("symbol_vers") or entrant).strip(),
+        label=(data.get("label_vers") or "").strip() or None,
+        currency=(data.get("currency") or "EUR").strip().upper(),
+        kind=kind,
+    )
+
+    execute(
+        "INSERT INTO asset_movements(id, asset_id, date, montant, type, quantite, "
+        "prix_unitaire, ticker, frais, note) VALUES (?,?,?,?,'retrait',?,?,?,0,?)",
+        (new_id(), aid, d, -round(valeur, 2), abs(q_sortie),
+         round(valeur / q_sortie, 8), sortant, f"Echange vers {entrant}"),
+    )
+    execute(
+        "INSERT INTO asset_movements(id, asset_id, date, montant, type, quantite, "
+        "prix_unitaire, ticker, frais, note) VALUES (?,?,?,?,'versement',?,?,?,?,?)",
+        # Le prix unitaire NE contient PAS le frais : `pru_par_ligne` l'ajoute
+        # deja depuis la colonne. L'inclure ici le comptait deux fois dans le
+        # prix de revient.
+        (new_id(), aid, d, round(valeur, 2), abs(q_recue),
+         round(valeur / q_recue, 8), entrant, round(frais, 2),
+         f"Echange depuis {sortant}"),
+    )
+    return jsonify({"ok": True, "de": sortant, "vers": entrant}), 201
+
+
+def _quantite_detenue(aid, ticker):
+    """Quantite actuellement detenue sur une ligne, ou None si non suivie."""
+    mouvements = services.get_movements(aid)
+    lignes = finance.pru_par_ligne(mouvements)
+    for lg in lignes:
+        if lg["ticker"] == ticker:
+            return lg["quantite"]
+    return None
 
 
 @bp.post("/api/assets/<aid>/positions")

@@ -49,18 +49,6 @@ def create_movement(aid):
             (data.get("note") or "").strip() or None,
         ),
     )
-    # Des frais preleves diminuent le solde du produit.
-    #
-    # Sans cette mise a jour ils restaient INVISIBLES : pour la date du jour,
-    # `asset_value_at` rend `valeur_actuelle` telle quelle sans regarder les
-    # mouvements — le montant declare en dernier fait autorite. On enregistrait
-    # donc un frais et rien ne bougeait a l'ecran. Un frais qu'on ne voit pas
-    # n'est pas comptabilise.
-    if mtype == "frais" and asset["valeur_actuelle"] is not None:
-        execute(
-            "UPDATE assets SET valeur_actuelle = ? WHERE id = ?",
-            (round(float(asset["valeur_actuelle"]) - abs(montant), 2), aid),
-        )
     return jsonify(row_to_dict(
         query("SELECT * FROM asset_movements WHERE id = ?", (mid,), one=True)
     )), 201

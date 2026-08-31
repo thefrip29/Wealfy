@@ -114,6 +114,50 @@ enregistré ne changeait donc **rien à l'écran**. Enregistrer des frais préle
 diminue désormais le solde déclaré du produit — un frais qu'on ne voit pas n'est
 pas comptabilisé.
 
+### Un échange n'est ni un achat ni une vente
+
+Sur une plateforme, échanger de l'ETH contre du SOL ne fait entrer ni sortir le
+moindre euro : **deux lignes changent de taille**. L'opération n'existait pas —
+il fallait la simuler par une vente puis un achat — et le frais de la plateforme
+n'appartenait proprement ni à l'une ni à l'autre.
+
+Le bouton **« ⇄ Échanger »** de chaque ligne écrit **deux mouvements de même
+montant, en sens inverse**. Le capital investi ne bouge donc pas : c'est le même
+argent qui change de forme. Seul le frais l'augmente.
+
+- Le prix de revient de la ligne **cédée** ne change pas : seule la part sortie
+  en est retirée, au prorata (convention française).
+- Celui de la ligne **reçue** intègre le frais, comme un courtage d'achat.
+
+Si la plateforme prélève sa commission **en jetons**, il suffit d'indiquer la
+quantité réellement reçue : elle est déjà nette. Le champ « frais » sert alors à
+ce qui a été débité en euros.
+
+### Un frais est porté par le côté qui peut le porter
+
+Une **valeur de marché** est recalculée à chaque affichage depuis les cours du
+jour : elle ne garde **aucune trace** d'un prélèvement passé. Enregistrer 25 €
+de frais de plateforme sur un portefeuille crypto ne changeait donc rien — ni la
+valeur, ni la plus-value. Le frais était écrit et sans effet.
+
+| Valeur du produit | Qui porte le frais en euros |
+|---|---|
+| Recalculée au cours du marché ou par indice | le **capital investi** |
+| Déclarée par vous, ou reconstituée depuis les mouvements | la **valeur** |
+
+Les deux font baisser la plus-value du montant du frais. Ce qui les sépare est
+la capacité de la valeur à en garder trace.
+
+**Un solde re-déclaré contient déjà les frais qui l'ont précédé** : les porter
+une seconde fois les ferait payer deux fois. Le partage se fait donc sur l'ordre
+de **saisie**, pas sur la date de l'opération — un frais enregistré après votre
+dernière déclaration est une information nouvelle, même s'il porte une date
+passée. `created_at` ne descend pas sous la seconde : le `rowid`, strictement
+croissant, départage deux écritures rapprochées.
+
+Un frais prélevé **en jetons** n'entre pas dans ce partage : il nomme une ligne,
+en réduit la quantité, et fait donc baisser la valeur tout seul.
+
 ### Le TER, qui n'est jamais prélevé
 
 Un TER n'est pas une transaction : il est **intégré au cours** du support et ne

@@ -908,6 +908,122 @@ class TestReduireUneQuantite(ApiTestCase):
         self.assertAlmostEqual(ligne["quantite"], 0.4999, places=8)
 
 
+class TestEchange(ApiTestCase):
+    """Un swap n'est ni un achat ni une vente : aucun euro n'entre ni ne
+    sort du produit, deux lignes changent de taille. Faute de pouvoir
+    l'exprimer, le frais de la plateforme n'avait nulle part ou se poser."""
+
+    def portefeuille(self):
+        aid = self.post("/api/assets", {
+            "type": "Crypto", "label": "Crypto",
+            "date_acquisition": "2026-01-01", "valeur_acquisition": 0,
+        })["id"]
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "ethereum", "quantite": 1, "prix_unitaire": 3000,
+            "date": "2026-01-10",
+        })
+        return aid
+
+    def lignes(self, aid):
+        return {l["ticker"]: l
+                for l in self.get("/api/assets/" + aid + "/positions")["lignes"]}
+
+    def echange(self, aid, **kw):
+        base = {"de": "ethereum", "vers": "solana", "quantite_sortie": 0.5,
+                "quantite_recue": 20, "valeur": 1600, "date": "2026-03-01"}
+        base.update(kw)
+        return self.post("/api/assets/" + aid + "/swap", base)
+
+    def test_les_deux_quantites_bougent(self):
+        aid = self.portefeuille()
+        self.echange(aid)
+        l = self.lignes(aid)
+        self.assertAlmostEqual(l["ethereum"]["quantite"], 0.5, places=8)
+        self.assertAlmostEqual(l["solana"]["quantite"], 20.0, places=8)
+
+    def test_un_echange_ne_change_pas_le_capital_investi(self):
+        """C'est le meme argent qui change de forme. Seuls les frais
+        l'augmentent."""
+        aid = self.portefeuille()
+        avant = self.get("/api/assets/" + aid)["asset"]["investi"]
+        self.echange(aid)
+        self.assertEqual(self.get("/api/assets/" + aid)["asset"]["investi"], avant)
+
+    def test_les_frais_gonflent_le_prix_de_revient_de_la_ligne_recue(self):
+        aid = self.portefeuille()
+        self.echange(aid, frais=8)
+        l = self.lignes(aid)
+        # (1 600 + 8) / 20
+        self.assertAlmostEqual(l["solana"]["pru"], 80.4, places=2)
+        self.assertEqual(self.get("/api/assets/" + aid)["frais_payes"], 8.0)
+
+    def test_le_pru_de_la_ligne_cedee_ne_bouge_pas(self):
+        aid = self.portefeuille()
+        avant = self.lignes(aid)["ethereum"]["pru"]
+        self.echange(aid, frais=8)
+        self.assertAlmostEqual(self.lignes(aid)["ethereum"]["pru"], avant, places=4)
+
+    def test_on_ne_cede_pas_plus_qu_on_ne_detient(self):
+        aid = self.portefeuille()
+        res = self.client.post("/api/assets/" + aid + "/swap", json={
+            "de": "ethereum", "vers": "solana", "quantite_sortie": 5,
+            "quantite_recue": 20, "valeur": 1600,
+        })
+        self.assertEqual(res.status_code, 400)
+
+    def test_echanger_une_ligne_contre_elle_meme_est_refuse(self):
+        aid = self.portefeuille()
+        res = self.client.post("/api/assets/" + aid + "/swap", json={
+            "de": "ethereum", "vers": "ethereum", "quantite_sortie": 0.1,
+            "quantite_recue": 0.1, "valeur": 300,
+        })
+        self.assertEqual(res.status_code, 400)
+
+
+class TestFraisPorteParLeBonCote(ApiTestCase):
+    """Un frais en euros doit etre porte par le cote qui peut le porter.
+
+    Une valeur de marche est recalculee a chaque affichage depuis les cours du
+    jour : elle ne garde aucune trace d'un prelevement passe. Un frais de
+    plateforme sur un portefeuille crypto ne changeait donc RIEN — ni la
+    valeur, ni la plus-value.
+    """
+
+    def test_sur_une_valeur_de_marche_le_frais_est_porte_par_l_investi(self):
+        aid = self.post("/api/assets", {
+            "type": "Crypto", "label": "Crypto",
+            "date_acquisition": "2026-01-01", "valeur_acquisition": 0,
+        })["id"]
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "ethereum", "quantite": 1, "prix_unitaire": 3000,
+            "date": "2026-01-10",
+        })
+        avant = self.get("/api/assets/" + aid)["asset"]
+        self.post("/api/assets/" + aid + "/movements", {
+            "date": "2026-02-01", "type": "frais", "montant": 25,
+        })
+        apres = self.get("/api/assets/" + aid)["asset"]
+        self.assertEqual(apres["plus_value"], avant["plus_value"] - 25)
+
+    def test_un_solde_redeclare_ne_compte_pas_le_frais_deux_fois(self):
+        """Le solde que vous declarez apres coup contient deja le frais :
+        le porter aussi sur le capital investi le ferait payer deux fois."""
+        aid = self.post("/api/assets", {
+            "type": "AssuranceVie", "label": "AV",
+            "date_acquisition": "2026-01-01",
+            "valeur_acquisition": 4000, "valeur_actuelle": 5000,
+        })["id"]
+        self.post("/api/assets/" + aid + "/movements", {
+            "date": date.today().isoformat(), "type": "frais", "montant": 42.5,
+        })
+        avec_frais = self.get("/api/assets/" + aid)["asset"]
+        self.assertEqual(avec_frais["valeur"], 4957.5)
+        self.post("/api/assets/" + aid + "/valorisation", {"valeur": 4957.5})
+        apres = self.get("/api/assets/" + aid)["asset"]
+        self.assertEqual(apres["valeur"], 4957.5)
+        self.assertEqual(apres["plus_value"], avec_frais["plus_value"])
+
+
 class TestAnalytics(ApiTestCase):
     def seed(self):
         self.post("/api/assets", {

@@ -396,7 +396,17 @@ App.tabs.wealth = {
             onclick: () => App.tabs.wealth.openPositionForm(asset, host, {
               ticker: ligne.ticker, symbol: ligne.symbole, label: ligne.libelle,
             }, { sens: 'retrait', detenu: ligne.quantite }),
-          }, '\u2212 Vendre'))));
+          }, '\u2212 Vendre'),
+          ' ',
+          // Un echange n'est ni un achat ni une vente : aucun euro n'entre ni
+          // ne sort, deux lignes changent de taille. Faute de pouvoir
+          // l'exprimer, le frais de la plateforme n'avait nulle part ou se
+          // poser — c'est ce qui manquait.
+          ligne.kind === 'non_cote' ? null : App.h('button', {
+            class: 'btn small',
+            title: 'Echanger cette ligne contre une autre',
+            onclick: () => App.tabs.wealth.openSwapForm(asset, host, ligne),
+          }, '\u21c4 \u00c9changer'))));
     }
 
     // Chiffres de synthèse en tête : ils occupaient auparavant deux onglets
@@ -564,6 +574,88 @@ App.tabs.wealth = {
       }, 'Fermer')],
     });
     setTimeout(() => input.focus(), 50);
+  },
+
+  /* --- échange entre deux lignes du même produit ---
+
+     Un swap n'est ni un achat ni une vente. Aucun euro n'entre ni ne sort du
+     produit : deux lignes changent de taille. Il fallait donc le simuler par
+     une vente puis un achat, et le frais de la plateforme n'appartenait
+     proprement ni à l'une ni à l'autre.
+
+     Le serveur écrit deux mouvements de MÊME montant, en sens inverse : le
+     capital investi ne bouge pas — c'est le même argent — seul le frais
+     l'augmente. */
+  openSwapForm(asset, host, ligne) {
+    const kind = asset.type === 'Crypto' ? 'crypto' : 'titre';
+    const form = App.h('form', { class: 'form-grid', onsubmit: (e) => e.preventDefault() },
+      App.field(`Quantité de ${ligne.libelle || ligne.ticker} cédée`,
+        App.input('quantite_sortie', {
+          type: 'number', step: '0.00000001', required: true,
+        }), { hint: `Vous en détenez ${App.fmt.num(ligne.quantite, 8)}` }),
+      App.field('Reçu en échange', App.input('vers', {
+        placeholder: kind === 'crypto' ? 'solana' : 'CW8 ou ISIN', required: true,
+      }), { hint: 'Identifiant de la ligne qui entre' }),
+      App.field('Nom affiché', App.input('label_vers', {})),
+      App.field('Quantité reçue', App.input('quantite_recue', {
+        type: 'number', step: '0.00000001', required: true,
+      }), { hint: 'Ce que vous avez réellement reçu' }),
+      App.field('Valeur de l’échange (€)', App.input('valeur', {
+        type: 'number', step: '0.01', required: true,
+      }), { hint: 'Ce que valait l’opération. Sert à reporter le prix de revient' }),
+      App.field('Frais de la plateforme (€)', App.input('frais', {
+        type: 'number', step: '0.01', placeholder: '0',
+      }), { hint: 'Compte dans le prix de revient de la ligne reçue' }),
+      App.field('Date', App.dateField('date', { value: App.todayISO() })));
+
+    const save = async () => {
+      const v = App.formValues(form);
+      if (!v.quantite_sortie) {
+        return App.invalide(form, 'quantite_sortie', 'Indiquez la quantité cédée.');
+      }
+      if (parseFloat(v.quantite_sortie) > ligne.quantite + 1e-9) {
+        return App.invalide(form, 'quantite_sortie',
+          `Vous n\u2019en détenez que ${App.fmt.num(ligne.quantite, 8)}.`);
+      }
+      if (!(v.vers || '').trim()) {
+        return App.invalide(form, 'vers', 'Indiquez ce que vous recevez.');
+      }
+      if (!v.quantite_recue) {
+        return App.invalide(form, 'quantite_recue', 'Indiquez la quantité reçue.');
+      }
+      if (!v.valeur) return App.invalide(form, 'valeur', 'Indiquez la valeur de l’échange.');
+      try {
+        await App.api.post(`/api/assets/${asset.id}/swap`, {
+          ...v, de: ligne.ticker,
+        });
+        App.modal.close();
+        App.toast('Échange enregistré', 'success');
+        await App.tabs.wealth.renderPositions(host, asset);
+        await App.refreshOthers();
+      } catch (e) { App.toast(e.message, 'error'); }
+    };
+
+    App.modal.open({
+      title: `Échanger — ${ligne.libelle || ligne.ticker}`,
+      body: App.h('div', {}, form,
+        App.note('Ce que l’application en fait',
+          App.h('p', {},
+            'Deux mouvements de même montant, en sens inverse. Votre capital '
+            + 'investi ne bouge pas — c’est le même argent qui change de '
+            + 'forme — et seuls les frais l’augmentent.'),
+          App.h('p', {},
+            'Le prix de revient de la ligne cédée ne change pas : seule la part '
+            + 'sortie en est retirée, au prorata. Celui de la ligne reçue intègre '
+            + 'les frais, comme un courtage d’achat.'),
+          App.h('p', {},
+            'Si la plateforme a prélevé sa commission EN jetons, indiquez '
+            + 'simplement la quantité réellement reçue : elle est déjà nette. '
+            + 'Le champ « frais » est alors pour ce qui vous a été débité en euros.'))),
+      footer: [
+        App.h('button', { class: 'btn', onclick: () => App.modal.close() }, 'Annuler'),
+        App.h('button', { class: 'btn primary', onclick: save }, 'Échanger'),
+      ],
+    });
   },
 
   /* --- support non coté : fonds euro, SCPI en UC, support en arbitrage ---

@@ -181,7 +181,17 @@ def asset_value_at(asset, movements, at_date=None, use_manual_current=True) -> f
         return 0.0
 
     if use_manual_current and at_date >= date.today() and asset["valeur_actuelle"] is not None:
-        return float(asset["valeur_actuelle"])
+        # Le solde declare fait autorite, MAIS il date du jour ou on l'a
+        # declare : les frais preleves depuis lui sont sortis du produit sans
+        # que ce chiffre en sache rien. Sans cette soustraction, enregistrer un
+        # frais ne changeait rien a l'ecran.
+        #
+        # On ne retient que ceux posterieurs a la derniere valorisation :
+        # au-dela, le solde re-declare les contient deja, et les compter une
+        # seconde fois les ferait payer deux fois.
+        return round(float(asset["valeur_actuelle"])
+                     - frais_autonomes(movements, at_date,
+                                       depuis=_derniere_valorisation(movements, at_date)), 2)
 
     base = float(asset["valeur_acquisition"] or 0)
     base_date = acq or at_date
@@ -426,6 +436,64 @@ def valeur_capitalisee(flux, taux_annuel, at_date=None):
         solde += taux * base / 365.0
         curseur = fin + timedelta(days=1)
     return round(solde, 2)
+
+
+def _champ(source, nom):
+    """Lit un champ optionnel, que la ligne soit un dict ou une ligne SQLite."""
+    try:
+        return source[nom]
+    except (KeyError, IndexError, TypeError):
+        return None
+
+
+def _saisi_a(mv):
+    """Rang de SAISIE d'un mouvement, pas la date de l'operation.
+
+    `created_at` ne descend pas sous la seconde : deux ecritures rapprochees y
+    sont indiscernables. Le rowid, strictement croissant, les departage.
+    """
+    return (str(_champ(mv, "created_at") or ""), _champ(mv, "ordre_saisie") or 0)
+
+
+def _derniere_valorisation(movements, at_date):
+    """Instant de saisie du dernier solde declare, ou None.
+
+    C'est l'ordre de SAISIE qui compte, pas la date de l'operation. Un solde
+    declare aujourd'hui contient deja les frais preleves le mois dernier : on
+    ne les soustrait pas une seconde fois. Mais un frais enregistre APRES cette
+    declaration est une information nouvelle, meme s'il porte une date passee.
+    """
+    dernier = None
+    for mv in movements:
+        d = parse_date(mv["date"])
+        if d and d <= at_date and mv["type"] == "valorisation":
+            saisi = _saisi_a(mv)
+            if dernier is None or saisi > dernier:
+                dernier = saisi
+    return dernier
+
+
+def frais_autonomes(movements, at_date=None, depuis=None) -> float:
+    """Frais preleves en euros, qui ne reduisent aucune ligne.
+
+    Un frais en jetons nomme un ticker : il fait baisser la quantite, donc la
+    valeur, tout seul. Un frais en euros ne designe rien — il faut le porter
+    explicitement, sans quoi il n'a aucun effet.
+
+    `depuis` est un instant de SAISIE : voir `_derniere_valorisation`.
+    """
+    at_date = parse_date(at_date) or date.today()
+    total = 0.0
+    for mv in movements:
+        if mv["type"] != "frais" or (mv["ticker"] or "").strip():
+            continue
+        d = parse_date(mv["date"])
+        if not d or d > at_date:
+            continue
+        if depuis is not None and _saisi_a(mv) <= depuis:
+            continue
+        total += abs(float(mv["montant"] or 0))
+    return round(total, 2)
 
 
 def frais_de(mv) -> float:

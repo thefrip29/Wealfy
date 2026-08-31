@@ -33,11 +33,13 @@ def get_asset(asset_id):
 def get_movements(asset_id=None):
     if asset_id:
         rows = query(
-            "SELECT * FROM asset_movements WHERE asset_id = ? ORDER BY date, created_at",
+            "SELECT rowid AS ordre_saisie, * FROM asset_movements "
+            "WHERE asset_id = ? ORDER BY date, created_at",
             (asset_id,),
         )
     else:
-        rows = query("SELECT * FROM asset_movements ORDER BY date, created_at")
+        rows = query("SELECT rowid AS ordre_saisie, * FROM asset_movements "
+                     "ORDER BY date, created_at")
     return rows_to_list(rows)
 
 
@@ -148,6 +150,19 @@ def asset_detail(asset, movements, at_date=None, ctx=None):
             live, kind = market.indexed_value(asset, at_date), "indice"
         if live is not None:
             value, source = live, kind
+            # Une valeur de marche est recalculee a chaque affichage depuis les
+            # cours du jour : elle ne garde AUCUNE trace d'un frais preleve il y
+            # a trois mois. Sur un portefeuille crypto, enregistrer 25 EUR de
+            # frais de plateforme ne changeait donc rien — ni la valeur, ni la
+            # plus-value.
+            #
+            # C'est le capital investi qui les porte : cet argent est bien sorti
+            # de votre poche pour detenir ce produit. La plus-value baisse
+            # d'autant, ce qui est le resultat attendu, et durablement.
+            #
+            # Sur une valeur reconstituee, au contraire, le flux du frais a deja
+            # fait baisser le solde : l'ajouter ici le compterait deux fois.
+            invested += finance.frais_autonomes(movements, at_date)
 
     detail = dict(asset)
     detail["famille"] = famille_of(asset["type"])
