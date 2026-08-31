@@ -949,6 +949,37 @@ class TestEchange(ApiTestCase):
         self.echange(aid)
         self.assertEqual(self.get("/api/assets/" + aid)["asset"]["investi"], avant)
 
+    def test_l_echange_ne_demande_pas_la_valeur(self):
+        """Le prix de revient est simplement transfere : un echange entre
+        cryptos ne realise rien. Demander la valeur, c'etait demander un chiffre
+        que l'application connait deja."""
+        aid = self.portefeuille()
+        self.post("/api/assets/" + aid + "/swap", {
+            "de": "ethereum", "vers": "solana",
+            "quantite_sortie": 0.5, "quantite_recue": 20,
+        })
+        l = self.lignes(aid)
+        # 0,5 ETH a 3 000 = 1 500, repartis sur 20 SOL.
+        self.assertAlmostEqual(l["solana"]["pru"], 75.0, places=4)
+        self.assertEqual(self.get("/api/assets/" + aid)["asset"]["investi"], 3000.0)
+
+    def test_des_frais_en_jetons_ne_demandent_que_la_quantite(self):
+        """Sur une plateforme crypto la commission est prise en jetons. Ce
+        qu'elle valait en euros, c'est ce que ces jetons avaient coute."""
+        aid = self.portefeuille()
+        res = self.post("/api/assets/" + aid + "/frais-en-nature", {
+            "ticker": "ethereum", "quantite": 0.01,
+        })
+        self.assertEqual(res["montant"], 30.0)          # 0,01 x 3 000
+        self.assertAlmostEqual(self.lignes(aid)["ethereum"]["quantite"], 0.99, places=8)
+        self.assertEqual(self.get("/api/assets/" + aid)["frais_payes"], 30.0)
+
+    def test_on_ne_paie_pas_plus_de_frais_qu_on_ne_detient(self):
+        aid = self.portefeuille()
+        res = self.client.post("/api/assets/" + aid + "/frais-en-nature",
+                               json={"ticker": "ethereum", "quantite": 99})
+        self.assertEqual(res.status_code, 400)
+
     def test_les_frais_gonflent_le_prix_de_revient_de_la_ligne_recue(self):
         aid = self.portefeuille()
         self.echange(aid, frais=8)

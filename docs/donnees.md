@@ -123,15 +123,33 @@ n'appartenait proprement ni à l'une ni à l'autre.
 
 Le bouton **« ⇄ Échanger »** de chaque ligne écrit **deux mouvements de même
 montant, en sens inverse**. Le capital investi ne bouge donc pas : c'est le même
-argent qui change de forme. Seul le frais l'augmente.
+argent qui change de forme.
 
-- Le prix de revient de la ligne **cédée** ne change pas : seule la part sortie
-  en est retirée, au prorata (convention française).
-- Celui de la ligne **reçue** intègre le frais, comme un courtage d'achat.
+**Trois informations suffisent** : ce qui sort, ce qui entre, combien. Ni la
+valeur en euros, ni les frais ne sont demandés.
 
-Si la plateforme prélève sa commission **en jetons**, il suffit d'indiquer la
-quantité réellement reçue : elle est déjà nette. Le champ « frais » sert alors à
-ce qui a été débité en euros.
+- **La valeur se déduit** du prix de revient de la ligne cédée. Un échange entre
+  cryptos ne réalise rien — ni gain ni perte, y compris au sens fiscal français,
+  où seule une sortie vers l'euro compte. Le prix de revient est donc
+  simplement *transféré* : ce que vous aviez payé pour les jetons cédés devient
+  ce que vous avez payé pour ceux reçus.
+- **Les frais sont déjà dedans.** Sur une plateforme, la commission est prise
+  sur les jetons : la quantité que vous avez réellement reçue est nette. La
+  saisir une seconde fois la compterait deux fois.
+
+Le prix de revient de la ligne **cédée** ne change pas : seule la part sortie en
+est retirée, au prorata (convention française).
+
+### Des frais prélevés en jetons
+
+Pour ce qui est prélevé **en plus** — retrait, transfert, commission facturée à
+part — la sortie d'une ligne propose « Frais prélevés » à côté de « Vente » :
+deux gestes qui font la même chose, des jetons partent, et ne diffèrent que par
+ce qu'on reçoit en échange.
+
+Un frais ne demande alors **que la quantité**. Ce qu'elle valait en euros, c'est
+ce que ces jetons avaient coûté — leur prix de revient — et l'application le
+sait déjà. Le demander serait demander un chiffre qu'elle a sous la main.
 
 ### Un frais est porté par le côté qui peut le porter
 

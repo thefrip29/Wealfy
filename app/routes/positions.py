@@ -59,17 +59,33 @@ def swap_position(aid):
     if not q_sortie or not q_recue:
         return fail("Indiquez les deux quantites.")
 
-    # La valeur de l'echange sert a transferer le prix de revient d'une ligne a
-    # l'autre. Sans elle, on ne saurait pas a quel prix la nouvelle ligne entre.
-    valeur = as_float(data.get("valeur"))
-    if valeur is None or valeur <= 0:
-        return fail("Indiquez la valeur de l'echange.")
     frais = abs(as_float(data.get("frais"), 0.0) or 0.0)
     d = as_date(data.get("date"), date.today().isoformat())
 
-    detenu = _quantite_detenue(aid, sortant)
+    ligne = _ligne(aid, sortant)
+    detenu = ligne["quantite"] if ligne else None
     if detenu is not None and q_sortie > detenu + 1e-9:
         return fail(f"Vous ne detenez que {detenu} sur cette ligne.")
+
+    # La valeur de l'echange n'est PAS demandee : elle se deduit du prix de
+    # revient de la ligne cedee.
+    #
+    # Un echange entre cryptos ne realise rien — ni gain ni perte, y compris au
+    # sens fiscal francais, ou seule une sortie vers l'euro compte. Le prix de
+    # revient est donc simplement TRANSFERE : ce que vous aviez paye pour les
+    # jetons cedes devient ce que vous avez paye pour ceux recus.
+    #
+    # C'est aussi la seule valeur qu'on connaisse a coup sur. Un cours du jour
+    # demanderait un appel reseau ou une saisie de plus, pour un chiffre qui ne
+    # changerait pas votre plus-value totale.
+    valeur = as_float(data.get("valeur"))
+    if valeur is None or valeur <= 0:
+        if not ligne or ligne.get("pru") is None:
+            return fail(
+                "Prix de revient inconnu sur cette ligne : indiquez la valeur "
+                "de l'echange."
+            )
+        valeur = round(ligne["pru"] * q_sortie, 2)
 
     kind = "crypto" if asset["type"] in market.CRYPTO_ASSET_TYPES else "titre"
     market.upsert_security(
@@ -99,14 +115,50 @@ def swap_position(aid):
     return jsonify({"ok": True, "de": sortant, "vers": entrant}), 201
 
 
-def _quantite_detenue(aid, ticker):
-    """Quantite actuellement detenue sur une ligne, ou None si non suivie."""
-    mouvements = services.get_movements(aid)
-    lignes = finance.pru_par_ligne(mouvements)
-    for lg in lignes:
+def _ligne(aid, ticker):
+    """Quantite et prix de revient d'une ligne, ou None si elle n'existe pas."""
+    for lg in finance.pru_par_ligne(services.get_movements(aid)):
         if lg["ticker"] == ticker:
-            return lg["quantite"]
+            return lg
     return None
+
+
+@bp.post("/api/assets/<aid>/frais-en-nature")
+def frais_en_nature(aid):
+    """Frais preleves EN JETONS sur une ligne.
+
+    Sur une plateforme crypto, la commission n'est pas debitee en euros : elle
+    est prise sur les jetons. Elle reduit donc la quantite detenue, et une seule
+    information suffit — combien de jetons sont partis.
+
+    Le montant en euros n'est pas demande : il vaut ce que ces jetons avaient
+    coute, c'est-a-dire leur prix de revient. Il ne sert qu'au rapport des frais.
+    """
+    asset = services.get_asset(aid)
+    if not asset:
+        return fail("Actif introuvable.", 404)
+    data = body()
+    ticker = (data.get("ticker") or "").strip()
+    quantite = as_float(data.get("quantite"))
+    if not ticker:
+        return fail("Ligne manquante.")
+    if not quantite or quantite <= 0:
+        return fail("Indiquez la quantite prelevee.")
+
+    ligne = _ligne(aid, ticker)
+    if ligne is None:
+        return fail("Ligne introuvable.")
+    if quantite > (ligne["quantite"] or 0) + 1e-9:
+        return fail(f"Vous ne detenez que {ligne['quantite']} sur cette ligne.")
+
+    montant = round((ligne.get("pru") or 0) * quantite, 2)
+    execute(
+        "INSERT INTO asset_movements(id, asset_id, date, montant, type, quantite, "
+        "ticker, frais, note) VALUES (?,?,?,?,'frais',?,?,0,?)",
+        (new_id(), aid, as_date(data.get("date"), date.today().isoformat()),
+         -montant, abs(quantite), ticker, "Frais preleves en nature"),
+    )
+    return jsonify({"ok": True, "ticker": ticker, "montant": montant}), 201
 
 
 @bp.post("/api/assets/<aid>/positions")

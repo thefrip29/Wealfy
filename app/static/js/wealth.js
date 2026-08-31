@@ -392,11 +392,9 @@ App.tabs.wealth = {
           // quantite » n'y veut rien dire.
           ligne.kind === 'non_cote' ? null : App.h('button', {
             class: 'btn small',
-            title: `Vendre, retirer ou passer des frais sur cette ${mot}`,
-            onclick: () => App.tabs.wealth.openPositionForm(asset, host, {
-              ticker: ligne.ticker, symbol: ligne.symbole, label: ligne.libelle,
-            }, { sens: 'retrait', detenu: ligne.quantite }),
-          }, '\u2212 Vendre'),
+            title: `Vendre, ou passer des frais preleves sur cette ${mot}`,
+            onclick: () => App.tabs.wealth.openSortieForm(asset, host, ligne),
+          }, '\u2212 Sortie'),
           ' ',
           // Un echange n'est ni un achat ni une vente : aucun euro n'entre ni
           // ne sort, deux lignes changent de taille. Faute de pouvoir
@@ -576,6 +574,92 @@ App.tabs.wealth = {
     setTimeout(() => input.focus(), 50);
   },
 
+  /* --- sortie d'une ligne : vente ou frais ---
+
+     Deux gestes qui font la meme chose — des jetons partent — et ne different
+     que par ce qu'on recoit en echange. Les separer en deux boutons aurait
+     ajoute une quatrieme action par ligne ; ils partagent donc un formulaire.
+
+     Un frais ne demande QUE la quantite : sur une plateforme crypto la
+     commission est prise en jetons, et ce qu'elle valait en euros, c'est ce que
+     ces jetons avaient coute. L'application le sait deja. */
+  openSortieForm(asset, host, ligne) {
+    const detenu = ligne.quantite || 0;
+    const nature = App.select('nature', [
+      ['vente', 'Vente'],
+      ['frais', 'Frais prélevés'],
+    ], 'vente');
+
+    const prix = App.field('Prix unitaire (€)', App.input('prix_unitaire', {
+      type: 'number', step: '0.0001',
+    }), { hint: 'Ce que vous en avez tiré' });
+    const courtage = App.field('Frais de la vente (€)', App.input('frais', {
+      type: 'number', step: '0.01', placeholder: '0',
+    }));
+
+    const form = App.h('form', { class: 'form-grid', onsubmit: (e) => e.preventDefault() },
+      App.field('Nature', nature),
+      App.field('Quantité', App.input('quantite', {
+        type: 'number', step: '0.00000001', required: true,
+      }), { hint: `Sur ${App.fmt.num(detenu, 8)} détenus` }),
+      prix, courtage,
+      App.field('Date', App.dateField('date', { value: App.todayISO() })));
+
+    const majuster = () => {
+      const frais = nature.value === 'frais';
+      prix.hidden = frais;
+      courtage.hidden = frais;
+    };
+    nature.addEventListener('change', majuster);
+    majuster();
+
+    const save = async () => {
+      const v = App.formValues(form);
+      if (!v.quantite) return App.invalide(form, 'quantite', 'Indiquez une quantité.');
+      // Sortir plus qu'on ne detient produit une quantite negative, qui
+      // traverse ensuite toute la valorisation sans que rien ne l'arrete.
+      if (parseFloat(v.quantite) > detenu + 1e-9) {
+        return App.invalide(form, 'quantite',
+          `Vous n\u2019en détenez que ${App.fmt.num(detenu, 8)}.`);
+      }
+      const frais = v.nature === 'frais';
+      try {
+        if (frais) {
+          await App.api.post(`/api/assets/${asset.id}/frais-en-nature`, {
+            ticker: ligne.ticker, quantite: v.quantite, date: v.date,
+          });
+        } else {
+          await App.api.post(`/api/assets/${asset.id}/positions`, {
+            ticker: ligne.ticker, symbol: ligne.symbole || ligne.ticker,
+            type: 'retrait', quantite: v.quantite,
+            prix_unitaire: v.prix_unitaire, frais: v.frais, date: v.date,
+          });
+        }
+        App.modal.close();
+        App.toast(frais ? 'Frais enregistrés' : 'Vente enregistrée', 'success');
+        await App.tabs.wealth.renderPositions(host, asset);
+        await App.refreshOthers();
+      } catch (e) { App.toast(e.message, 'error'); }
+    };
+
+    App.modal.open({
+      title: `Sortie — ${ligne.libelle || ligne.ticker}`,
+      body: App.h('div', {}, form,
+        App.note('Frais prélevés',
+          App.h('p', {},
+            'Sur une plateforme crypto, la commission est prise EN JETONS. '
+            + 'Indiquez combien sont partis : ce qu’ils valaient en euros, '
+            + 'c’est ce qu’ils vous avaient coûté, et l’application le sait.'),
+          App.h('p', {},
+            'Après un échange, rien à saisir ici : la quantité que vous avez '
+            + 'réellement reçue contient déjà la commission.'))),
+      footer: [
+        App.h('button', { class: 'btn', onclick: () => App.modal.close() }, 'Annuler'),
+        App.h('button', { class: 'btn primary', onclick: save }, 'Enregistrer'),
+      ],
+    });
+  },
+
   /* --- échange entre deux lignes du même produit ---
 
      Un swap n'est ni un achat ni une vente. Aucun euro n'entre ni ne sort du
@@ -589,23 +673,15 @@ App.tabs.wealth = {
   openSwapForm(asset, host, ligne) {
     const kind = asset.type === 'Crypto' ? 'crypto' : 'titre';
     const form = App.h('form', { class: 'form-grid', onsubmit: (e) => e.preventDefault() },
-      App.field(`Quantité de ${ligne.libelle || ligne.ticker} cédée`,
-        App.input('quantite_sortie', {
-          type: 'number', step: '0.00000001', required: true,
-        }), { hint: `Vous en détenez ${App.fmt.num(ligne.quantite, 8)}` }),
+      App.field('Quantité cédée', App.input('quantite_sortie', {
+        type: 'number', step: '0.00000001', required: true,
+      }), { hint: `Sur ${App.fmt.num(ligne.quantite, 8)} détenus` }),
       App.field('Reçu en échange', App.input('vers', {
-        placeholder: kind === 'crypto' ? 'solana' : 'CW8 ou ISIN', required: true,
-      }), { hint: 'Identifiant de la ligne qui entre' }),
-      App.field('Nom affiché', App.input('label_vers', {})),
+        placeholder: kind === 'crypto' ? 'solana' : 'CW8', required: true,
+      })),
       App.field('Quantité reçue', App.input('quantite_recue', {
         type: 'number', step: '0.00000001', required: true,
       }), { hint: 'Ce que vous avez réellement reçu' }),
-      App.field('Valeur de l’échange (€)', App.input('valeur', {
-        type: 'number', step: '0.01', required: true,
-      }), { hint: 'Ce que valait l’opération. Sert à reporter le prix de revient' }),
-      App.field('Frais de la plateforme (€)', App.input('frais', {
-        type: 'number', step: '0.01', placeholder: '0',
-      }), { hint: 'Compte dans le prix de revient de la ligne reçue' }),
       App.field('Date', App.dateField('date', { value: App.todayISO() })));
 
     const save = async () => {
@@ -623,11 +699,8 @@ App.tabs.wealth = {
       if (!v.quantite_recue) {
         return App.invalide(form, 'quantite_recue', 'Indiquez la quantité reçue.');
       }
-      if (!v.valeur) return App.invalide(form, 'valeur', 'Indiquez la valeur de l’échange.');
       try {
-        await App.api.post(`/api/assets/${asset.id}/swap`, {
-          ...v, de: ligne.ticker,
-        });
+        await App.api.post(`/api/assets/${asset.id}/swap`, { ...v, de: ligne.ticker });
         App.modal.close();
         App.toast('Échange enregistré', 'success');
         await App.tabs.wealth.renderPositions(host, asset);
@@ -638,19 +711,17 @@ App.tabs.wealth = {
     App.modal.open({
       title: `Échanger — ${ligne.libelle || ligne.ticker}`,
       body: App.h('div', {}, form,
-        App.note('Ce que l’application en fait',
+        App.note('Pourquoi si peu de questions',
           App.h('p', {},
-            'Deux mouvements de même montant, en sens inverse. Votre capital '
-            + 'investi ne bouge pas — c’est le même argent qui change de '
-            + 'forme — et seuls les frais l’augmentent.'),
+            'La valeur de l’échange n’est pas demandée : votre prix de revient '
+            + 'est simplement TRANSFÉRÉ d’une ligne à l’autre. Un échange entre '
+            + 'cryptos ne réalise rien — ni gain ni perte, y compris au sens '
+            + 'fiscal, où seule une sortie vers l’euro compte.'),
           App.h('p', {},
-            'Le prix de revient de la ligne cédée ne change pas : seule la part '
-            + 'sortie en est retirée, au prorata. Celui de la ligne reçue intègre '
-            + 'les frais, comme un courtage d’achat.'),
-          App.h('p', {},
-            'Si la plateforme a prélevé sa commission EN jetons, indiquez '
-            + 'simplement la quantité réellement reçue : elle est déjà nette. '
-            + 'Le champ « frais » est alors pour ce qui vous a été débité en euros.'))),
+            'Les frais non plus : sur une plateforme, la commission est prise '
+            + 'sur les jetons. Indiquez ce que vous avez RÉELLEMENT reçu, elle '
+            + 'est déjà déduite. Pour des frais prélevés en plus — un retrait, '
+            + 'un transfert — passez par « − Sortie ».'))),
       footer: [
         App.h('button', { class: 'btn', onclick: () => App.modal.close() }, 'Annuler'),
         App.h('button', { class: 'btn primary', onclick: save }, 'Échanger'),
@@ -715,13 +786,10 @@ App.tabs.wealth = {
      Quand l'instrument vient de la recherche, tout est déjà connu : on ne
      demande que combien et à quel prix. Les champs techniques (place, devise,
      indice) se replient — ils ne servent qu'à la saisie manuelle. */
-  openPositionForm(asset, host, instrument, options) {
+  openPositionForm(asset, host, instrument) {
     const kind = asset.type === 'Crypto' ? 'crypto' : 'titre';
     const item = instrument || {};
     const choisi = !!item.ticker;
-    const opt = options || {};
-    const vente = opt.sens === 'retrait';
-    const detenu = opt.detenu;
 
     // « Nom affiché » vit ici et non dans les détails repliés : les
     // référentiels ne connaissent que les raisons sociales, jamais les marques
@@ -730,10 +798,9 @@ App.tabs.wealth = {
     const principal = App.h('div', { class: 'form-grid' },
       App.field('Nom affiché', App.input('label', { value: item.label || '' }),
         { full: true, hint: 'Le nom du référentiel. Remplacez-le par le vôtre.' }),
-      App.field(vente ? 'Quantité vendue' : 'Quantité', App.input('quantite', {
+      App.field('Quantité', App.input('quantite', {
         type: 'number', step: '0.00000001', required: true,
-      }), vente && detenu != null
-        ? { hint: `Vous en détenez ${App.fmt.num(detenu, 8)}` } : {}),
+      })),
       App.field('Prix unitaire (€)', App.input('prix_unitaire', {
         type: 'number', step: '0.0001',
       }), { hint: 'Sert au PRU et au TRI' }),
@@ -778,17 +845,10 @@ App.tabs.wealth = {
       const ticker = (v.ticker || item.ticker || '').trim();
       if (!ticker) return App.invalide(form, 'ticker', 'Indiquez un instrument.');
       if (!v.quantite) return App.invalide(form, 'quantite', 'Indiquez une quantité.');
-      // Vendre plus qu'on ne detient produit une quantite negative, qui
-      // traverse ensuite toute la valorisation sans que rien ne l'arrete.
-      if (vente && detenu != null && parseFloat(v.quantite) > detenu + 1e-9) {
-        return App.invalide(form, 'quantite',
-          `Vous n\u2019en détenez que ${App.fmt.num(detenu, 8)}.`);
-      }
       try {
         await App.api.post(`/api/assets/${asset.id}/positions`, {
           ...v,
           ticker,
-          type: vente ? 'retrait' : 'versement',
           symbol: item.symbol || ticker,
           currency: v.currency || item.currency || 'EUR',
           // La colonne `securities.isin` existait mais restait toujours NULL :
@@ -796,16 +856,14 @@ App.tabs.wealth = {
           isin: item.isin || '',
         });
         App.modal.close();
-        App.toast(vente ? 'Vente enregistrée' : 'Position ajoutée', 'success');
+        App.toast('Position ajoutée', 'success');
         await App.tabs.wealth.renderPositions(host, asset);
         await App.refreshOthers();
       } catch (e) { App.toast(e.message, 'error'); }
     };
 
     App.modal.open({
-      title: vente
-        ? `${item.label || item.ticker} — combien en sort-il ?`
-        : (item.label ? `${item.label} — combien ?` : 'Ajouter une position'),
+      title: item.label ? `${item.label} — combien ?` : 'Ajouter une position',
       body: App.h('div', {},
         choisi ? App.h('p', { class: 'hint', style: 'margin-bottom:14px' },
           [item.code, item.exchange, item.currency].filter(Boolean).join(' · ')) : null,
@@ -813,12 +871,11 @@ App.tabs.wealth = {
       footer: [
         App.h('button', {
           class: 'btn',
-          onclick: () => (choisi && !vente
+          onclick: () => (choisi
             ? App.tabs.wealth.openInstrumentSearch(asset, host)
             : App.modal.close()),
-        }, choisi && !vente ? 'Retour' : 'Annuler'),
-        App.h('button', { class: 'btn primary', onclick: save },
-          vente ? 'Enregistrer la vente' : 'Ajouter'),
+        }, choisi ? 'Retour' : 'Annuler'),
+        App.h('button', { class: 'btn primary', onclick: save }, 'Ajouter'),
       ],
     });
   },

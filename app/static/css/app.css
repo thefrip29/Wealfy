@@ -1211,6 +1211,9 @@ body.privacy .reste-value { filter: blur(10px); user-select: none; }
 
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-4); }
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* `display: flex` l'emporterait sur le `display: none` attache a l'attribut
+   `hidden` : sans cette regle, masquer un champ n'aurait aucun effet. */
+.field[hidden] { display: none; }
 .field label { font-size: var(--fs-xs); color: var(--text-2); font-weight: var(--weight-medium); }
 .field.full { grid-column: 1 / -1; }
 .field .hint { margin-top: 1px; }
