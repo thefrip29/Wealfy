@@ -1055,6 +1055,64 @@ class TestFraisPorteParLeBonCote(ApiTestCase):
         self.assertEqual(apres["plus_value"], avec_frais["plus_value"])
 
 
+class TestTauxSansRevenuCredible(ApiTestCase):
+    """Un taux dont le dénominateur n'est pas un revenu crédible n'est pas un
+    taux : c'est du bruit affiché comme un fait.
+
+    Le 1er du mois, le salaire n'est pas encore tombé. Rapporter la mensualité
+    d'un prêt aux quelques centimes d'intérêts déjà crédités affichait un taux
+    d'endettement de plusieurs milliers de pour cent — et un taux d'épargne du
+    même acabit.
+    """
+
+    def test_endettement_ne_s_emballe_pas_sur_un_mois_a_peine_commence(self):
+        self.post("/api/liabilities", {
+            "type": "PretImmobilier", "label": "Pret", "montant_emprunte": 100000,
+            "taux_annuel": 2.0, "duree_mois": 240, "date_debut": "2024-01-01",
+        })
+        # Quatre centimes d'interets, et rien d'autre, pour tout revenu du mois.
+        self.post("/api/transactions", {
+            "date": f"{month_key()}-01", "description": "Interets",
+            "amount": 0.04, "category": "Interets",
+        })
+        m = self.get("/api/overview?month=" + month_key())["metrics"]
+        self.assertGreater(m["mensualites_mois"], 0)
+        self.assertIsNone(m["taux_endettement"])
+        self.assertIsNone(m["part_charges_fixes"])
+
+    def test_taux_epargne_muet_sans_revenu(self):
+        pea = self.post("/api/assets", {
+            "type": "PEA", "label": "PEA", "date_acquisition": "2023-01-01",
+            "valeur_acquisition": 0,
+        })
+        self.post(f"/api/assets/{pea['id']}/movements", {
+            "date": f"{month_key()}-01", "montant": 300, "type": "versement",
+        })
+        self.post("/api/transactions", {
+            "date": f"{month_key()}-01", "description": "Interets",
+            "amount": 0.04, "category": "Interets",
+        })
+        flux = self.get("/api/overview?month=" + month_key())["mois"]
+        self.assertEqual(flux["epargne"], 300.0)
+        self.assertIsNone(flux["taux_epargne"])   # et non 750 000 %
+
+    def test_un_vrai_revenu_donne_bien_un_taux(self):
+        """Le garde-fou ne doit pas faire taire les cas normaux."""
+        self.post("/api/transactions", {
+            "date": f"{month_key()}-01", "description": "Salaire",
+            "amount": 2000, "category": "Salaire",
+        })
+        pea = self.post("/api/assets", {
+            "type": "PEA", "label": "PEA", "date_acquisition": "2023-01-01",
+            "valeur_acquisition": 0,
+        })
+        self.post(f"/api/assets/{pea['id']}/movements", {
+            "date": f"{month_key()}-01", "montant": 400, "type": "versement",
+        })
+        flux = self.get("/api/overview?month=" + month_key())["mois"]
+        self.assertAlmostEqual(flux["taux_epargne"], 0.2, places=6)
+
+
 class TestAnalytics(ApiTestCase):
     def seed(self):
         self.post("/api/assets", {

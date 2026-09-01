@@ -420,7 +420,7 @@ def month_flows(year, month, cache=None):
         "transferts_internes": transferts_internes,
         "solde": round(revenus - depenses - transferts, 2),
         "epargne": versements,
-        "taux_epargne": round(versements / revenus, 6) if revenus > 0 else None,
+        "taux_epargne": _taux(versements, revenus, decimales=6),
         "nb_transactions": len(txs),
         # Le detail par sens. `nb_transactions` compte TOUT le mois, depenses
         # comprises : affiche sous « Revenus du mois », il ne parlait de rien.
@@ -576,6 +576,38 @@ def monthly_archive(limit=None):
 
 # --- métriques transverses ------------------------------------------------
 
+# Un ratio dont le dénominateur n'est pas un revenu crédible n'est pas un
+# ratio : c'est du bruit affiché comme un fait. Le 1er du mois, le salaire n'est
+# pas encore tombé ; diviser les mensualités d'un prêt par les quelques centimes
+# d'intérêts déjà crédités donnait des milliers de pour cent.
+REVENU_MINIMAL = 50.0
+
+
+def _taux(numerateur, revenus, facteur=1.0, decimales=2):
+    """Le taux, ou None quand le revenu ne permet pas d'en calculer un.
+
+    Ne rien afficher est honnête ; afficher 1 500 000 % ne l'est pas.
+    """
+    if not revenus or revenus < REVENU_MINIMAL:
+        return None
+    return round(facteur * numerateur / revenus, decimales)
+
+
+def avg_income(months=3, reference=None):
+    """Revenu mensuel moyen des mois RÉVOLUS, hors mois en cours.
+
+    Le taux d'endettement et la part des charges fixes décrivent une situation
+    durable, pas le hasard d'un mois : ils se mesurent sur un revenu ordinaire.
+    """
+    reference = finance.parse_date(reference) or date.today()
+    total, counted = 0.0, 0
+    for i in range(1, months + 1):
+        d = finance.add_months(reference, -i)
+        total += month_flows(d.year, d.month)["revenus"]
+        counted += 1
+    return round(total / counted, 2) if counted else 0.0
+
+
 def avg_expenses(months=3, reference=None):
     reference = finance.parse_date(reference) or date.today()
     total, counted = 0.0, 0
@@ -606,6 +638,10 @@ def metrics(at_date=None):
         l["mensualite_avec_assurance"] for l in snap["liabilities"]
         if l["echeances_payees"] < l["echeances_totales"]), 2)
     revenus = flows["revenus"]
+    # Un mois à peine commencé n'a pas encore reçu son salaire. Les taux qui
+    # décrivent une situation durable se mesurent donc sur les mois révolus, et
+    # ne retombent sur le mois courant que faute d'historique.
+    revenu_ordinaire = avg_income(3, at_date) or revenus
 
     # Charges fixes : ce qui tombe tous les mois quoi qu'il arrive. Le reste à
     # vivre est ce dont on dispose réellement une fois ces charges et l'épargne
@@ -636,11 +672,10 @@ def metrics(at_date=None):
         "revenus_mois": flows["revenus"],
         "depenses_mois": flows["depenses"],
         "mensualites_mois": mensualites,
-        "taux_endettement": round(100 * mensualites / revenus, 2) if revenus > 0 else None,
+        "taux_endettement": _taux(mensualites, revenu_ordinaire, 100),
         "charges_fixes_mois": charges_fixes,
         "reste_a_vivre_mois": round(revenus - charges_fixes - flows["epargne"], 2),
-        "part_charges_fixes": (
-            round(100 * charges_fixes / revenus, 2) if revenus > 0 else None),
+        "part_charges_fixes": _taux(charges_fixes, revenu_ordinaire, 100),
         "frais_annuels": frais_total,
         # Le detail par produit, la ou il n'y avait qu'un total global.
         "frais_annuels_detail": frais_annee,
