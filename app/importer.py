@@ -161,70 +161,239 @@ def _sniff_delimiter(sample: str) -> str:
 # que sa fin, « 450,00 », et le « 2 » restant passerait pour la fin du libellé.
 # Les deux gardes empêchent de commencer ou de finir au milieu d'un nombre.
 MONTANT_LIBRE = re.compile(
-    r"(?<![\d,.])[-+]?(?:\d{1,3}(?:[   .]\d{3})+|\d+)[,.]\d{2}(?![\d,.])"
+    r"(?<![\d,.])[-+]?(?:\d{1,3}(?:[ \xa0\u202f.,]\d{3})+|\d+)[,.]\d{2}(?![\d,.])"
 )
-DATE_LIBRE = re.compile(r"^\s*(\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4})\b")
+
+# Les mois écrits en toutes lettres, français et anglais, avec leurs
+# abréviations usuelles. Un relevé imprimé date rarement en chiffres : sans
+# cette table, « Aug 1, 2026 » ou « 1 août 2026 » ne présente AUCUNE ligne au
+# lecteur, et l'import entier rend zéro transaction.
+_MOIS = [
+    ("january", "janvier", "jan", "janv"),
+    ("february", "fevrier", "feb", "fev", "fevr"),
+    ("march", "mars", "mar"),
+    ("april", "avril", "apr", "avr"),
+    ("may", "mai"),
+    ("june", "juin", "jun"),
+    ("july", "juillet", "jul", "juil"),
+    ("august", "aout", "aug"),
+    ("september", "septembre", "sep", "sept"),
+    ("october", "octobre", "oct"),
+    ("november", "novembre", "nov"),
+    ("december", "decembre", "dec"),
+]
+MOIS_TEXTE = {nom: rang for rang, noms in enumerate(_MOIS, 1) for nom in noms}
+
+# `[^\W\d_]` : une lettre, accentuée ou non. Reconnaître le mot puis le
+# chercher dans la table vaut mieux qu'une alternance de cent noms de mois :
+# « août » et « aout » y passent par le même chemin.
+_MOT = r"([^\W\d_]{3,10})\.?"
+_DATES_LIBRES = (
+    (re.compile(r"^\s*(\d{4})-(\d{1,2})-(\d{1,2})\b"), "ama"),
+    (re.compile(r"^\s*(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})\b"), "jma"),
+    (re.compile(r"^\s*" + _MOT + r"\s+(\d{1,2})(?:er)?,?\s+(\d{2,4})\b", re.I), "mja"),
+    (re.compile(r"^\s*(\d{1,2})(?:er)?\s+" + _MOT + r"\s+(\d{2,4})\b", re.I), "jmat"),
+)
 
 # Lignes de pied de relevé : elles portent une date et un montant, donc rien ne
 # les distingue d'une opération sinon leur libellé.
 LIBELLES_NON_OPERATION = ("solde", "total", "report", "nouveau solde",
                           "ancien solde", "sous total")
 
+# Un relevé range en annexe les opérations annulées, refusées ou en attente.
+# Elles portent une date et un montant comme les autres, et rien dans la ligne
+# elle-même ne les en distingue : seul le titre de la section qui les précède
+# le dit. Les compter comme des dépenses fausse les totaux — et la banque, elle,
+# ne les compte pas dans les siens.
+SECTIONS_ECARTEES = ("reverted", "declined", "failed", "cancelled", "canceled",
+                     "pending", "rejected", "refused", "annul", "rejet",
+                     "refus", "echou", "en attente", "non abouti")
+SECTIONS_OPERATIONS = ("transaction", "operation", "mouvement", "ecriture")
 
-def _date_libre(brut):
-    """Normalise une date de relevé avant `parse_date`, qui ne lit ni les
-    séparateurs par point ni les années sur deux chiffres."""
-    jour, mois, annee = re.split(r"[/.\-]", brut)
-    if len(annee) == 2:
-        # Un relevé bancaire ne remonte pas au siècle dernier.
-        annee = f"20{annee}"
-    return parse_date(f"{int(jour):02d}/{int(mois):02d}/{annee}")
+# Les mots qui composent une ligne d'en-tête de colonnes, FR et EN.
+ENTETES_COLONNES = ("date", "description", "libelle", "intitule", "montant",
+                    "debit", "credit", "balance", "solde", "money out",
+                    "money in", "valeur", "operation")
+
+
+def _est_entete_colonnes(ligne):
+    """La ligne qui nomme les colonnes, juste avant les opérations."""
+    if MONTANT_LIBRE.search(ligne):
+        return False
+    t = norm(ligne)
+    return sum(1 for mot in ENTETES_COLONNES if mot in t) >= 2
+
+
+def _annonce_de_section(textes, i):
+    """Une ligne sans date est un titre de section quand un en-tête de colonnes
+    la suit de près.
+
+    C'est le squelette commun à tous les relevés — un titre, les noms de
+    colonnes, puis les opérations — et non le vocabulaire d'une banque en
+    particulier. S'y raccrocher évite de prendre pour un titre la deuxième
+    ligne d'un libellé, qui n'a pas de date elle non plus.
+    """
+    return any(_est_entete_colonnes(textes[j])
+               for j in range(i + 1, min(len(textes), i + 3)))
+
+
+def _annee(brut):
+    """Un relevé bancaire ne remonte pas au siècle dernier."""
+    n = int(brut)
+    return n if n >= 100 else 2000 + n
+
+
+def _mois(brut):
+    return MOIS_TEXTE.get(strip_accents(brut).lower())
+
+
+def _date_en_tete(ligne):
+    """(date, position de fin) si la ligne commence par une date, sinon (None, 0).
+
+    Quatre écritures se rencontrent sur un relevé : l'ISO, la numérique
+    française, et le mois en toutes lettres dans les deux ordres — l'anglais
+    « Aug 1, 2026 » comme le français « 1 août 2026 ».
+    """
+    for motif, forme in _DATES_LIBRES:
+        m = motif.match(ligne)
+        if not m:
+            continue
+        a, b, c = m.group(1), m.group(2), m.group(3)
+        if forme == "ama":
+            annee, mois, jour = _annee(a), int(b), int(c)
+        elif forme == "jma":
+            jour, mois, annee = int(a), int(b), _annee(c)
+        elif forme == "mja":
+            mois, jour, annee = _mois(a), int(b), _annee(c)
+        else:
+            jour, mois, annee = int(a), _mois(b), _annee(c)
+        if not mois:
+            continue
+        try:
+            return date(annee, mois, jour), m.end()
+        except ValueError:
+            continue
+    return None, 0
+
+
+def _colonne_solde(brutes, tolerance=0.011):
+    """Le dernier montant de chaque ligne est-il un solde courant ?
+
+    Presque tous les relevés impriment un solde APRÈS le montant de
+    l'opération. Le prendre pour l'opération — ce que faisait ce lecteur —
+    enregistre silencieusement des montants faux.
+
+    Un solde se trahit tout seul : d'une ligne à la suivante, il varie
+    exactement du montant de l'opération. C'est de l'arithmétique, donc cela
+    vaut pour n'importe quelle banque, dans n'importe quelle langue, sans rien
+    savoir de la mise en page.
+
+    Le seuil est une majorité, jamais l'unanimité : un relevé qui enchaîne
+    plusieurs comptes repart d'un autre solde à chaque section, et ces ruptures
+    ne doivent pas disqualifier la lecture.
+    """
+    candidats = [b for b in brutes if len(b["valeurs"]) >= 2]
+    if len(candidats) < 4:
+        return False
+    accords = 0
+    for prec, cour in zip(candidats, candidats[1:]):
+        delta = cour["valeurs"][-1] - prec["valeurs"][-1]
+        if any(abs(abs(delta) - abs(v)) <= tolerance for v in cour["valeurs"][:-1]):
+            accords += 1
+    return accords >= 0.6 * (len(candidats) - 1)
 
 
 def _parse_lignes_libres(text: str):
     """Lit un relevé aligné à l'espace, une ligne à la fois.
 
-    Le sens du montant vient de sa COLONNE, pas de son signe : un relevé
-    imprimé sépare débit et crédit en deux colonnes et n'écrit jamais de moins.
-    Les montants y sont alignés à droite, donc c'est la position de FIN qui est
-    stable — celle du début varie avec le nombre de chiffres.
+    Trois indices donnent le sens d'une opération, du plus sûr au moins sûr :
+    un signe écrit, la variation du solde courant, et enfin la colonne où le
+    montant est aligné. Le solde est le plus précieux des trois — c'est le seul
+    qui ne dépende ni de la langue du relevé ni de sa mise en page.
     """
     warnings = []
     brutes = []
-    for ligne in text.splitlines():
-        m = DATE_LIBRE.match(ligne)
-        if not m:
-            continue
-        d = _date_libre(m.group(1))
+    textes = text.splitlines()
+    n, exclu, ecartees = 0, False, 0
+    while n < len(textes):
+        ligne = textes[n]
+        n += 1
+        d, fin_date = _date_en_tete(ligne)
         if d is None:
+            if _annonce_de_section(textes, n - 1):
+                titre = norm(ligne)
+                if any(x in titre for x in SECTIONS_ECARTEES):
+                    exclu = True
+                elif any(x in titre for x in SECTIONS_OPERATIONS):
+                    exclu = False
             continue
-        reste = ligne[m.end():]
-        montants = list(MONTANT_LIBRE.finditer(reste))
-        if not montants:
+        if exclu:
+            ecartees += 1
             continue
-        # Le montant de l'opération est le dernier de la ligne : ce qui le suit
-        # éventuellement (un solde courant) appartient à une autre colonne.
-        dernier = montants[-1]
-        valeur = parse_amount(dernier.group(0))
-        if valeur is None:
+        reste = ligne[fin_date:]
+        # Un libellé long passe à la ligne dans un PDF, et emporte les montants
+        # avec lui. La ligne suivante n'a pas de date à elle : c'est la suite de
+        # celle-ci, pas une opération. Sans ce raccord, l'opération entière est
+        # perdue en silence — vingt-trois sur cent quatre-vingt-dix-sept dans le
+        # relevé qui a servi de témoin.
+        joint, sauts = False, 0
+        while not MONTANT_LIBRE.search(reste) and n < len(textes) and sauts < 2:
+            suite = textes[n]
+            if not suite.strip() or _date_en_tete(suite)[0] is not None:
+                break
+            reste = reste.rstrip() + " " + suite.strip()
+            n += 1
+            sauts += 1
+            joint = True
+        trouves = [(m, parse_amount(m.group(0)))
+                   for m in MONTANT_LIBRE.finditer(reste)]
+        trouves = [(m, v) for m, v in trouves if v is not None]
+        if not trouves:
             continue
-        desc = re.sub(r"\s+", " ", reste[:montants[0].start()]).strip(" .-\t")
+        desc = re.sub(r"\s+", " ", reste[:trouves[0][0].start()])
+        # Le symbole monétaire précède le montant : il reste collé à la fin du
+        # libellé, où il n'apprend rien à personne.
+        desc = desc.strip(" .-\t\u00a0\u20ac$\u00a3\u00a5")
         if norm(desc).startswith(LIBELLES_NON_OPERATION):
             continue
         brutes.append({
             "date": iso(d),
             "description": desc or "(sans libellé)",
-            "valeur": valeur,
-            "signe_ecrit": dernier.group(0).strip()[0] in "-+",
-            "fin": m.end() + dernier.end(),
+            "valeurs": [v for _m, v in trouves],
+            "signes": [m.group(0).strip()[0] in "-+" for m, _v in trouves],
+            "fins": [fin_date + m.end() for m, _v in trouves],
+            "joint": joint,
             "brut": ligne.strip(),
         })
 
     if not brutes:
         return [], ["Aucune ligne datée suivie d'un montant dans ce contenu."]
 
-    coupure = _coupure_colonnes([b["fin"] for b in brutes])
-    if coupure is None:
+    if ecartees:
+        warnings.append(
+            f"{ecartees} opération(s) annulée(s), refusée(s) ou en attente "
+            "écartée(s) : votre banque ne les compte pas non plus."
+        )
+
+    solde = _colonne_solde(brutes)
+
+    def rang_operation(b):
+        """L'avant-dernier montant quand la dernière colonne est un solde,
+        le dernier sinon."""
+        return -2 if solde and len(b["valeurs"]) >= 2 else -1
+
+    # L'alignement se mesure sur la colonne de l'OPÉRATION : mesurée sur celle
+    # du solde, elle ne dirait rien du sens. Et il se mesure sur les seules
+    # lignes d'un seul tenant : une ligne raccordée a perdu son alignement en
+    # cours de route, et fausserait la colonne pour toutes les autres.
+    entieres = [b for b in brutes if not b["joint"]] or brutes
+    coupure = _coupure_colonnes([b["fins"][rang_operation(b)] for b in entieres])
+    if solde:
+        warnings.append(
+            "Colonne de solde reconnue : le montant retenu est celui de "
+            "l'opération, et son sens vient de la variation du solde."
+        )
+    elif coupure is None:
         warnings.append(
             "Une seule colonne de montants : les lignes sans signe sont lues "
             "comme des débits. Vérifiez les montants avant de confirmer."
@@ -235,23 +404,68 @@ def _parse_lignes_libres(text: str):
             "Vérifiez quelques lignes avant de confirmer."
         )
 
-    lines = []
+    # Premier passage : ce que l'on sait de source sûre, ligne par ligne.
+    decisions, precedent = [], None
     for b in brutes:
-        if b["signe_ecrit"]:
-            amount = b["valeur"]                 # un signe écrit fait foi
-        elif coupure is None:
-            amount = -abs(b["valeur"])
+        i = rang_operation(b)
+        delta = None
+        if solde and len(b["valeurs"]) >= 2:
+            courant = b["valeurs"][-1]
+            if precedent is not None:
+                delta = round(courant - precedent, 2)
+                # Quand la ligne porte plusieurs montants — colonnes débit ET
+                # crédit imprimées — celui qui explique la variation est le bon.
+                for j, v in enumerate(b["valeurs"][:-1]):
+                    if abs(abs(delta) - abs(v)) <= 0.011:
+                        i = j
+                        break
+                else:
+                    # Changement de section : le solde repart d'ailleurs et
+                    # cette variation-là ne veut rien dire.
+                    delta = None
+            precedent = courant
+        if b["signes"][i]:
+            signe = 1 if b["valeurs"][i] > 0 else -1   # un signe écrit fait foi
+        elif delta:
+            signe = 1 if delta > 0 else -1
         else:
-            credit = b["fin"] >= coupure
-            amount = abs(b["valeur"]) if credit else -abs(b["valeur"])
+            signe = None
+        decisions.append([b, i, signe])
+
+    # Second passage. Le solde vient d'apprendre où se tiennent les débits et où
+    # se tiennent les crédits ; les rares lignes qu'il ne tranche pas — la
+    # première de chaque section, qui n'a pas de solde avant elle — se rangent
+    # dans la colonne la plus proche. C'est mieux qu'un simple partage en deux :
+    # ici les colonnes sont observées, pas devinées.
+    connues = {1: [], -1: []}
+    for b, i, signe in decisions:
+        if signe:
+            connues[signe].append(b["fins"][i])
+
+    lines = []
+    for b, i, signe in decisions:
+        if signe is None:
+            fin = b["fins"][i]
+            if connues[1] and connues[-1]:
+                signe = 1 if (abs(fin - _mediane(connues[1]))
+                              <= abs(fin - _mediane(connues[-1]))) else -1
+            elif coupure is not None:
+                signe = 1 if fin >= coupure else -1
+            else:
+                signe = -1
         lines.append({
             "date": b["date"],
             "description": b["description"],
-            "amount": round(amount, 2),
+            "amount": round(signe * abs(b["valeurs"][i]), 2),
             "devise": "EUR",
             "brut": b["brut"],
         })
     return lines, warnings
+
+
+def _mediane(valeurs):
+    ordonnees = sorted(valeurs)
+    return ordonnees[len(ordonnees) // 2]
 
 
 def _coupure_colonnes(fins, ecart_min=4):
@@ -403,7 +617,7 @@ def parse_statement(text: str):
     # lignes dont le libellé commence lui-même par une date : le découpage n'a
     # alors rien découpé, la ligne entière a atterri dans une seule cellule, et
     # ce qui en sort ressemble à des transactions sans en être.
-    if not lines or sum(bool(DATE_LIBRE.match(l["description"]))
+    if not lines or sum(_date_en_tete(l["description"])[0] is not None
                         for l in lines) * 2 >= len(lines):
         libres, avertissements_libres = _parse_lignes_libres(text)
         if libres:

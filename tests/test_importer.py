@@ -146,8 +146,129 @@ class TestReleveNonDelimite(unittest.TestCase):
         atterrissant dans une seule cellule."""
         lines, _ = importer.parse_statement(PDF_DEUX_COLONNES)
         for ligne in lines:
-            self.assertIsNone(importer.DATE_LIBRE.match(ligne["description"]))
+            self.assertIsNone(importer._date_en_tete(ligne["description"])[0])
             self.assertNotEqual(ligne["amount"], 0.0)
+
+
+# Un relevé anglais, avec sa colonne de solde courant et sa section annexe
+# d'opérations annulées. Les colonnes sont alignées comme sur un vrai relevé.
+RELEVE_SOLDE = """Account transactions from August 1, 2026 to September 1, 2026
+Date          Description                 Money out     Money in      Balance
+Aug 1, 2026   Grab                            \u20ac6.94                  \u20ac241.26
+Aug 1, 2026   Transfer from MATHILDE                      \u20ac71.00      \u20ac312.26
+Aug 2, 2026   Agoda                          \u20ac42.59                  \u20ac269.67
+Aug 3, 2026   Grand Whiz Hotel               \u20ac16.34                  \u20ac253.33
+Aug 4, 2026   Salary                                   \u20ac1,200.00    \u20ac1,453.33
+Reverted from August 1, 2026 to September 1, 2026
+Start date    Description                 Money out     Money in
+Aug 4, 2026   Grab                           \u20ac10.06
+"""
+
+# Le même relevé, en français, daté en toutes lettres et sans solde : le sens
+# ne peut venir que de la colonne.
+RELEVE_FR_TEXTE = """Operations du 1 aout 2026 au 31 aout 2026
+Date            Libelle                      Debit       Credit
+1er ao\u00fbt 2026    CB CARREFOUR                 45,30
+3 ao\u00fbt 2026      VIR SALAIRE                              2 450,00
+15 ao\u00fbt 2026     PRLV NETFLIX                 13,49
+"""
+
+# Un libellé trop long passe à la ligne dans un PDF, et emporte le montant.
+RELEVE_ENROULE = """Date        Libelle                          Debit
+5 aout 2026 Prelevement pour la mutuelle de
+groupe                                       48,20
+6 aout 2026 Cafe                              2,50
+"""
+
+
+class TestDatesDeReleve(unittest.TestCase):
+    """Un relevé ne date pas toujours en chiffres. Sans ces écritures-là, il ne
+    présente aucune ligne au lecteur et l'import rend zéro transaction."""
+
+    def test_ecritures_reconnues(self):
+        attendu = {
+            "12/08/2026 X": date(2026, 8, 12),
+            "03.03.24 X": date(2024, 3, 3),
+            "2026-08-01 X": date(2026, 8, 1),
+            "Aug 1, 2026 X": date(2026, 8, 1),
+            "August 1, 2026 X": date(2026, 8, 1),
+            "1 ao\u00fbt 2026 X": date(2026, 8, 1),
+            "1er ao\u00fbt 2026 X": date(2026, 8, 1),
+            "15 janvier 2025 X": date(2025, 1, 15),
+            "Sep. 3, 2026 X": date(2026, 9, 3),
+        }
+        for ligne, d in attendu.items():
+            self.assertEqual(importer._date_en_tete(ligne)[0], d, ligne)
+
+    def test_ce_qui_n_est_pas_une_date(self):
+        for ligne in ("Date Description Money out", "Total 1 234,56",
+                      "Revolut Bank UAB 2026", "To: Grab, Jakarta"):
+            self.assertIsNone(importer._date_en_tete(ligne)[0], ligne)
+
+
+class TestSoldeCourant(unittest.TestCase):
+    """Presque tous les relevés impriment un solde APRÈS le montant. Le prendre
+    pour l'opération enregistre silencieusement des montants faux."""
+
+    def test_le_montant_retenu_est_l_operation_pas_le_solde(self):
+        lines, _ = importer.parse_statement(RELEVE_SOLDE)
+        montants = {l["description"]: l["amount"] for l in lines}
+        self.assertEqual(montants["Grab"], -6.94)          # et non -241.26
+        self.assertEqual(montants["Agoda"], -42.59)
+        self.assertEqual(montants["Grand Whiz Hotel"], -16.34)
+
+    def test_le_sens_vient_de_la_variation_du_solde(self):
+        lines, warnings = importer.parse_statement(RELEVE_SOLDE)
+        montants = {l["description"]: l["amount"] for l in lines}
+        self.assertEqual(montants["Transfer from MATHILDE"], 71.00)
+        self.assertEqual(montants["Salary"], 1200.00)
+        self.assertTrue(any("solde" in w.lower() for w in warnings))
+
+    def test_la_premiere_ligne_suit_la_colonne_apprise(self):
+        """Elle n'a pas de solde avant elle : son sens vient de la colonne où
+        le solde a rangé toutes les autres."""
+        lines, _ = importer.parse_statement(RELEVE_SOLDE)
+        self.assertEqual(lines[0]["description"], "Grab")
+        self.assertEqual(lines[0]["amount"], -6.94)
+
+    def test_operations_annulees_ecartees(self):
+        """Une opération annulée porte une date et un montant comme les autres.
+        Seul le titre de sa section la distingue — et la banque ne la compte pas
+        dans ses totaux non plus."""
+        lines, warnings = importer.parse_statement(RELEVE_SOLDE)
+        self.assertEqual(len(lines), 5)
+        self.assertNotIn(-10.06, [l["amount"] for l in lines])
+        self.assertTrue(any("annul" in w for w in warnings))
+
+    def test_milliers_a_l_anglo_saxonne(self):
+        """« \u20ac2,238.82 » n'était pas reconnu du tout : la virgule des milliers
+        manquait au motif, et la ligne entière passait à la trappe."""
+        lines, _ = importer.parse_statement("Aug 1, 2026 Gros achat \u20ac2,238.82")
+        self.assertEqual(lines[0]["amount"], -2238.82)
+
+
+class TestReleveEnToutesLettres(unittest.TestCase):
+    def test_dates_francaises_et_colonnes(self):
+        lines, _ = importer.parse_statement(RELEVE_FR_TEXTE)
+        self.assertEqual(len(lines), 3)
+        self.assertEqual(lines[0]["date"], "2026-08-01")
+        self.assertEqual(lines[0]["amount"], -45.30)
+        self.assertEqual(lines[1]["amount"], 2450.00)
+        self.assertEqual(lines[2]["amount"], -13.49)
+
+    def test_symbole_monetaire_hors_du_libelle(self):
+        lines, _ = importer.parse_statement(RELEVE_SOLDE)
+        for l in lines:
+            self.assertNotIn("\u20ac", l["description"])
+
+    def test_libelle_enroule_raccorde(self):
+        """Vingt-trois opérations sur cent quatre-vingt-dix-sept se perdaient
+        ainsi dans le relevé qui a servi de témoin."""
+        lines, _ = importer.parse_statement(RELEVE_ENROULE)
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[0]["description"],
+                         "Prelevement pour la mutuelle de groupe")
+        self.assertEqual(lines[0]["amount"], -48.20)
 
 
 class TestExtractionFichier(unittest.TestCase):

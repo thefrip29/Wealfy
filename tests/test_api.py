@@ -1066,8 +1066,11 @@ class TestAnalytics(ApiTestCase):
             "valeur_acquisition": 0,
         })
         this_month = month_key()
+        # Le 1er du mois : le patrimoine est value a la date du jour, et un
+        # versement date du 3 n'a pas encore eu lieu. Dater du 1er rend le test
+        # vrai tous les jours du mois plutot que vingt-huit jours sur trente.
         self.post(f"/api/assets/{pea['id']}/movements", {
-            "date": f"{this_month}-03", "montant": 400, "type": "versement",
+            "date": f"{this_month}-01", "montant": 400, "type": "versement",
         })
         self.post("/api/transactions", {
             "date": f"{this_month}-01", "description": "Salaire", "amount": 2000,

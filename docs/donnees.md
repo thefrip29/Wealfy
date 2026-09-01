@@ -33,19 +33,60 @@ mieux qu'une banque choisie dans une liste de quatre.
 
 Un relevé imprimé ou extrait d'un PDF n'a aucun séparateur : ses colonnes sont
 alignées à l'espace. `csv.reader` n'y voyait qu'une colonne par ligne et
-renvoyait zéro transaction. Une seconde lecture prend le relais, ligne à ligne :
-date en tête, montant en fin.
+renvoyait zéro transaction. Une seconde lecture prend le relais, ligne à ligne.
+Elle ne connaît aucune banque en particulier : elle s'appuie sur ce que tous les
+relevés ont en commun.
 
-**Le sens du montant vient de sa colonne, pas de son signe.** Un relevé imprimé
-sépare débit et crédit en deux colonnes et n'écrit jamais de moins. Les montants
-y sont alignés à droite : c'est donc la position de **fin** qui est stable, pas
-celle du début, et le plus grand écart entre deux fins sépare les deux colonnes.
-À défaut de seconde colonne, la ligne est lue comme un débit — et l'application
-le dit, plutôt que d'inventer un sens.
+**Une date en tête, dans n'importe quelle écriture.** `12/08/2026`, `2026-08-01`,
+`Aug 1, 2026`, `1er août 2026` : les mois en toutes lettres, français comme
+anglais, ouvrent la ligne aussi bien que les chiffres. Sans eux, un relevé
+étranger ne présentait *aucune* ligne au lecteur et l'import entier rendait zéro
+transaction.
+
+**Le solde courant n'est pas le montant de l'opération.** Presque tous les
+relevés impriment un solde *après* le montant. Le lecteur prenait le dernier
+montant de la ligne : sur `Grab €6.94 €241.26`, il enregistrait 241,26 €.
+Silencieusement, et faux partout.
+
+Un solde se trahit tout seul : d'une ligne à la suivante, il varie exactement du
+montant de l'opération. Le lecteur teste cette hypothèse sur tout le relevé et
+l'accepte à la majorité — jamais à l'unanimité, car un relevé qui enchaîne
+plusieurs comptes repart d'un autre solde à chaque section. C'est de
+l'arithmétique : cela vaut pour n'importe quelle banque, dans n'importe quelle
+langue, sans rien savoir de la mise en page.
+
+**Le sens de l'opération, du plus sûr au moins sûr.** Un signe écrit fait foi.
+Sinon, la variation du solde le donne. Sinon seulement, la colonne : les montants
+sont alignés à droite, donc c'est la position de **fin** qui est stable. Et
+quand le solde a tranché la plupart des lignes, il a du même coup montré *où* se
+tiennent les débits et où se tiennent les crédits — les rares lignes qu'il ne
+couvre pas, la première de chaque section, se rangent dans la colonne la plus
+proche. À défaut de tout cela, la ligne est lue comme un débit, et l'application
+le dit plutôt que d'inventer un sens.
+
+**Un libellé trop long passe à la ligne**, et emporte les montants avec lui. La
+ligne suivante n'a pas de date à elle : c'est la suite, pas une opération. Le
+lecteur la raccorde, sur deux lignes au plus. Sans ce raccord, vingt-trois
+opérations sur cent quatre-vingt-dix-sept se perdaient en silence dans le relevé
+qui a servi de témoin.
+
+**Les sections annexes sont écartées.** Un relevé range à part les opérations
+annulées, refusées ou en attente. Elles portent une date et un montant comme les
+autres : rien dans la ligne ne les distingue, seul le titre de la section qui les
+précède le dit. Un titre se reconnaît à ce qu'une ligne d'en-têtes de colonnes le
+suit de près — le squelette commun à tous les relevés, plutôt que le vocabulaire
+d'une banque. Les compter comme des dépenses fausserait les totaux, et la banque
+ne les compte pas dans les siens non plus. Le nombre écarté est annoncé.
 
 Les lignes de solde (« solde précédent », « nouveau solde », « report ») portent
 une date et un montant comme les autres : seul leur libellé les distingue. Elles
 sont écartées, sans quoi tous les totaux seraient faux.
+
+**Ce que vaut cette lecture, mesuré.** Sur un relevé réel de 197 opérations qui
+rendait auparavant *zéro* ligne : 192 opérations lues, 5 écartées à juste titre
+parce qu'annulées, et le montant de **chacune des 192 lignes est d'accord avec la
+variation du solde imprimé par la banque**. Le mouvement net tombe au centime sur
+le récapitulatif du relevé.
 
 La lecture délimitée garde la priorité quand elle aboutit vraiment : c'est elle
 qui distingue débit et crédit sans avoir à deviner. Deux signes la déclarent en
