@@ -303,7 +303,7 @@ def apply_rules_now():
     updated = 0
     for tx in rows_to_list(query(sql)):
         line = {"date": tx["date"], "description": tx["description"], "amount": tx["amount"]}
-        category, liability_id, _ = importer.classify(
+        category, liability_id, _, _ = importer.classify(
             line, rules, liabs, tol, tol_days)
         if category != tx["category"] or (liability_id and liability_id != tx["liability_id"]):
             execute(

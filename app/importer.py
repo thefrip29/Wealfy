@@ -35,40 +35,75 @@ CURRENCY_HEADERS = ["currency", "devise"]
 
 # Mots-clés par défaut : ne sert que de filet quand aucune règle utilisateur
 # ne correspond. Les règles de la table `rules` restent prioritaires.
+#
+# Cette liste était strictement française. Mesurée sur un relevé réel de 197
+# opérations — un compte utilisé à l'étranger — elle en reconnaissait NEUF.
+# Un relevé ordinaire est plein de marchands internationaux et de libellés
+# anglais ; les ignorer laissait 95 % des lignes sans catégorie.
 DEFAULT_KEYWORDS = {
     "Alimentation": ["carrefour", "leclerc", "lidl", "auchan", "intermarche", "super u",
-                     "monoprix", "franprix", "casino", "biocoop", "picard", "aldi"],
+                     "monoprix", "franprix", "casino", "biocoop", "picard", "aldi",
+                     "spar", "coop", "tesco", "mercadona", "delhaize", "colruyt",
+                     "migros", "seven eleven", "familymart", "indomaret", "alfamart",
+                     "supermarket", "grocery", "epicerie", "primeur"],
     "Restaurants": ["restaurant", "mcdonald", "burger", "uber eats", "deliveroo",
-                    "just eat", "boulangerie", "starbucks", "kebab", "sushi", "brasserie"],
+                    "just eat", "boulangerie", "starbucks", "kebab", "sushi", "brasserie",
+                    "grabfood", "foodpanda", "doordash", "glovo", "wolt", "subway",
+                    "dominos", "pizza", "bistrot", "taverne", "cafeteria", "coffee",
+                    "warung", "trattoria", "creperie"],
     "Transport": ["sncf", "ratp", "uber", "total", "totalenergies", "esso", "shell",
-                  "bp ", "essence", "peage", "vinci autoroute", "blablacar", "parking",
-                  "velib", "navigo", "tan ", "tcl ", "carburant"],
+                  "bp", "essence", "peage", "vinci autoroute", "blablacar", "parking",
+                  "velib", "navigo", "tan", "tcl", "carburant",
+                  "grab", "bolt", "gojek", "lyft", "cabify", "freenow", "flixbus",
+                  "redbus", "12go", "taxi", "metro", "tramway", "autocar"],
+    "Voyages": ["booking", "airbnb", "ryanair", "easyjet", "air france", "hotel",
+                "agoda", "hostelworld", "expedia", "klook", "getyourguide",
+                "trip com", "hotels com", "wizz air", "transavia", "vueling",
+                "emirates", "qatar airways", "airasia", "vietjet", "hostel",
+                "resort", "guesthouse", "airport", "aeroport", "duty free",
+                "lodge", "auberge"],
     "Abonnements": ["netflix", "spotify", "amazon prime", "disney", "canal+", "youtube",
                     "icloud", "google one", "microsoft", "adobe", "openai", "anthropic",
-                    "free mobile", "orange", "sfr", "bouygues", "sosh", "red by sfr"],
+                    "free mobile", "orange", "sfr", "bouygues", "sosh", "red by sfr",
+                    "chatgpt", "claude ai", "notion", "dropbox", "github", "linkedin",
+                    "duolingo", "google play", "itunes", "apple com bill", "patreon",
+                    "abonnement", "subscription"],
     "Logement": ["loyer", "edf", "engie", "veolia", "suez", "gaz", "electricite",
-                 "eau ", "syndic", "charges copro", "taxe habitation"],
+                 "eau", "syndic", "charges copro", "taxe habitation", "rent",
+                 "electricity", "internet box"],
     "Sante": ["pharmacie", "medecin", "docteur", "mutuelle", "harmonie", "laboratoire",
-              "dentiste", "opticien", "hopital", "cpam"],
+              "dentiste", "opticien", "hopital", "cpam",
+              "pharmacy", "clinic", "clinique", "hospital", "dental", "optic",
+              "kine", "osteopathe", "vaccination"],
     "Assurances": ["assurance", "axa", "maif", "macif", "matmut", "allianz", "gmf",
-                   "groupama", "maaf"],
-    "Frais bancaires": ["frais bancaire", "cotisation carte", "agios", "commission d intervention"],
-    "Impots": ["dgfip", "impot", "tresor public", "urssaf", "taxe fonciere"],
+                   "groupama", "maaf", "insurance"],
+    "Frais bancaires": ["frais bancaire", "cotisation carte", "agios",
+                        "commission d intervention", "atm", "cash withdrawal",
+                        "retrait dab", "exchange fee", "frais de change",
+                        "bank fee", "service charge"],
+    "Impots": ["dgfip", "impot", "tresor public", "urssaf", "taxe fonciere", "tax office"],
     "Loisirs": ["cinema", "fnac", "decathlon", "steam", "salle de sport", "basic fit",
-                "fitness park", "musee", "concert", "billetterie"],
-    "Shopping": ["amazon", "zalando", "vinted", "ikea", "leroy merlin", "action ",
-                 "zara", "h&m", "uniqlo", "cdiscount"],
-    "Voyages": ["booking", "airbnb", "ryanair", "easyjet", "air france", "hotel"],
+                "fitness park", "musee", "concert", "billetterie",
+                "gym", "museum", "cinepolis", "bowling", "escape game", "massage",
+                "playstation", "nintendo", "lootcode"],
+    "Shopping": ["amazon", "zalando", "vinted", "ikea", "leroy merlin", "action",
+                 "zara", "h&m", "uniqlo", "cdiscount",
+                 "shopee", "lazada", "aliexpress", "temu", "shein", "ebay", "etsy",
+                 "leboncoin", "boutique", "store"],
     "Epargne/Investissement": ["trade republic", "traderepublic", "boursorama invest",
                                "degiro", "binance", "coinbase", "kraken", "bitpanda",
                                "virement livret", "versement pea"],
 }
 
 INCOME_KEYWORDS = {
-    "Salaire": ["salaire", "paie", "paye", "remuneration", "virement employeur"],
+    "Salaire": ["salaire", "paie", "paye", "remuneration", "virement employeur",
+                "salary", "payroll", "wage"],
     "Argent parents": ["papa", "maman", "parents"],
-    "Revenu locatif": ["loyer recu", "loyer percu", "locataire"],
-    "Interets": ["interets", "interet crediteur"],
+    "Revenu locatif": ["loyer recu", "loyer percu", "locataire", "rent received"],
+    "Interets": ["interets", "interet crediteur", "interest", "net interest",
+                 "dividende", "dividend", "coupon"],
+    "Remboursement": ["remboursement", "refund", "cashback", "reimbursement",
+                      "avoir", "reverted"],
 }
 
 
@@ -666,11 +701,31 @@ def _apply_rules(description, rules):
 
 
 def _apply_keywords(description, amount):
+    """Le filet intégré, comparé au JETON et non à la sous-chaîne.
+
+    Chercher « bp » n'importe où dans un libellé le trouvait dans « abonnement »
+    autant que dans une station-service — d'où les mots-clés écrits « bp » avec
+    une espace finale, qui rataient alors les fins de ligne. Comparer des mots
+    entiers supprime le bricolage et les faux positifs d'un seul coup.
+
+    Un mot-clé long reste cherché en sous-chaîne : « carrefour » est assez
+    spécifique pour être reconnu dans « CARREFOURMARKET », que l'extraction d'un
+    PDF colle parfois d'un seul tenant.
+    """
     text = norm(description)
+    jetons = text.split()
     table = INCOME_KEYWORDS if amount > 0 else DEFAULT_KEYWORDS
     for category, keywords in table.items():
         for kw in keywords:
-            if norm(kw) in text:
+            mots = norm(kw).split()
+            if not mots:
+                continue
+            if len(mots) > 1:
+                n = len(mots)
+                if any(jetons[i:i + n] == mots
+                       for i in range(len(jetons) - n + 1)):
+                    return category
+            elif mots[0] in jetons or (len(mots[0]) >= 6 and mots[0] in text):
                 return category
     return None
 
@@ -791,12 +846,19 @@ def parse_movements(text: str):
     return lines, warnings
 
 
-def classify(line, rules, liabilities, tolerance=2.0, day_tolerance=6):
-    """Renvoie (category, liability_id, origine).
+def classify(line, rules, liabilities, tolerance=2.0, day_tolerance=6,
+             modele=None, seuil=1.0):
+    """Renvoie (category, liability_id, origine, confiance).
 
-    Ordre : règles utilisateur, puis échéance de prêt, puis mots-clés intégrés.
-    Les règles gardent la priorité : c'est l'utilisateur qui a le dernier mot
-    sur sa propre classification.
+    Ordre : règles utilisateur, échéance de prêt, modèle appris, mots-clés
+    intégrés, défaut. Les règles gardent la priorité : c'est l'utilisateur qui a
+    le dernier mot sur sa propre classification, et un modèle ne doit jamais
+    passer devant une consigne explicite.
+
+    Le modèle est passé de l'extérieur, avec son seuil. Ce module ne connaît
+    donc pas `classifier`, qui le connaît lui — sans quoi les deux s'importeraient
+    l'un l'autre. En dessous du seuil, le modèle se tait : une ligne « à
+    classer » se voit et se corrige, une ligne mal classée passe inaperçue.
 
     Il y avait ici une quatrième étape, une liste de mots-clés qui marquaient
     un virement interne. Elle faisait exactement ce qu'une règle fait — chercher
@@ -811,10 +873,14 @@ def classify(line, rules, liabilities, tolerance=2.0, day_tolerance=6):
         line["date"], amount, liabilities, tolerance, day_tolerance
     )
     if value:
-        return value, liability_id, "regle"
+        return value, liability_id, "regle", 1.0
     if liability_id:
-        return "Remboursement pret", liability_id, "pret"
+        return "Remboursement pret", liability_id, "pret", 1.0
+    if modele is not None:
+        appris, confiance = modele.predire(line["description"], amount)
+        if appris and confiance >= seuil:
+            return appris, None, "modele", confiance
     keyword = _apply_keywords(line["description"], amount)
     if keyword:
-        return keyword, None, "mot-cle"
-    return ("Autre revenu" if amount > 0 else "Non categorise"), None, "defaut"
+        return keyword, None, "mot-cle", 1.0
+    return ("Autre revenu" if amount > 0 else "Non categorise"), None, "defaut", 0.0

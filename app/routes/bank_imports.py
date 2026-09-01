@@ -1,7 +1,9 @@
 """Import de releves bancaires."""
+from collections import Counter
+
 from flask import jsonify, request
 
-from .. import importer, services
+from .. import classifier, importer, services
 from ..db import execute, get_setting, new_id, query, rows_to_list
 from ._blueprint import bp
 from ._helpers import as_date, as_float, body, fail
@@ -46,6 +48,7 @@ def preview_import():
     liabs = services.liabilities_with_summary()
     tol = float(get_setting("tolerance_mensualite", 2.0) or 2.0)
     tol_days = int(get_setting("tolerance_jours_echeance", 6) or 6)
+    modele = classifier.modele_entraine()
 
     existing = {r["dedup_hash"] for r in query(
         "SELECT dedup_hash FROM transactions WHERE dedup_hash IS NOT NULL"
@@ -57,8 +60,9 @@ def preview_import():
         seen.add(h)
         if duplicate:
             doublons += 1
-        category, liability_id, origine = importer.classify(
-            line, rules, liabs, tol, tol_days
+        category, liability_id, origine, confiance = importer.classify(
+            line, rules, liabs, tol, tol_days,
+            modele, classifier.SEUIL_CONFIANCE,
         )
         out.append({
             **line,
@@ -68,13 +72,39 @@ def preview_import():
             "category": category,
             "liability_id": liability_id,
             "origine": origine,
+            "confiance": round(confiance, 3),
         })
     return jsonify({
         "lignes": out,
         "avertissements": warnings,
         "total": len(out),
         "doublons": doublons,
+        "groupes": _marchands(out),
     })
+
+
+# Les categories fourre-tout : une ligne qui y atterrit n'est pas classee, elle
+# attend une decision.
+A_CLASSER = ("Non categorise", "Autre revenu")
+
+
+def _marchands(lignes):
+    """Les marchands qui reviennent, et ce qu'on propose pour chacun.
+
+    C'est ce qui rend le premier import possible sur une base vide : sur le
+    releve temoin, treize marchands couvraient 79 % des lignes. Treize decisions
+    au lieu de deux cents, sans qu'aucun modele ait rien appris.
+
+    Les groupes qui attendent une decision passent devant : ce sont eux qui
+    coutent du temps a l'utilisateur, pas ceux qui sont deja classes.
+    """
+    groupes = classifier.regrouper(lignes)
+    for g in groupes:
+        comptes = Counter(lignes[i]["category"] for i in g["indices"])
+        g["categorie"] = comptes.most_common(1)[0][0]
+        g["a_classer"] = g["categorie"] in A_CLASSER
+    groupes.sort(key=lambda g: (not g["a_classer"], -g["nb"], g["racine"]))
+    return groupes
 
 
 @bp.post("/api/imports/confirm")

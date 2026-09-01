@@ -316,20 +316,20 @@ class TestClassification(unittest.TestCase):
 
     def test_rule_wins(self):
         line = {"date": "2024-03-05", "description": "Virement SALAIRE MARS", "amount": 2100.0}
-        cat, lid, origin = importer.classify(line, self.rules, self.liabs)
+        cat, lid, origin, _ = importer.classify(line, self.rules, self.liabs)
         self.assertEqual(cat, "Salaire")
         self.assertEqual(origin, "regle")
         self.assertIsNone(lid)
 
     def test_rule_is_accent_and_case_insensitive(self):
         line = {"date": "2024-03-06", "description": "VIR M. DUPÔNT LOYER", "amount": 750.0}
-        cat, _, _ = importer.classify(line, self.rules, self.liabs)
+        cat, _, _, _ = importer.classify(line, self.rules, self.liabs)
         self.assertEqual(cat, "Revenu locatif")
 
     def test_loan_detected_by_amount_and_date(self):
         line = {"date": "2024-04-15", "description": "PRLV BANQUE 55512",
                 "amount": -round(self.mensualite, 2)}
-        cat, lid, origin = importer.classify(line, self.rules, self.liabs)
+        cat, lid, origin, _ = importer.classify(line, self.rules, self.liabs)
         self.assertEqual(cat, "Remboursement pret")
         self.assertEqual(lid, "L1")
         self.assertEqual(origin, "pret")
@@ -337,24 +337,24 @@ class TestClassification(unittest.TestCase):
     def test_loan_not_detected_when_amount_is_off(self):
         line = {"date": "2024-04-15", "description": "PRLV BANQUE",
                 "amount": -(self.mensualite + 50)}
-        _, lid, _ = importer.classify(line, self.rules, self.liabs)
+        _, lid, _, _ = importer.classify(line, self.rules, self.liabs)
         self.assertIsNone(lid)
 
     def test_loan_not_detected_far_from_due_date(self):
         line = {"date": "2024-04-30", "description": "PRLV BANQUE",
                 "amount": -round(self.mensualite, 2)}
-        _, lid, _ = importer.classify(line, self.rules, self.liabs)
+        _, lid, _, _ = importer.classify(line, self.rules, self.liabs)
         self.assertIsNone(lid)
 
     def test_keyword_fallback(self):
         line = {"date": "2024-03-02", "description": "CARREFOUR CITY", "amount": -24.30}
-        cat, _, origin = importer.classify(line, [], [])
+        cat, _, origin, _ = importer.classify(line, [], [])
         self.assertEqual(cat, "Alimentation")
         self.assertEqual(origin, "mot-cle")
 
     def test_uncategorised_default(self):
         line = {"date": "2024-03-02", "description": "XYZ 4412", "amount": -10.0}
-        cat, _, origin = importer.classify(line, [], [])
+        cat, _, origin, _ = importer.classify(line, [], [])
         self.assertEqual(cat, "Non categorise")
         self.assertEqual(origin, "defaut")
 

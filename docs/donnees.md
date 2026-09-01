@@ -429,12 +429,58 @@ Ordre d'application :
    6 jours de l'échéance théorique, la ligne est classée « Remboursement pret »
    et rattachée au prêt (`liability_id`).
 3. **Virement interne** — voir la section précédente.
-4. **Mots-clés intégrés** — filet de sécurité pour les enseignes courantes.
-5. Sinon « Non categorise ».
+4. **Modèle appris** (`app/classifier.py`), au-dessus d'un seuil de confiance.
+5. **Mots-clés intégrés** — filet de sécurité pour les enseignes courantes.
+6. Sinon « Non categorise ».
+
+L'utilisateur garde le dernier mot : une règle passe toujours devant le modèle.
 
 Les tolérances sont dans les paramètres (`tolerance_mensualite`,
 `tolerance_jours_echeance`). Le bouton *Appliquer aux transactions non
 catégorisées* rejoue les règles sur l'existant.
+
+### Le classifieur local
+
+Les mots-clés intégrés étaient strictement français. Mesurés sur un relevé réel
+de 192 opérations — un compte utilisé à l'étranger — ils en reconnaissaient
+**neuf, soit 5 %**. Deux mécanismes s'ajoutent, et ils ne servent pas au même
+moment.
+
+**Le regroupement par marchand** travaille dès le premier import, sur une base
+vide. Il réduit chaque libellé à sa racine — « Grab* A-9la554nwwmgeav, Jakarta »
+et « Grab* A-9lf26h6gwtxvav » sont le même marchand — puis remonte les racines
+qui reviennent. Sur le relevé témoin : **quatorze marchands couvrant 79 % des
+lignes**. Quatorze décisions au lieu de deux cents, sans qu'aucun modèle n'ait
+rien appris. Accepter une proposition crée une règle ordinaire, qui garde donc
+la priorité sur tout le reste.
+
+**Le modèle** prend le relais ensuite. C'est un bayésien naïf multinomial — la
+technique des filtres anti-spam — écrit à la main, **sans aucune dépendance** :
+ajouter scikit-learn ferait entrer NumPy, et l'exécutable doublerait de taille.
+Il regarde les mots du libellé et les tranches de quatre caractères, ces
+dernières rapprochant « CARREFOUR MKT 1234 » de « CARREFOUR CITY ». Dépenses et
+revenus ont chacun leur modèle : le signe du montant dit lequel interroger.
+
+Il s'entraîne sur vos propres transactions déjà catégorisées, et **la boucle
+d'apprentissage est gratuite** : une correction faite à la main dans le tableau
+des dépenses est déjà enregistrée dans `transactions.category`. Aucune table
+supplémentaire, aucun réglage — corriger une ligne suffit à instruire le prochain
+import. La taxonomie intégrée lui sert d'amorçage, sans quoi il ne saurait rien
+le premier jour, qui est justement celui où l'on importe le plus.
+
+**Le seuil de confiance est ce qui l'empêche d'inventer.** La confiance est
+l'écart entre les deux meilleures hypothèses, ramené au nombre de traits *déjà
+vus* — un trait inconnu compte pareil pour toutes les catégories et ne ferait que
+diluer l'information des autres. En dessous du seuil, le modèle se tait et la
+ligne reste à classer : une ligne « à classer » se voit et se corrige, une ligne
+mal classée passe inaperçue et fausse les totaux. Sans seuil, sur des marchands
+retirés de l'entraînement, il ne tranchait juste que six fois sur dix.
+
+Tout se calcule sur votre machine, sans appel réseau, comme le reste.
+
+**Ce que cela donne, mesuré.** Sur le relevé témoin, qui rendait auparavant zéro
+ligne : 192 opérations lues en 147 ms, **78 % catégorisées automatiquement**, et
+les 22 % restantes ramenées à quatre décisions de groupe.
 
 
 ## Valorisation en direct (cours de marché)
