@@ -541,6 +541,152 @@ App.tabs.expenses = {
     });
   },
 
+  /* ---------- ce que vaut une detection ----------
+
+     Une categorie posee par une regle est une consigne de l'utilisateur ; une
+     categorie proposee par le modele est une hypothese. Les afficher pareil
+     reviendrait a demander la meme confiance aux deux. La pastille du modele
+     est donc bordee de pointilles, et porte sa confiance en infobulle. */
+  badgeOrigine(line) {
+    if (line.doublon) return App.h('span', { class: 'pill warn' }, 'doublon');
+    // Plus d'origine « transfert » : les motifs de virement sont devenus des
+    // regles ordinaires, et repondent donc « regle » comme les autres.
+    const [classe, texte] = {
+      regle: ['accent', 'règle'],
+      pret: ['ok', 'prêt détecté'],
+      modele: ['appris', 'modèle'],
+      manuel: ['accent', 'vous'],
+      'mot-cle': ['', 'mot-clé'],
+      defaut: ['', '—'],
+    }[line.origine] || ['', ''];
+    const attrs = { class: `pill ${classe}` };
+    if (line.origine === 'modele') {
+      attrs.title = `Proposé par le modèle — confiance ${
+        Math.round((line.confiance || 0) * 100)} %. Corrigez-le : il apprendra.`;
+    }
+    return App.h('span', attrs, texte);
+  },
+
+  /* ---------- les marchands qui reviennent ----------
+
+     Un releve de deux cents lignes se ramene a une poignee de marchands : sur
+     un releve reel, quatorze marchands couvraient 79 % des lignes. Repondre une
+     fois par marchand plutot qu'une fois par ligne, c'est la difference entre
+     un import faisable et un import qu'on abandonne — et c'est ce qui marche
+     des le premier jour, quand le modele n'a encore rien appris.
+
+     Les groupes qui attendent une decision passent devant : ce sont eux qui
+     coutent du temps, pas ceux qui sont deja classes. */
+  renderMarchands(res, lines, rangees) {
+    const groupes = res.groupes || [];
+    if (!groupes.length) return null;
+    const couvert = groupes.reduce((n, g) => n + g.nb, 0);
+    const aFaire = groupes.filter((g) => g.a_classer);
+    const classes = groupes.filter((g) => !g.a_classer);
+
+    // Un tableau de quatorze marchands repousserait les transactions hors de
+    // l'ecran. Seuls ceux qui attendent une decision restent devant ; les
+    // autres sont deja bons, et se replient sans disparaitre — on peut
+    // toujours vouloir corriger une proposition.
+    const tableau = (liste) => App.h('div', { class: 'table-wrap scroll-y' },
+      App.h('table', { class: 'table' },
+        App.h('thead', {}, App.h('tr', {},
+          App.h('th', {}, 'Marchand'),
+          App.h('th', { class: 'right', style: 'width:62px' }, 'Lignes'),
+          App.h('th', { class: 'right', style: 'width:104px' }, 'Total'),
+          App.h('th', { style: 'width:210px' }, 'Catégorie'),
+          App.h('th', { style: 'width:130px' }, ''))),
+        App.h('tbody', {}, ...liste.map(
+          (g) => App.tabs.expenses.ligneMarchand(g, lines, rangees)))));
+
+    return App.h('section', { class: 'marchands' },
+      App.h('div', { class: 'marchands-tete' },
+        App.h('strong', {}, aFaire.length
+          ? `${aFaire.length} marchand(s) à classer`
+          : 'Tous les marchands sont classés'),
+        App.h('span', { class: 'hint' },
+          `${groupes.length} marchand(s) couvrent ${couvert} ligne(s) sur ${lines.length}`)),
+      App.h('p', { class: 'hint' },
+        'Répondre une fois pour un marchand vaut pour toutes ses lignes, '
+        + 'et l’application le retient pour vos prochains relevés.'),
+      aFaire.length ? tableau(aFaire) : null,
+      classes.length
+        ? App.note(`${classes.length} marchand(s) déjà classé(s)`, tableau(classes))
+        : null);
+  },
+
+  ligneMarchand(g, lines, rangees) {
+    const NEUVE = '\u0000neuve';
+    const choix = App.select('cat', [
+      ...App.categoriesAll().map((c) => [c, c]),
+      [NEUVE, '＋ Nouvelle catégorie…'],
+    ], g.categorie);
+    const saisie = App.h('input', {
+      class: 'cat-neuve', placeholder: 'Nom de la catégorie', hidden: true,
+    });
+    choix.addEventListener('change', () => {
+      saisie.hidden = choix.value !== NEUVE;
+      if (!saisie.hidden) saisie.focus();
+    });
+
+    const bouton = App.h('button', { class: 'btn small' }, 'Appliquer');
+    const cellule = App.h('td', {}, bouton);
+
+    bouton.addEventListener('click', async () => {
+      const valeur = (choix.value === NEUVE ? saisie.value : choix.value).trim();
+      if (!valeur) {
+        App.toast('Nommez la catégorie.', 'error');
+        saisie.focus();
+        return;
+      }
+      bouton.disabled = true;
+      try {
+        // Une categorie inedite doit rejoindre la liste des categories, sinon
+        // le menu de chaque ligne ne la contient pas et le choix serait perdu
+        // au premier changement.
+        if (!App.categoriesAll().includes(valeur)) {
+          const cle = g.total > 0 ? 'categories_revenus' : 'categories_depenses';
+          const liste = [...(App.state.meta[cle] || []), valeur];
+          await App.api.put('/api/settings', { [cle]: liste });
+          App.state.meta[cle] = liste;
+        }
+        // La regle est ce qui fait que la question ne sera pas reposee au
+        // prochain releve — et elle passe devant le modele, comme toute
+        // consigne explicite.
+        await App.api.post('/api/rules', { pattern: g.racine, valeur });
+
+        g.indices.forEach((i) => {
+          lines[i].category = valeur;
+          lines[i].origine = 'regle';
+          const r = rangees[i];
+          if (!r) return;
+          if (![...r.cat.options].some((o) => o.value === valeur)) {
+            r.cat.append(App.h('option', { value: valeur }, valeur));
+          }
+          r.cat.value = valeur;
+          r.pastille.replaceChildren(App.tabs.expenses.badgeOrigine(lines[i]));
+        });
+
+        g.a_classer = false;
+        cellule.replaceChildren(App.h('span', { class: 'pill ok' }, 'retenu'));
+        App.toast(`${g.nb} ligne(s) classée(s) en « ${valeur} »`, 'success');
+      } catch (e) {
+        App.toast(e.message, 'error');
+        bouton.disabled = false;
+      }
+    });
+
+    return App.h('tr', {},
+      App.h('td', {},
+        App.h('div', { class: 'ell', title: g.racine }, g.libelle),
+        g.a_classer ? App.h('span', { class: 'pill warn' }, 'à classer') : null),
+      App.h('td', { class: 'right num' }, String(g.nb)),
+      App.h('td', { class: `right num ${g.total < 0 ? 'neg' : 'pos'}` },
+        App.fmt.eur(g.total)),
+      App.h('td', {}, choix, saisie),
+      cellule);
+  },
+
   showPreview(res, sourceName) {
     const lines = res.lignes;
     const table = App.h('table', { class: 'table' },
@@ -553,6 +699,9 @@ App.tabs.expenses = {
         App.h('th', { style: 'width:120px' }, 'Détection'))));
     const tbody = App.h('tbody', {});
     table.append(tbody);
+    // Les cellules de chaque rangee, pour qu'une decision de groupe puisse les
+    // mettre a jour sans reconstruire tout le tableau.
+    const rangees = [];
 
     lines.forEach((line) => {
       const check = App.h('input', { type: 'checkbox' });
@@ -560,16 +709,14 @@ App.tabs.expenses = {
       check.addEventListener('change', () => { line.ignore = !check.checked; });
 
       const cat = App.select('c', App.categoriesAll(), line.category);
-      cat.addEventListener('change', () => { line.category = cat.value; });
+      cat.addEventListener('change', () => {
+        line.category = cat.value;
+        line.origine = 'manuel';
+        pastille.replaceChildren(App.tabs.expenses.badgeOrigine(line));
+      });
 
-      // Plus d'origine « transfert » : les motifs de virement sont devenus
-      // des regles ordinaires, et repondent donc « regle » comme les autres.
-      const badge = {
-        regle: ['accent', 'règle'],
-        pret: ['ok', 'prêt détecté'],
-        'mot-cle': ['', 'mot-clé'],
-        defaut: ['', '—'],
-      }[line.origine] || ['', ''];
+      const pastille = App.h('td', {}, App.tabs.expenses.badgeOrigine(line));
+      rangees.push({ cat, pastille });
 
       tbody.append(App.h('tr', {},
         App.h('td', {}, check),
@@ -577,10 +724,7 @@ App.tabs.expenses = {
         App.h('td', {}, App.h('div', { class: 'ell', title: line.description }, line.description)),
         App.h('td', {}, cat),
         App.h('td', { class: `right num ${line.amount < 0 ? 'neg' : 'pos'}` }, App.fmt.eur(line.amount)),
-        App.h('td', {},
-          line.doublon
-            ? App.h('span', { class: 'pill warn' }, 'doublon')
-            : App.h('span', { class: `pill ${badge[0]}` }, badge[1]))));
+        pastille));
     });
 
     const body = App.h('div', {},
@@ -588,6 +732,7 @@ App.tabs.expenses = {
         `${res.total} ligne(s) reconnue(s), ${res.doublons} doublon(s) déjà en base `
         + '(décochés par défaut). Vérifiez les catégories avant de confirmer.'),
       ...(res.avertissements || []).map((w) => App.h('p', { class: 'hint' }, `⚠ ${w}`)),
+      App.tabs.expenses.renderMarchands(res, lines, rangees),
       App.h('div', { class: 'actions', style: 'margin:10px 0' },
         App.h('button', {
           class: 'btn small',

@@ -1414,3 +1414,36 @@ body.privacy .reste-value { filter: blur(10px); user-select: none; }
   .asset-row { grid-template-columns: 1fr 120px; row-gap: 6px; padding-left: var(--space-3); }
   .modal-backdrop { padding: var(--space-4) var(--space-2); }
 }
+
+/* ==========================================================================
+   Marchands regroupés à l'import
+   ========================================================================== */
+
+/* Le bandeau porte la bordure ; les rangées qu'il contient n'en portent
+   aucune, pour rester libres de leurs transitions. */
+.marchands {
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--card-2);
+}
+.marchands-tete {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--space-3); flex-wrap: wrap;
+}
+.marchands .table-wrap { margin-top: var(--space-3); }
+.marchands select { width: 100%; }
+.marchands .pill { margin-top: 4px; }
+
+/* Une catégorie qu'on invente : le champ n'apparaît qu'une fois demandé. */
+.cat-neuve { width: 100%; margin-top: var(--space-2); }
+.cat-neuve[hidden] { display: none; }
+
+/* Une proposition du modèle, par opposition à une consigne : même couleur
+   d'accent, mais en pointillés — provisoire, et corrigeable. */
+.pill.appris {
+  color: var(--info);
+  border: 1px dashed color-mix(in srgb, var(--info) 55%, transparent);
+  background: transparent;
+}

@@ -542,6 +542,46 @@ après les règles écrites à la main, comme avant. Voir
 L'origine annoncée dans la prévisualisation d'import suit : il n'y a plus de
 pastille « virement interne », ces lignes répondent « règle » comme les autres.
 
+### Une décision par marchand, pas une par ligne
+
+La prévisualisation d'un relevé demandait de vérifier deux cents lignes une à
+une. Sur un relevé réel, **quatorze marchands couvrent 153 de ces 192 lignes** :
+répondre une fois par marchand, c'est la différence entre un import qu'on finit
+et un import qu'on abandonne.
+
+Un bandeau les remonte donc en tête, **avant** le tableau des transactions. Il
+n'affiche que ceux qui attendent une décision ; les autres — déjà classés par
+une règle, un mot-clé ou le modèle — se replient derrière une ligne « 11
+marchand(s) déjà classé(s) », consultable mais hors du chemin. Sans ce repli, le
+bandeau repousserait les transactions hors de l'écran, ce qui remplacerait un
+travail fastidieux par un autre.
+
+Répondre pour un marchand **crée une règle**. C'est ce qui fait que la question
+ne sera pas reposée au prochain relevé — et une règle passe devant le modèle,
+comme toute consigne explicite. Le menu propose les catégories existantes plus
+« ＋ Nouvelle catégorie… » : une catégorie inédite est ajoutée à la liste des
+réglages au passage, sans quoi le menu de chaque ligne ne la contiendrait pas et
+le choix serait perdu au premier changement.
+
+### Une pastille qui dit ce qu'elle vaut
+
+Une catégorie posée par une règle est une **consigne** ; une catégorie proposée
+par le modèle est une **hypothèse**. Les afficher pareil reviendrait à demander
+la même confiance aux deux.
+
+| Pastille | Ce qu'elle dit |
+|---|---|
+| `règle` | Votre consigne. Elle passe avant tout le reste. |
+| `prêt détecté` | Rapproché d'une échéance de prêt, sans règle. |
+| `modèle` *(pointillés)* | Une proposition. La confiance exacte est en infobulle. |
+| `mot-clé` | Reconnu par la taxonomie intégrée. |
+| `—` | Rien de sûr : à vous de trancher. |
+
+Les pointillés du modèle reprennent la couleur d'accent, sans en introduire une
+nouvelle : c'est le trait, pas la teinte, qui dit « provisoire ». Corriger une
+ligne à la main la fait passer en « vous » — et cette correction instruit le
+modèle pour le prochain import.
+
 ### Le rôle d'une catégorie, en un tableau
 
 C'étaient **trois listes de cases à cocher empilées** — épargne, charges fixes,
