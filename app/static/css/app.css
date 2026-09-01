@@ -1436,6 +1436,28 @@ body.privacy .reste-value { filter: blur(10px); user-select: none; }
 .marchands select { width: 100%; }
 .marchands .pill { margin-top: 4px; }
 
+/* --- ce qui attend une décision -------------------------------------------
+
+   Vingt-quatre lignes noyées dans deux cents ne se voient pas. Un lisere sur
+   le bord gauche suffit à les retrouver d'un coup d'œil ; il disparaît des
+   qu'une catégorie est posée, si bien que le tableau se vide à mesure du
+   travail fait. */
+.table tbody tr.a-classer > td:first-child {
+  box-shadow: inset 3px 0 0 var(--alerte);
+}
+.table tbody tr.a-classer > td { background: var(--alerte-bg); }
+.table tbody tr[hidden] { display: none; }
+
+.recap {
+  display: flex; align-items: center; gap: var(--space-3);
+  flex-wrap: wrap; margin-bottom: var(--space-3);
+}
+.recap .hint { margin-right: auto; }
+.a-classer-compte { color: var(--alerte); }
+
+/* Le collage remplace le dépôt : l'un ou l'autre, jamais les deux. */
+.depot[hidden] { display: none; }
+
 /* Une catégorie qu'on invente : le champ n'apparaît qu'une fois demandé. */
 .cat-neuve { width: 100%; margin-top: var(--space-2); }
 .cat-neuve[hidden] { display: none; }

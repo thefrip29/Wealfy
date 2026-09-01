@@ -181,6 +181,28 @@ groupe                                       48,20
 """
 
 
+class TestMotsClesLesDeuxTables(unittest.TestCase):
+    """Le signe dit quelle table consulter D'ABORD, pas laquelle consulter tout
+    court."""
+
+    def test_ligne_a_zero_euro_n_est_pas_une_depense(self):
+        """Un interet arrondi a rien vaut 0,00 : il etait cherche parmi les
+        depenses, ou il ne pouvait rien trouver."""
+        self.assertEqual(
+            importer._apply_keywords("Net Interest Paid to Compte", 0.0),
+            "Interets")
+
+    def test_remboursement_garde_la_categorie_de_la_depense(self):
+        """Un avoir Carrefour arrive en credit et reste de l'alimentation."""
+        self.assertEqual(
+            importer._apply_keywords("CARREFOUR CITY", 24.30), "Alimentation")
+
+    def test_le_signe_reste_prioritaire(self):
+        """Un salaire ne doit pas basculer dans une categorie de depense."""
+        self.assertEqual(
+            importer._apply_keywords("VIR SALAIRE MARS", 2100.0), "Salaire")
+
+
 class TestDatesDeReleve(unittest.TestCase):
     """Un relevé ne date pas toujours en chiffres. Sans ces écritures-là, il ne
     présente aucune ligne au lecteur et l'import rend zéro transaction."""

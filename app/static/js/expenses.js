@@ -496,14 +496,24 @@ App.tabs.expenses = {
      Le menu deroulant « Source » a disparu. Il ne servait qu'a etiqueter le
      journal des imports, et le nom du fichier le dit mieux qu'une banque
      choisie dans une liste de quatre. */
+  /* ---------- deposer un releve ----------
+
+     Un seul geste au premier plan : deposer le fichier, qui s'analyse tout
+     seul. Le collage reste possible, mais derriere un bouton — c'est le
+     recours, pas le chemin ordinaire. Et plus de notice explicative : elle
+     decrivait ce que la zone de depot dit deja. */
   openImport() {
     const textarea = App.h('textarea', {
-      name: 'text', rows: 10,
-      placeholder: '… ou collez ici le contenu de votre relevé',
+      name: 'text', rows: 9,
+      placeholder: 'Collez ici le contenu de votre relevé',
     });
+    const zoneTexte = App.h('div', { class: 'field full', hidden: true }, textarea);
     let source = 'Collé';
 
     const analyse = async () => {
+      if (!textarea.value.trim()) {
+        return App.toast('Déposez un fichier, ou collez un relevé.', 'error');
+      }
       try {
         const res = await App.api.post('/api/imports/preview', { text: textarea.value });
         App.tabs.expenses.showPreview(res, source);
@@ -518,22 +528,21 @@ App.tabs.expenses = {
       },
     });
 
+    const bascule = App.h('button', { class: 'btn small' }, 'Coller le texte');
+    bascule.addEventListener('click', () => {
+      const versTexte = zoneTexte.hidden;
+      zoneTexte.hidden = !versTexte;
+      depot.hidden = versTexte;
+      bascule.textContent = versTexte ? 'Déposer un fichier' : 'Coller le texte';
+      if (versTexte) textarea.focus();
+    });
+
     App.modal.open({
       title: 'Importer un relevé',
       wide: true,
       garder: true,
-      body: App.h('div', {},
-        depot,
-        App.h('div', { class: 'field full', style: 'margin-top:14px' },
-          App.h('label', {}, 'Ou coller le contenu'), textarea),
-        App.note('Ce qui est reconnu',
-          App.h('p', {},
-            'Les exports CSV ou TSV de votre banque, et les relevés PDF '
-            + 'téléchargés depuis votre espace client. Le séparateur, les colonnes '
-            + 'et le format des montants sont détectés automatiquement.'),
-          App.h('p', {},
-            'Un PDF scanné ne contient pas de texte, seulement une image : '
-            + 'celui-là ne peut pas être lu.'))),
+      body: App.h('div', {}, depot, zoneTexte,
+        App.h('div', { class: 'actions', style: 'margin-top:12px' }, bascule)),
       footer: [
         App.h('button', { class: 'btn', onclick: () => App.modal.close() }, 'Annuler'),
         App.h('button', { class: 'btn primary', onclick: analyse }, 'Analyser'),
@@ -606,9 +615,6 @@ App.tabs.expenses = {
           : 'Tous les marchands sont classés'),
         App.h('span', { class: 'hint' },
           `${groupes.length} marchand(s) couvrent ${couvert} ligne(s) sur ${lines.length}`)),
-      App.h('p', { class: 'hint' },
-        'Répondre une fois pour un marchand vaut pour toutes ses lignes, '
-        + 'et l’application le retient pour vos prochains relevés.'),
       aFaire.length ? tableau(aFaire) : null,
       classes.length
         ? App.note(`${classes.length} marchand(s) déjà classé(s)`, tableau(classes))
@@ -665,6 +671,7 @@ App.tabs.expenses = {
           }
           r.cat.value = valeur;
           r.pastille.replaceChildren(App.tabs.expenses.badgeOrigine(lines[i]));
+          if (r.maj) r.maj();
         });
 
         g.a_classer = false;
@@ -703,6 +710,12 @@ App.tabs.expenses = {
     // mettre a jour sans reconstruire tout le tableau.
     const rangees = [];
 
+    /* Une ligne que l'application n'a pas su classer est la seule qui coute du
+       temps. Elle se signale donc d'un liseré, et on peut ne voir qu'elles :
+       vingt-quatre lignes noyées dans deux cents ne se voient pas. */
+    const estAClasser = (l) => l.origine === 'defaut';
+    let rafraichir = () => {};
+
     lines.forEach((line) => {
       const check = App.h('input', { type: 'checkbox' });
       check.checked = !line.ignore;
@@ -713,24 +726,55 @@ App.tabs.expenses = {
         line.category = cat.value;
         line.origine = 'manuel';
         pastille.replaceChildren(App.tabs.expenses.badgeOrigine(line));
+        maj();
       });
 
       const pastille = App.h('td', {}, App.tabs.expenses.badgeOrigine(line));
-      rangees.push({ cat, pastille });
-
-      tbody.append(App.h('tr', {},
+      const tr = App.h('tr', {},
         App.h('td', {}, check),
         App.h('td', { class: 'nowrap' }, App.fmt.date(line.date)),
         App.h('td', {}, App.h('div', { class: 'ell', title: line.description }, line.description)),
         App.h('td', {}, cat),
         App.h('td', { class: `right num ${line.amount < 0 ? 'neg' : 'pos'}` }, App.fmt.eur(line.amount)),
-        pastille));
+        pastille);
+
+      const maj = () => {
+        tr.classList.toggle('a-classer', estAClasser(line));
+        rafraichir();
+      };
+      tr.classList.toggle('a-classer', estAClasser(line));
+      rangees.push({ cat, pastille, tr, maj });
+      tbody.append(tr);
     });
 
+    // --- le bandeau de tete : trois chiffres, et un bouton qui sert ---
+    const compteur = App.h('strong', {});
+    const filtrer = App.h('button', { class: 'btn small' }, '');
+    let filtre = false;
+
+    const appliquerFiltre = () => {
+      rangees.forEach((r, i) => { r.tr.hidden = filtre && !estAClasser(lines[i]); });
+      filtrer.textContent = filtre ? 'Voir toutes les lignes' : 'Ne voir que celles-ci';
+    };
+    rafraichir = () => {
+      const n = lines.filter(estAClasser).length;
+      compteur.textContent = n ? `${n} ligne(s) à classer` : 'Tout est classé';
+      compteur.className = n ? 'a-classer-compte' : '';
+      filtrer.hidden = !n;
+      if (!n && filtre) { filtre = false; }
+      appliquerFiltre();
+    };
+    filtrer.addEventListener('click', () => { filtre = !filtre; appliquerFiltre(); });
+
+    const recap = App.h('div', { class: 'recap' },
+      compteur,
+      App.h('span', { class: 'hint' },
+        `${res.total} ligne(s) reconnue(s)`
+        + (res.doublons ? ` · ${res.doublons} doublon(s) déjà en base, décoché(s)` : '')),
+      filtrer);
+
     const body = App.h('div', {},
-      App.h('p', { class: 'hint' },
-        `${res.total} ligne(s) reconnue(s), ${res.doublons} doublon(s) déjà en base `
-        + '(décochés par défaut). Vérifiez les catégories avant de confirmer.'),
+      recap,
       ...(res.avertissements || []).map((w) => App.h('p', { class: 'hint' }, `⚠ ${w}`)),
       App.tabs.expenses.renderMarchands(res, lines, rangees),
       App.h('div', { class: 'actions', style: 'margin:10px 0' },
@@ -748,6 +792,8 @@ App.tabs.expenses = {
         }, 'Tout décocher')),
       App.h('div', { class: 'table-wrap scroll-y' }, table));
 
+    rafraichir();
+
     const confirm = async () => {
       try {
         const out = await App.api.post('/api/imports/confirm', { source: sourceName, lignes: lines });
@@ -756,8 +802,7 @@ App.tabs.expenses = {
         await App.refreshAll();
         // Un virement entre vos comptes n'apparaît qu'une fois les deux relevés
         // importés : c'est donc ici, et nulle part ailleurs, qu'il faut
-        // regarder. Silencieux s'il n'y a rien à proposer — plutôt qu'un
-        // bouton permanent qu'on ne pense jamais à cliquer.
+        // regarder. Silencieux s'il n'y a rien à proposer.
         await App.tabs.expenses.suggestTransfers();
       } catch (e) { App.toast(e.message, 'error'); }
     };

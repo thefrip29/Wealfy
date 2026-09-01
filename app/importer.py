@@ -45,17 +45,22 @@ DEFAULT_KEYWORDS = {
                      "monoprix", "franprix", "casino", "biocoop", "picard", "aldi",
                      "spar", "coop", "tesco", "mercadona", "delhaize", "colruyt",
                      "migros", "seven eleven", "familymart", "indomaret", "alfamart",
-                     "supermarket", "grocery", "epicerie", "primeur"],
+                     "supermarket", "grocery", "epicerie", "primeur",
+                     "super mart", "supermart", "mart", "mini market",
+                     "minimart", "7 eleven", "convenience store"],
     "Restaurants": ["restaurant", "mcdonald", "burger", "uber eats", "deliveroo",
                     "just eat", "boulangerie", "starbucks", "kebab", "sushi", "brasserie",
                     "grabfood", "foodpanda", "doordash", "glovo", "wolt", "subway",
                     "dominos", "pizza", "bistrot", "taverne", "cafeteria", "coffee",
-                    "warung", "trattoria", "creperie"],
+                    "warung", "trattoria", "creperie", "cafe", "noodle", "bakery",
+                    "eatery", "canteen", "grill", "bistro", "resto"],
     "Transport": ["sncf", "ratp", "uber", "total", "totalenergies", "esso", "shell",
                   "bp", "essence", "peage", "vinci autoroute", "blablacar", "parking",
                   "velib", "navigo", "tan", "tcl", "carburant",
                   "grab", "bolt", "gojek", "lyft", "cabify", "freenow", "flixbus",
-                  "redbus", "12go", "taxi", "metro", "tramway", "autocar"],
+                  "redbus", "12go", "taxi", "metro", "tramway", "autocar",
+                  "sixt", "hertz", "europcar", "trainline", "car rental",
+                  "rent a car", "location voiture"],
     "Voyages": ["booking", "airbnb", "ryanair", "easyjet", "air france", "hotel",
                 "agoda", "hostelworld", "expedia", "klook", "getyourguide",
                 "trip com", "hotels com", "wizz air", "transavia", "vueling",
@@ -80,7 +85,9 @@ DEFAULT_KEYWORDS = {
     "Frais bancaires": ["frais bancaire", "cotisation carte", "agios",
                         "commission d intervention", "atm", "cash withdrawal",
                         "retrait dab", "exchange fee", "frais de change",
-                        "bank fee", "service charge"],
+                        "bank fee", "service charge", "plan fee", "account fee",
+                        "card fee", "monthly fee", "annual fee",
+                        "membership fee", "frais de tenue"],
     "Impots": ["dgfip", "impot", "tresor public", "urssaf", "taxe fonciere", "tax office"],
     "Loisirs": ["cinema", "fnac", "decathlon", "steam", "salle de sport", "basic fit",
                 "fitness park", "musee", "concert", "billetterie",
@@ -714,19 +721,26 @@ def _apply_keywords(description, amount):
     """
     text = norm(description)
     jetons = text.split()
-    table = INCOME_KEYWORDS if amount > 0 else DEFAULT_KEYWORDS
-    for category, keywords in table.items():
-        for kw in keywords:
-            mots = norm(kw).split()
-            if not mots:
-                continue
-            if len(mots) > 1:
-                n = len(mots)
-                if any(jetons[i:i + n] == mots
-                       for i in range(len(jetons) - n + 1)):
+    # Le signe dit quelle table consulter D'ABORD, pas laquelle consulter tout
+    # court. Un remboursement « Carrefour » arrive en crédit et reste pourtant de
+    # l'alimentation. Et une ligne à 0,00 € — un intérêt arrondi à rien — n'est
+    # pas un revenu au sens strict : elle était cherchée parmi les dépenses, où
+    # elle ne pouvait rien trouver.
+    tables = ([INCOME_KEYWORDS, DEFAULT_KEYWORDS] if amount > 0
+              else [DEFAULT_KEYWORDS, INCOME_KEYWORDS])
+    for table in tables:
+        for category, keywords in table.items():
+            for kw in keywords:
+                mots = norm(kw).split()
+                if not mots:
+                    continue
+                if len(mots) > 1:
+                    n = len(mots)
+                    if any(jetons[i:i + n] == mots
+                           for i in range(len(jetons) - n + 1)):
+                        return category
+                elif mots[0] in jetons or (len(mots[0]) >= 6 and mots[0] in text):
                     return category
-            elif mots[0] in jetons or (len(mots[0]) >= 6 and mots[0] in text):
-                return category
     return None
 
 

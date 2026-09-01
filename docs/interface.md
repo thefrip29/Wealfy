@@ -542,6 +542,36 @@ après les règles écrites à la main, comme avant. Voir
 L'origine annoncée dans la prévisualisation d'import suit : il n'y a plus de
 pastille « virement interne », ces lignes répondent « règle » comme les autres.
 
+### Ce qui attend une décision se voit
+
+Un marchand récurrent se traite en une fois (section suivante), mais il reste
+toujours des lignes seules — un commerçant local, vu une fois, qu'aucune liste
+de mots-clés ne devinera jamais. Sur le relevé témoin il en reste **24 sur
+192**, et vingt-quatre lignes noyées dans deux cents ne se voient pas.
+
+Trois choses les remontent :
+
+- un **compteur** en tête, dans la couleur d'alerte : « 24 ligne(s) à classer » ;
+- un **lisere** sur le bord gauche de chaque rangée concernée, avec un fond
+  légèrement teinté ;
+- un bouton **« Ne voir que celles-ci »**, qui masque tout le reste.
+
+Le lisere tombe dès qu'une catégorie est posée, et le compteur décroît : sous
+filtre, le tableau se vide à mesure du travail fait, ce qui dit où l'on en est
+sans avoir à compter.
+
+Une ligne « à classer » est une ligne d'origine `defaut` — ni règle, ni prêt,
+ni modèle au-dessus du seuil, ni mot-clé. Le modèle se tait plutôt que
+d'inventer : une ligne à classer se voit et se corrige, une ligne mal classée
+passe inaperçue et fausse les totaux.
+
+### Déposer un relevé
+
+Un seul geste au premier plan : **déposer le fichier**, qui s'analyse tout seul.
+Le collage reste possible derrière un bouton « Coller le texte » — c'est le
+recours, pas le chemin ordinaire. La notice « Ce qui est reconnu » a disparu :
+elle décrivait ce que la zone de dépôt dit déjà en une ligne.
+
 ### Une décision par marchand, pas une par ligne
 
 La prévisualisation d'un relevé demandait de vérifier deux cents lignes une à
