@@ -456,6 +456,26 @@ def build_provider(name=None, api_key=None):
 # Cache
 # ==========================================================================
 
+def rafraichir_taux(provider, codes=None):
+    """Releve le taux du moment pour chaque devise d'affichage. SORT SUR LE RESEAU.
+
+    C'est la requete la moins bavarde de toute l'application : elle envoie une
+    paire de devises et rien d'autre. Ni symbole detenu, ni quantite, ni
+    montant — a la difference d'un rafraichissement de cours, dont les symboles
+    interroges renseignent sur la composition du portefeuille.
+    """
+    sortie = []
+    for code in (codes or DEVISES_AFFICHAGE):
+        try:
+            taux = provider.fx("EUR", code)
+        except Exception:                       # pragma: no cover - reseau
+            taux = None
+        if taux:
+            store_quote(f"FX:EUR{code}", provider.name, date.today(), taux, code)
+        sortie.append(taux_affichage(code))
+    return sortie
+
+
 def taux_affichage(code):
     """Le taux euro -> `code` en cache, avec sa date. Aucun appel réseau.
 
@@ -467,25 +487,30 @@ def taux_affichage(code):
     if code == "EUR":
         return {"code": "EUR", "taux": 1.0, "date": None}
     rows = query(
-        "SELECT price, date FROM quotes WHERE symbol = ? ORDER BY date DESC LIMIT 1",
+        "SELECT price, date, fetched_at FROM quotes WHERE symbol = ? "
+        "ORDER BY date DESC LIMIT 1",
         (f"FX:EUR{code}",),
     )
     for row in rows:
-        return {"code": code, "taux": float(row["price"]), "date": row["date"]}
+        return {"code": code, "taux": float(row["price"]), "date": row["date"],
+                "releve_a": row["fetched_at"], "direct": True}
 
     # A defaut, l'INVERSE du taux deja en cache. La conversion des titres cotes
     # en devise etrangere releve `FX:{code}EUR` depuis toujours : le chiffre est
     # donc la, a l'envers, et attendre un rafraichissement pour le meme
     # renseignement rendait la lecture en dollars indisponible sans raison.
     rows = query(
-        "SELECT price, date FROM quotes WHERE symbol = ? ORDER BY date DESC LIMIT 1",
+        "SELECT price, date, fetched_at FROM quotes WHERE symbol = ? "
+        "ORDER BY date DESC LIMIT 1",
         (f"FX:{code}EUR",),
     )
     for row in rows:
         inverse = float(row["price"])
         if inverse > 0:
-            return {"code": code, "taux": round(1 / inverse, 6), "date": row["date"]}
-    return {"code": code, "taux": None, "date": None}
+            return {"code": code, "taux": round(1 / inverse, 6), "date": row["date"],
+                    "releve_a": row["fetched_at"], "direct": False}
+    return {"code": code, "taux": None, "date": None,
+            "releve_a": None, "direct": False}
 
 
 def store_quote(symbol, source, quote_date, price, currency="EUR"):
@@ -674,13 +699,7 @@ def refresh_quotes(provider=None, crypto_provider=None):
     # portefeuille fait de seuls supports non cotes declencherait un appel
     # reseau pour rien, alors qu'il n'a aucun cours a demander.
     if items or coin_items:
-        for code in DEVISES_AFFICHAGE:
-            try:
-                taux = provider.fx("EUR", code)
-            except Exception:                   # pragma: no cover - reseau
-                taux = None
-            if taux:
-                store_quote(f"FX:EUR{code}", provider.name, date.today(), taux, code)
+        rafraichir_taux(provider)
 
     for ticker in non_mappes:
         errors.append({"cle": ticker,

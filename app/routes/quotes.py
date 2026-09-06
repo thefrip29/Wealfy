@@ -7,9 +7,14 @@ from ._blueprint import bp
 from ._helpers import body, fail
 
 
-# Seul `POST /api/market/refresh` (et les deux routes de test) sortent sur le
-# reseau : c'est le seul acces exterieur de toute l'application. Les routes de
-# lecture de ce module ne touchent que le cache local.
+# Deux routes seulement sortent sur le reseau (avec les deux routes de test) :
+# `POST /api/market/refresh` et `POST /api/fx/refresh`. Toutes les routes de
+# LECTURE de ce module ne touchent que le cache local.
+#
+# La seconde est de loin la moins bavarde : elle envoie une paire de devises,
+# « EUR/USD », et rien d'autre. Les symboles interroges par la premiere
+# renseignent sur la composition du portefeuille ; une paire de devises ne dit
+# rien de personne.
 
 
 @bp.get("/api/market/status")
@@ -51,6 +56,24 @@ def fx_display_rates():
     return jsonify({
         "devises": [market.taux_affichage(c) for c in market.DEVISES_AFFICHAGE],
     })
+
+
+@bp.post("/api/fx/refresh")
+def fx_refresh():
+    """Releve le taux de change du moment.
+
+    Appelee quand on quitte l'euro a l'ecran. L'affichage ne l'attend pas : il
+    bascule avec le dernier taux connu et se corrige si un plus frais arrive,
+    pour qu'un changement de devise ne donne jamais l'impression d'attendre le
+    reseau.
+    """
+    if not get_setting("market_enabled", False):
+        return fail("Les cours de marche sont desactives.", 409)
+    try:
+        provider = market.build_provider()
+    except market.MarketError as exc:
+        return fail(str(exc))
+    return jsonify({"devises": market.rafraichir_taux(provider)})
 
 
 @bp.post("/api/market/refresh")

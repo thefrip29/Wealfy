@@ -17,12 +17,54 @@ App.chargerDevises = async function () {
   try { choisie = localStorage.getItem(App.CLE_DEVISE); } catch (e) { /* ignore */ }
   const dispo = (App.state.devises || []).find((d) => d.code === choisie);
   App.devise = dispo || { code: 'EUR', taux: 1, date: null };
+  // Ouvrir l'application en dollars doit donner un taux du jour, pas celui de
+  // la derniere session. Sans `await` : le premier rendu passe avant.
+  if (App.devise.code !== 'EUR') {
+    App.rafraichirDevises().then((change) => {
+      if (change && App.currentTab === 'wealth') App.tabs.wealth.load();
+    });
+  }
+};
+
+/* Le taux du moment, demande au fournisseur de cours.
+
+   L'affichage ne l'attend JAMAIS : on bascule avec le dernier taux connu, et
+   l'onglet se corrige tout seul si un plus frais arrive. Changer de devise ne
+   doit pas donner l'impression d'attendre le reseau — et sans cours actives,
+   la lecture en dollars continue de fonctionner sur le taux en cache. */
+App.DELAI_TAUX = 60000;
+
+App.rafraichirDevises = async function () {
+  App.state.tauxDemandeA = Date.now();
+  let res;
+  try { res = await App.api.post('/api/fx/refresh', {}); } catch (e) { return false; }
+  const dispos = (res.devises || []).filter((d) => d.taux);
+  if (!dispos.length) return false;
+  const avantTaux = App.devise.taux;
+  App.state.devises = dispos;
+  const frais = dispos.find((d) => d.code === App.devise.code);
+  if (frais) App.devise = frais;
+  return !!frais && frais.taux !== avantTaux;
+};
+
+/* Une garde d'une minute : basculer d'avant en arriere ne doit pas declencher
+   une requete a chaque aller-retour. */
+App.tauxARedemander = function () {
+  return Date.now() - (App.state.tauxDemandeA || 0) > App.DELAI_TAUX;
 };
 
 App.choisirDevise = function (code) {
   const d = (App.state.devises || []).find((x) => x.code === code);
   App.devise = d || { code: 'EUR', taux: 1, date: null };
   try { localStorage.setItem(App.CLE_DEVISE, App.devise.code); } catch (e) { /* ignore */ }
+  if (App.devise.code !== 'EUR' && App.tauxARedemander()) {
+    App.rafraichirDevises().then((change) => {
+      // On ne repeint que si le taux a REELLEMENT bouge : redessiner l'onglet
+      // sous les yeux de l'utilisateur pour un chiffre identique serait une
+      // agitation gratuite.
+      if (change) App.tabs.wealth.load();
+    });
+  }
 };
 
 App.loadMeta = async function () {

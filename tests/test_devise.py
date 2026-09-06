@@ -108,6 +108,33 @@ class TestTauxDAffichage(ApiTestCase):
             market.refresh_quotes(espion)
         self.assertEqual(espion.appels_fx, 0)
 
+    def test_refresh_releve_le_taux_du_moment(self):
+        """La bascule vers le dollar demande un taux frais, sans passer par un
+        rafraichissement complet des cours."""
+        self.enable_market()
+        with self.app.app_context():
+            market.store_quote("FX:EURUSD", "vieux", "2026-08-01", 1.05, "USD")
+        espion = FauxFournisseurFx(taux=1.1234)
+        with self.app.app_context():
+            devises = market.rafraichir_taux(espion)
+        self.assertEqual(espion.appels_fx, 1)
+        self.assertAlmostEqual(devises[0]["taux"], 1.1234, places=4)
+        self.assertTrue(devises[0]["direct"])
+
+    def test_refresh_refuse_si_les_cours_sont_desactives(self):
+        """Aucune sortie reseau tant que l'utilisateur ne l'a pas autorisee,
+        meme pour une simple paire de devises."""
+        res = self.client.post("/api/fx/refresh", json={})
+        self.assertEqual(res.status_code, 409)
+
+    def test_un_taux_indisponible_laisse_le_cache_en_place(self):
+        """Le fournisseur muet ne doit pas effacer ce qu'on savait deja."""
+        self.enable_market()
+        with self.app.app_context():
+            market.store_quote("FX:EURUSD", "faux", "2026-09-01", 1.09, "USD")
+            devises = market.rafraichir_taux(FauxFournisseurFx(taux=None))
+        self.assertAlmostEqual(devises[0]["taux"], 1.09, places=4)
+
     def test_les_montants_de_l_api_restent_en_euros(self):
         """Le point le plus important : la conversion est un habillage.
 

@@ -751,11 +751,29 @@ réécrit donc jamais l'histoire — c'est la propriété que garde
 actions et les cryptos aurait donné un « patrimoine net » mélangeant des euros
 et des dollars, c'est-à-dire un total qui ne veut rien dire.
 
-**Le taux vient du rafraîchissement des cours**, et de nulle part ailleurs.
-`POST /api/market/refresh` est la seule route de toute l'application qui sorte
-sur le réseau, et cette propriété vaut mieux qu'un taux toujours frais : la
-lecture en dollars se contente du dernier taux connu, dont la date s'affiche en
-infobulle du sélecteur. Tant qu'aucun taux n'a été relevé, le sélecteur reste
+**Le taux est celui du moment.** Quitter l'euro déclenche
+`POST /api/fx/refresh`, qui demande le cours au fournisseur configuré (Twelve
+Data en direct, avec repli sur la référence quotidienne de la BCE).
+
+L'affichage ne l'attend jamais : il bascule avec le dernier taux connu, puis se
+corrige tout seul si un plus frais arrive — et seulement si le chiffre a
+réellement bougé, redessiner l'onglet pour une valeur identique n'étant que de
+l'agitation. Une garde d'une minute évite qu'un aller-retour entre les deux
+crans ne déclenche une requête à chaque clic.
+
+C'est la **deuxième et dernière** route qui sorte sur le réseau, et de loin la
+moins bavarde : elle envoie une paire de devises, « EUR/USD », et rien
+d'autre. Là où les symboles interrogés par un rafraîchissement de cours
+renseignent sur la composition du portefeuille, une paire de devises ne dit
+rien de personne. Elle reste néanmoins soumise au réglage **cours de
+marché** : rien ne sort de la machine tant que vous ne l'avez pas autorisé.
+
+Sans réseau, la lecture en dollars continue de fonctionner sur le dernier taux
+en cache, dont la date s'affiche en infobulle du sélecteur. À défaut d'un taux
+`EUR -> USD`, l'**inverse** de `USD -> EUR` est utilisé : ce dernier est relevé
+depuis toujours pour convertir les titres cotés en dollars, et attendre un
+rafraîchissement pour le même renseignement rendait la fonctionnalité
+indisponible sans raison. Tant qu'aucun des deux n'existe, le sélecteur reste
 **masqué** — convertir avec un taux inventé serait pire que ne pas convertir.
 
 Le choix est mémorisé dans le navigateur (`localStorage`), comme le thème, le
