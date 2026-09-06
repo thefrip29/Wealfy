@@ -337,6 +337,42 @@ réglage n'a jamais été fait, on y emmène), ou aucun revenu sur le mois (le r
 ferait chercher un écran qu'on a sous les yeux — d'où `categories_charges_fixes`
 dans `/api/meta`, qui sépare les deux cas.
 
+### Le détecteur d'abonnements
+
+Une carte de l'onglet **Dépenses**, masquée tant qu'aucun prélèvement récurrent
+n'est reconnu. Rien à déclarer : tout se déduit des transactions déjà
+importées (`app/abonnements.py`, `GET /api/subscriptions`, deux ans d'historique).
+
+**Trois signes, et il les faut tous les trois.** Le même marchand revient
+(même racine que le regroupement d'import), l'écart entre deux prélèvements
+est régulier, et le montant ne bouge pas. Le troisième est le plus sûr : un
+restaurant n'additionne jamais deux fois la même note au centime près.
+
+Le risque n'est pas de manquer un abonnement, c'est d'en inventer. Quarante-six
+courses Grab dans un mois reviennent et coûtent, sans être un abonnement ; une
+facture d'électricité au réel est mensuelle sans être à prix fixe. Les deux
+sont écartées, et les tests le vérifient. Les virements entre vos propres
+comptes le sont aussi : un versement mensuel sur un livret est parfaitement
+régulier et parfaitement stable, donc indiscernable d'un abonnement par les
+seuls chiffres — mais cet argent reste chez vous.
+
+Périodicités reconnues : hebdomadaire, mensuelle, bimestrielle, trimestrielle,
+semestrielle, annuelle. La tolérance mensuelle est large à dessein : un
+prélèvement « le 15 » produit des écarts de 28 à 31 jours, qu'un jour ouvré
+décale encore.
+
+**Ce que la carte apporte** n'est pas la liste, que vous connaissez déjà, mais
+les trois choses qu'on ne voit pas :
+
+| | |
+|---|---|
+| Le coût à l'année | Chaque rythme est annualisé, et le total ne compte que les abonnements actifs. |
+| Les hausses de prix | Le dernier montant est comparé au précédent qui en diffère ; l'écart s'affiche en pourcentage. |
+| Ce qui se prélève encore | Rien depuis plus d'une période et demie : la rangée s'éteint et porte « plus prélevé ». Résilié, ou oublié ? |
+
+Les plus chers à l'année passent devant : c'est là qu'une décision rapporte le
+plus. Rien n'est modifié dans vos données : la carte observe, elle n'écrit pas.
+
 ### Des budgets de dépenses
 
 Le patrimoine avait ses cibles, avec l'écart affiché (`repartition_cible`). Les

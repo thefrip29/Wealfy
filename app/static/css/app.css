@@ -1436,6 +1436,11 @@ body.privacy .reste-value { filter: blur(10px); user-select: none; }
 .marchands select { width: 100%; }
 .marchands .pill { margin-top: 4px; }
 
+/* Un abonnement qui ne se prélève plus : la rangée s'efface sans disparaître.
+   C'est justement celle qu'on veut retrouver, pour vérifier la résiliation. */
+.table tbody tr.eteint > td { opacity: .55; }
+.hint.alerte { color: var(--alerte); }
+
 /* --- ce qui attend une décision -------------------------------------------
 
    Vingt-quatre lignes noyées dans deux cents ne se voient pas. Un lisere sur

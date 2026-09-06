@@ -4,16 +4,21 @@ App.tabs.expenses = {
 
   async load() {
     const month = App.state.month;
-    const [flows, txs, imports] = await Promise.all([
+    const [flows, txs, imports, abos] = await Promise.all([
       App.api.get(`/api/month?month=${month}`),
       App.api.get(`/api/transactions?month=${month}`),
       App.api.get('/api/imports'),
+      // Les abonnements ne dependent pas du mois affiche : ils se lisent sur
+      // deux ans. Charges ici pour ne pas ajouter un aller-retour a l'ouverture
+      // de l'onglet.
+      App.api.get('/api/subscriptions').catch(() => null),
     ]);
     App.tabs.expenses.cache = { transactions: txs, month };
     App.el('#ex-month-label').textContent = App.fmt.month(month);
     App.tabs.expenses.renderLastImport(imports);
     App.tabs.expenses.renderKpis(flows);
     App.tabs.expenses.renderBudgets(flows);
+    App.tabs.expenses.renderAbonnements(abos);
     App.tabs.expenses.fillCategoryFilter();
     App.tabs.expenses.renderTable();
     App.tabs.expenses.renderImports(imports);
@@ -46,6 +51,75 @@ App.tabs.expenses = {
       kpi('Épargne', App.fmt.eur(f.epargne),
         f.taux_epargne === null ? null : `taux ${App.fmt.ratio(f.taux_epargne)}`),
     );
+  },
+
+  /* ---------- les prelevements qui reviennent ----------
+
+     Un abonnement ne se declare pas, il se reconnait : le meme marchand, un
+     ecart regulier, un montant qui ne bouge pas. Il faut les trois — un
+     marchand frequente revient et coute lui aussi, sans etre un abonnement.
+
+     Ce que la carte apporte n'est pas la liste, que vous connaissez, mais les
+     trois choses qu'on ne voit pas : le total a l'annee, les prix qui ont
+     augmente sans prevenir, et ce qui se preleve encore alors qu'on croyait
+     avoir resilie. */
+  renderAbonnements(res) {
+    const carte = App.el('#ex-abos-card');
+    if (!res || !res.abonnements || !res.abonnements.length) {
+      carte.hidden = true;
+      return;
+    }
+    carte.hidden = false;
+    App.el('#ex-abos-sub').textContent = res.nb
+      ? `${res.nb} actif(s) · ${App.fmt.eur(res.cout_mensuel)} par mois · `
+        + `${App.fmt.eur(res.cout_annuel)} par an`
+      : 'aucun actif';
+
+    const host = App.el('#ex-abos');
+    App.clear(host);
+
+    if (res.augmentations && res.augmentations.length) {
+      host.append(App.h('p', { class: 'hint alerte' },
+        `⚠ ${res.augmentations.length} prix a augmenté : `
+        + res.augmentations.map((a) => `${a.libelle} +${App.fmt.eur(a.augmentation.hausse)}`).join(', ')));
+    }
+
+    const corps = App.h('tbody', {});
+    res.abonnements.forEach((a) => {
+      const hausse = a.augmentation;
+      corps.append(App.h('tr', { class: a.actif ? '' : 'eteint' },
+        App.h('td', {},
+          App.h('div', { class: 'ell', title: a.libelle }, a.libelle),
+          App.h('div', { class: 'a-meta' },
+            `${a.nb} prélèvement(s) · dernier le ${App.fmt.date(a.dernier)}`)),
+        App.h('td', {}, a.periodicite),
+        App.h('td', { class: 'right num' }, App.fmt.eur(a.montant)),
+        App.h('td', { class: 'right num' }, App.fmt.eur(a.cout_annuel)),
+        App.h('td', { class: 'nowrap' }, a.prochain ? App.fmt.date(a.prochain) : '—'),
+        App.h('td', {},
+          !a.actif
+            ? App.h('span', {
+              class: 'pill warn',
+              title: `Rien depuis ${a.jours_depuis} jours. Résilié, ou oublié ?`,
+            }, 'plus prélevé')
+            : hausse
+              ? App.h('span', {
+                class: 'pill warn',
+                title: `Passé de ${App.fmt.eur(hausse.avant)} à ${App.fmt.eur(hausse.apres)}`,
+              }, `+${hausse.pct} %`)
+              : null)));
+    });
+
+    host.append(App.h('div', { class: 'table-wrap' },
+      App.h('table', { class: 'table' },
+        App.h('thead', {}, App.h('tr', {},
+          App.h('th', {}, 'Libellé'),
+          App.h('th', { style: 'width:110px' }, 'Rythme'),
+          App.h('th', { class: 'right', style: 'width:100px' }, 'Montant'),
+          App.h('th', { class: 'right', style: 'width:110px' }, 'À l’année'),
+          App.h('th', { style: 'width:104px' }, 'Prochain'),
+          App.h('th', { style: 'width:110px' }, ''))),
+        corps)));
   },
 
   /* Consomme sur prevu, par categorie budgetee.
