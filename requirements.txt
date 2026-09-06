@@ -18,4 +18,4 @@ pywebview[gtk]>=6.2 ; sys_platform == "linux"
 pypdf>=5
 
 # Dessin de l'icone applicative, a la construction uniquement.
-pillow>=10
+pillow>=12.3.0
