@@ -8,14 +8,24 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/icon.svg') }}">
 <script>
-  /* Pose le thème avant le premier rendu pour éviter tout flash :
-     choix mémorisé si l'utilisateur en a fait un, réglage système sinon. */
+  /* Thème posé AVANT le premier rendu, pour éviter le flash blanc.
+
+     Trois états, et « système » par défaut. La version précédente n'en avait
+     que deux, et elle GELAIT la préférence système dès le premier lancement :
+     `app.js` appelait `setTheme` au démarrage, or `setTheme` écrit dans le
+     stockage. L'application lisait donc le système une seule fois dans sa vie,
+     puis n'y revenait plus jamais.
+
+     La clé a changé de nom pour cette raison. L'ancienne valeur avait été
+     écrite par ce défaut et non choisie : la reprendre reconduirait le
+     problème, l'abandonner remet tout le monde sur le suivi automatique. */
   (function () {
-    var saved = null;
-    try { saved = localStorage.getItem('patrimoine.theme'); } catch (e) { /* ignore */ }
-    var dark = saved ? saved === 'dark'
+    var choix = null;
+    try { choix = localStorage.getItem('wealfy.theme'); } catch (e) { /* ignore */ }
+    var sombre = choix === 'sombre' ? true
+      : choix === 'clair' ? false
       : window.matchMedia('(prefers-color-scheme: dark)').matches;
-    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme', sombre ? 'dark' : 'light');
   })();
 
   /* Richesse des animations, décidée AVANT le premier rendu — la première
@@ -27,21 +37,19 @@
      du mouvement (déplacements, opacités) est traité par le compositeur et ne
      pèse quasiment rien.
 
-     Choix explicite d'abord, puis estimation d'après la machine. `app.js`
-     mesure ensuite la fluidité réelle et corrige si l'estimation était
-     optimiste. Pour forcer :
-       localStorage.setItem('patrimoine.animations', 'economes')  // ou 'completes' */
+     COMPLET PAR DÉFAUT, économe seulement si l'utilisateur le demande depuis
+     les réglages. La version précédente estimait la puissance de la machine
+     avec `navigator.deviceMemory`, une API que WebKit n'implémente pas : elle
+     valait `undefined`, le repli donnait 4, et le test était `<= 4`. Tout Mac
+     tombait donc en mode économe, un M5 comme le reste, sans aucun moyen d'en
+     sortir.
+
+     `prefers-reduced-motion` reste prioritaire : c'est une préférence système
+     explicite, posée par quelqu'un que le mouvement gêne. */
   (function () {
-    var force = null;
-    try { force = localStorage.getItem('patrimoine.animations'); } catch (e) { /* ignore */ }
-    var econome;
-    if (force === 'economes' || force === 'completes') {
-      econome = force === 'economes';
-    } else {
-      var coeurs = navigator.hardwareConcurrency || 4;
-      var memoire = navigator.deviceMemory || 4;
-      econome = coeurs <= 4 || memoire <= 4;
-    }
+    var choix = null;
+    try { choix = localStorage.getItem('wealfy.animations'); } catch (e) { /* ignore */ }
+    var econome = choix === 'economes';
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) econome = true;
     document.documentElement.setAttribute('data-anim', econome ? 'econome' : 'complet');
   })();
@@ -93,7 +101,8 @@
   <div class="topbar-right">
     <div class="month-picker">
       <button class="icon-btn" id="month-prev" title="Mois précédent">&#8249;</button>
-      <input type="month" id="month-input">
+      <input type="text" id="month-input" readonly autocomplete="off"
+             aria-label="Mois affiché">
       <button class="icon-btn" id="month-next" title="Mois suivant">&#8250;</button>
     </div>
     <button class="icon-btn" id="toggle-privacy"
@@ -106,6 +115,11 @@
 <main>
   <!-- ============ VUE D'ENSEMBLE ============ -->
   <section class="panel active" id="tab-overview">
+    <!-- Base vide : tout le reste du panneau est masqué par la classe
+         `.vide`, et cet accueil prend sa place. Un écran de zéros n'apprend
+         rien et n'indique pas par où commencer. -->
+    <div id="ov-vide"></div>
+
     <!-- Un seul chiffre domine la page : le patrimoine net. -->
     <div class="hero" id="ov-hero"></div>
 
@@ -122,12 +136,27 @@
         <button class="zoom-btn" data-zoom="networth" title="Agrandir" aria-label="Agrandir"></button>
         <div class="chart-wrap"><canvas id="chart-networth"></canvas></div>
         <div class="card-extra" id="extra-networth"></div>
-        <details class="note">
-          <summary>Comment cette courbe est construite</summary>
-          Les points passés sont reconstitués depuis les mouvements et les valorisations
-          datées. Utilisez « Valoriser » sur un actif chaque mois pour obtenir une courbe
-          fidèle plutôt qu'un saut au dernier point.
-        </details>
+      </div>
+      <div class="card">
+        <h3>Répartition du patrimoine <span class="sub" id="ov-pat-total"></span></h3>
+        <button class="zoom-btn" data-zoom="patrimoine" title="Agrandir" aria-label="Agrandir"></button>
+        <div class="chart-wrap"><canvas id="chart-patrimoine"></canvas></div>
+        <div class="card-extra" id="extra-patrimoine"></div>
+      </div>
+    </div>
+
+    <!-- Une seule carte de flux, là où il y en avait deux. « Dépenses — 12
+         mois » et « Dépenses / revenus — 6 mois » traçaient la même grandeur
+         deux fois, dans deux rangées différentes. Les barres donnent les trois
+         flux du mois, le trait la moyenne des douze derniers : la tendance
+         longue devient un repère posé sur le détail court, au lieu d'occuper
+         une carte à elle seule. -->
+    <div class="grid-2">
+      <div class="card">
+        <h3>Dépenses et revenus — 6 mois</h3>
+        <button class="zoom-btn" data-zoom="flux" title="Agrandir" aria-label="Agrandir"></button>
+        <div class="chart-wrap"><canvas id="chart-flux"></canvas></div>
+        <div class="card-extra" id="extra-flux"></div>
       </div>
       <div class="card">
         <h3>Dépenses par catégorie <span class="sub" id="ov-cat-month"></span></h3>
@@ -143,11 +172,13 @@
         <div id="ov-repartition" class="repartition"></div>
         <p class="sub" id="ov-frais" style="margin:12px 0 0"></p>
       </div>
+
+      <!-- Le reste à vivre était calculé, documenté, et affiché nulle part. La
+           colonne « Charge fixe » des réglages n'existe que pour l'alimenter :
+           on cochait des catégories pour nourrir un chiffre invisible. -->
       <div class="card">
-        <h3>Dépenses / revenus — 6 mois</h3>
-        <button class="zoom-btn" data-zoom="flows" title="Agrandir" aria-label="Agrandir"></button>
-        <div class="chart-wrap"><canvas id="chart-flows"></canvas></div>
-        <div class="card-extra" id="extra-flows"></div>
+        <h3>Mon mois <span class="sub" id="ov-mois-label"></span></h3>
+        <div id="ov-mois"></div>
       </div>
     </div>
   </section>
@@ -167,19 +198,38 @@
 
     <div class="kpi-grid" id="ex-kpis"></div>
 
+    <!-- Le patrimoine avait ses cibles avec l'ecart affiche ; les depenses
+         n'avaient rien. Vide et masquee tant qu'aucun budget n'est fixe. -->
+    <div class="card" id="ex-budgets-card" hidden>
+      <div class="card-head">
+        <h3>Budgets <span class="sub" id="ex-budgets-mois"></span></h3>
+      </div>
+      <div id="ex-budgets" class="repartition"></div>
+    </div>
+
     <div class="card">
       <div class="card-head">
         <h3>Transactions <span class="sub" id="ex-month-label"></span></h3>
         <div class="actions">
-          <input type="search" id="ex-search" placeholder="Rechercher…">
+          <input type="search" id="ex-search"
+                 placeholder="Rechercher…  (/)"
+                 title="Libellé, catégorie, montant ou produit rattaché">
           <select id="ex-filter-cat"><option value="">Toutes catégories</option></select>
           <button class="btn" id="ex-add">+ Transaction</button>
         </div>
       </div>
+      <!-- Barre d'actions groupees : elle n'apparait qu'a partir de la premiere
+           ligne cochee. Recategoriser trente lignes se faisait sinon une par
+           une, chacune declenchant sa requete et son rechargement. -->
+      <div class="bulk-bar" id="ex-bulk" hidden></div>
+
       <div class="table-wrap">
         <table class="table" id="ex-table">
           <thead>
             <tr>
+              <th class="center" style="width:34px">
+                <input type="checkbox" id="ex-select-all"
+                       aria-label="Tout selectionner"></th>
               <th style="width:110px">Date</th>
               <th>Libellé</th>
               <th style="width:190px">Catégorie</th>
@@ -229,7 +279,6 @@
       <div class="card-head">
         <h3>Actifs</h3>
         <div class="actions">
-          <label class="checkline"><input type="checkbox" id="we-archived"> Voir archivés</label>
           <span id="we-market-state"></span>
           <button class="btn" id="we-refresh-quotes">Rafraîchir les cours</button>
         </div>
@@ -262,7 +311,6 @@
     <div class="card">
       <div class="card-head">
         <h3>Archive mensuelle</h3>
-        <span class="sub">Recalculée à la volée — aucun snapshot figé</span>
       </div>
       <div class="table-wrap">
         <table class="table" id="hi-archive">
@@ -286,8 +334,13 @@
   </section>
 </main>
 
+<!-- `role`, `aria-modal` et `aria-labelledby` : sans eux, un lecteur d'ecran
+     annonce un groupe anonyme et continue de lire la page derriere, qui est
+     pourtant inatteignable a la souris. Le piege a tabulation vit dans
+     `App.modal.piegerFocus`. -->
 <div class="modal-backdrop" id="modal-backdrop" hidden>
-  <div class="modal" id="modal">
+  <div class="modal" id="modal" role="dialog" aria-modal="true"
+       aria-labelledby="modal-title">
     <div class="modal-head">
       <h2 id="modal-title"></h2>
       <button class="icon-btn" id="modal-close">&times;</button>

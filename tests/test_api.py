@@ -1,4 +1,5 @@
 """Tests de bout en bout : API HTTP + persistance SQLite."""
+import logging
 import os
 import sys
 import tempfile
@@ -379,6 +380,739 @@ class TestImportFlow(ApiTestCase):
         self.assertEqual(len(txs), 1)
 
 
+RELEVE_PDF_TEXTE = """
+Date       Libelle                    Debit      Credit
+03/03/2024 CB CARREFOUR               45,30
+07/03/2024 VIR SALAIRE                           2 450,00
+"""
+
+CSV_SIMPLE = """
+Date;Montant
+Cafe;-2,50
+"""
+
+
+def pypdf_silencieux(test):
+    """pypdf journalise sur stderr quand il refuse un PDF. C'est son travail,
+    mais dans une suite de tests cette ligne ressemble a un echec."""
+    logger = logging.getLogger("pypdf")
+    niveau = logger.level
+    logger.setLevel(logging.CRITICAL)
+    test.addCleanup(logger.setLevel, niveau)
+
+
+class TestDepotDeFichier(ApiTestCase):
+    """Le fichier depose est converti en texte cote serveur, puis rendu a
+    l'utilisateur pour qu'il le VOIE avant analyse : l'extraction d'un PDF est
+    imparfaite par nature."""
+
+    def depose(self, contenu, nom="releve.csv"):
+        import io as _io
+        return self.client.post(
+            "/api/imports/text",
+            data={"fichier": (_io.BytesIO(contenu), nom)},
+            content_type="multipart/form-data",
+        )
+
+    def test_fichier_texte_rendu_tel_quel(self):
+        res = self.depose(CSV_SIMPLE.encode("utf-8"))
+        self.assertEqual(res.status_code, 200)
+        corps = res.get_json()
+        self.assertIn("Cafe", corps["text"])
+        self.assertEqual(corps["nom"], "releve.csv")
+
+    def test_encodage_windows_accepte(self):
+        """Les exports bancaires francais sortent souvent en Windows-1252 :
+        les refuser pour un accent serait absurde."""
+        res = self.depose("Café de la Gare".encode("cp1252"))
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("Café", res.get_json()["text"])
+
+    def test_fichier_vide_refuse(self):
+        self.assertEqual(self.depose(b"   ").status_code, 400)
+
+    def test_sans_fichier_refuse(self):
+        res = self.client.post("/api/imports/text",
+                               data={}, content_type="multipart/form-data")
+        self.assertEqual(res.status_code, 400)
+
+    def test_pdf_illisible_explique_pourquoi(self):
+        pypdf_silencieux(self)
+        res = self.depose(b"%PDF-1.4 pas vraiment un pdf", nom="releve.pdf")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("PDF", res.get_json()["error"])
+
+    def test_releve_aligne_bout_en_bout(self):
+        """Le chemin complet : texte aligne a l'espace, colonnes debit et
+        credit reconnues a leur alignement, puis import reel. Le nom du fichier
+        devient la source du journal — le menu deroulant qui la demandait a
+        disparu de l'interface."""
+        texte = self.depose(RELEVE_PDF_TEXTE.encode("utf-8"),
+                            nom="releve.pdf").get_json()["text"]
+        apercu = self.post("/api/imports/preview", {"text": texte})
+        self.assertEqual(apercu["total"], 2)
+        self.assertEqual(sorted(l["amount"] for l in apercu["lignes"]),
+                         [-45.30, 2450.00])
+        out = self.post("/api/imports/confirm",
+                        {"source": "releve.pdf", "lignes": apercu["lignes"]})
+        self.assertEqual(out["importees"], 2)
+        self.assertEqual(self.get("/api/imports")[0]["source"], "releve.pdf")
+
+
+class TestAccueilBaseVide(ApiTestCase):
+    """Sur une base neuve, la synthese n'a aucun chiffre a montrer : elle
+    affichait un heros a zero, quatre indicateurs vides et deux camemberts
+    « aucun actif », sans dire par ou commencer."""
+
+    def test_base_neuve_signalee_vide(self):
+        self.assertTrue(self.get("/api/overview")["aucune_donnee"])
+
+    def test_un_seul_actif_suffit_a_remplir(self):
+        self.post("/api/assets", {"type": "Livret", "label": "Livret A",
+                                  "valeur_actuelle": 100})
+        self.assertFalse(self.get("/api/overview")["aucune_donnee"])
+
+    def test_une_seule_transaction_suffit_a_remplir(self):
+        self.post("/api/transactions", {"date": "2024-03-01", "amount": -10,
+                                        "description": "Cafe"})
+        self.assertFalse(self.get("/api/overview")["aucune_donnee"])
+
+
+class TestActionsGroupees(ApiTestCase):
+    """Apres un import, reclasser trente lignes se faisait une par une :
+    trente requetes, et un rechargement complet de l'onglet a chaque fois."""
+
+    def trois_lignes(self):
+        ids = []
+        for jour, libelle in ((1, "Cafe"), (2, "Boulangerie"), (3, "Cinema")):
+            res = self.post("/api/transactions", {
+                "date": f"2024-03-0{jour}", "amount": -10, "description": libelle,
+            })
+            ids.append(res["id"])
+        return ids
+
+    def test_recategorise_plusieurs_lignes(self):
+        ids = self.trois_lignes()
+        res = self.post("/api/transactions/categorie",
+                        {"ids": ids[:2], "category": "Loisirs"})
+        self.assertEqual(res["modifiees"], 2)
+        cats = {t["id"]: t["category"]
+                for t in self.get("/api/transactions?month=2024-03")}
+        self.assertEqual(cats[ids[0]], "Loisirs")
+        self.assertEqual(cats[ids[1]], "Loisirs")
+        self.assertNotEqual(cats[ids[2]], "Loisirs")
+
+    def test_supprime_plusieurs_lignes(self):
+        ids = self.trois_lignes()
+        res = self.post("/api/transactions/suppression", {"ids": ids[:2]})
+        self.assertEqual(res["supprimees"], 2)
+        restantes = self.get("/api/transactions?month=2024-03")
+        self.assertEqual([t["id"] for t in restantes], [ids[2]])
+
+    def test_selection_vide_refusee(self):
+        """Sans garde, un UPDATE sans clause `IN` toucherait toute la table."""
+        for url in ("/api/transactions/categorie", "/api/transactions/suppression"):
+            res = self.client.post(url, json={"ids": [], "category": "Loisirs"})
+            self.assertEqual(res.status_code, 400, url)
+
+    def test_categorie_manquante_refusee(self):
+        ids = self.trois_lignes()
+        res = self.client.post("/api/transactions/categorie", json={"ids": ids})
+        self.assertEqual(res.status_code, 400)
+        # Rien n'a bouge.
+        self.assertEqual(len(self.get("/api/transactions?month=2024-03")), 3)
+
+
+class TestEtendueArchive(ApiTestCase):
+    """Un Livret A ouvert en 2003 faisait calculer 275 mois d'archive, dont
+    265 sans la moindre transaction ni le moindre mouvement : 700 ms, et un
+    tableau que personne ne lit. Une archive raconte ce qui s'est passe."""
+
+    def test_ouverture_ancienne_ne_gonfle_pas_l_archive(self):
+        self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A",
+            "date_acquisition": "2003-10-02", "valeur_actuelle": 5000,
+        })
+        self.post("/api/transactions", {
+            "date": "2024-03-01", "amount": -10, "description": "Cafe",
+        })
+        archive = self.get("/api/history")["archive"]
+        # L'archive est rendue du plus recent au plus ancien : c'est sa DERNIERE
+        # ligne qui porte le mois de depart.
+        self.assertEqual(archive[-1]["mois"], "2024-03")
+        # Sans la correction, l'ouverture de 2003 imposait plus de 250 mois.
+        self.assertLess(len(archive), 60)
+
+    def test_un_solde_declare_ancre_l_archive_a_la_saisie(self):
+        """Declarer un produit ancien avec son solde du jour pose une
+        valorisation datee d'aujourd'hui : c'est de ce jour que date la
+        connaissance, pas de l'ouverture du produit."""
+        self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A",
+            "date_acquisition": "2024-01-15", "valeur_actuelle": 5000,
+        })
+        archive = self.get("/api/history")["archive"]
+        self.assertEqual(archive[-1]["mois"], month_key())
+
+    def test_sans_solde_declare_on_retombe_sur_les_ouvertures(self):
+        """Mieux vaut une archive plate qu'une archive vide : sans solde du
+        jour ni mouvement, la date d'ouverture reprend la main."""
+        self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A",
+            "date_acquisition": "2024-01-15", "valeur_acquisition": 5000,
+        })
+        archive = self.get("/api/history")["archive"]
+        self.assertEqual(archive[-1]["mois"], "2024-01")
+
+    def test_base_vide_ne_plante_pas(self):
+        self.assertEqual(self.get("/api/history")["archive"][0]["mois"],
+                         month_key())
+
+
+class TestGainAnnuel(ApiTestCase):
+    """Le gain de l'annee, versements exclus.
+
+    L'indicateur donnait la plus-value CUMULEE depuis l'acquisition de chaque
+    produit : un chiffre sans periode, qui ne bouge presque plus une fois le
+    patrimoine constitue, et qui peut afficher un joli total pendant que
+    l'annee en cours perd de l'argent.
+
+    Les actifs sont crees SANS `valeur_actuelle` : leur valeur est alors
+    reconstituee depuis les valorisations datees, ce qui est le mecanisme
+    qu'on veut eprouver ici.
+    """
+
+    def compte(self, valeur_debut=1200):
+        """Produit acquis 1 000 il y a deux ans, valorise au 31 decembre."""
+        an = date.today().year
+        actif = self.post("/api/assets", {
+            "type": "CompteCourant", "label": "Support",
+            "date_acquisition": f"{an - 2}-01-15", "valeur_acquisition": 1000,
+        })
+        self.post(f"/api/assets/{actif['id']}/valorisation",
+                  {"date": f"{an - 1}-12-31", "valeur": valeur_debut})
+        return actif["id"], an
+
+    def gain(self):
+        return self.get("/api/assets")["gain_annuel"]
+
+    def test_gain_mesure_l_ecart_depuis_le_31_decembre(self):
+        aid, an = self.compte()
+        self.post(f"/api/assets/{aid}/valorisation",
+                  {"date": f"{an}-06-30", "valeur": 1500})
+        g = self.gain()
+        self.assertEqual(g["montant"], 300.0)
+        self.assertEqual(g["annee"], an)
+        self.assertEqual(g["depuis"], f"{an}-01-01")
+
+    def test_un_versement_n_est_pas_un_gain(self):
+        """Le coeur de l'affaire : un euro verse augmente la valeur ET le
+        capital investi. Le compter comme un gain serait se mentir."""
+        aid, an = self.compte()
+        self.post(f"/api/assets/{aid}/movements",
+                  {"date": f"{an}-03-01", "type": "versement", "montant": 500})
+        # 1200 au 31 decembre + 500 verses = 1700 sans le moindre gain.
+        self.post(f"/api/assets/{aid}/valorisation",
+                  {"date": f"{an}-06-30", "valeur": 1700})
+        self.assertEqual(self.gain()["montant"], 0.0)
+
+    def test_gain_par_dessus_un_versement(self):
+        aid, an = self.compte()
+        self.post(f"/api/assets/{aid}/movements",
+                  {"date": f"{an}-03-01", "type": "versement", "montant": 500})
+        self.post(f"/api/assets/{aid}/valorisation",
+                  {"date": f"{an}-06-30", "valeur": 2000})
+        self.assertEqual(self.gain()["montant"], 300.0)
+
+    def test_annee_en_perte(self):
+        aid, an = self.compte()
+        self.post(f"/api/assets/{aid}/valorisation",
+                  {"date": f"{an}-06-30", "valeur": 900})
+        self.assertEqual(self.gain()["montant"], -300.0)
+
+    def test_produit_ouvert_dans_l_annee(self):
+        """Il n'existe pas dans la photo de reference : tout ce qu'il a
+        gagne l'a ete cette annee."""
+        an = date.today().year
+        actif = self.post("/api/assets", {
+            "type": "CompteCourant", "label": "Nouveau",
+            "date_acquisition": f"{an}-02-01", "valeur_acquisition": 1000,
+        })
+        self.post(f"/api/assets/{actif['id']}/valorisation",
+                  {"date": f"{an}-06-30", "valeur": 1150})
+        self.assertEqual(self.gain()["montant"], 150.0)
+
+    def test_base_vide(self):
+        self.assertEqual(self.gain()["montant"], 0.0)
+
+
+class TestResteAVivre(ApiTestCase):
+    """`services.metrics()` produit vingt-deux grandeurs, l'interface en
+    affichait sept. Le reste a vivre avait sa section dans la documentation et
+    n'apparaissait nulle part, alors que la colonne « Charge fixe » des reglages
+    n'existe que pour l'alimenter.
+    """
+
+    def un_mois(self):
+        mois = month_key()
+        self.post("/api/transactions", {
+            "date": mois + "-01", "amount": 2000, "description": "Salaire",
+            "category": "Salaire"})
+        self.post("/api/transactions", {
+            "date": mois + "-05", "amount": -700, "description": "Loyer",
+            "category": "Logement"})
+        self.post("/api/transactions", {
+            "date": mois + "-06", "amount": -100, "description": "Courses",
+            "category": "Alimentation"})
+        return mois
+
+    def metrics(self, mois):
+        return self.get("/api/overview?month=" + mois)["metrics"]
+
+    def test_les_six_grandeurs_sont_exposees(self):
+        m = self.metrics(self.un_mois())
+        for cle in ("reste_a_vivre_mois", "charges_fixes_mois", "part_charges_fixes",
+                    "taux_endettement", "mensualites_mois", "revenus_mois"):
+            self.assertIn(cle, m)
+
+    def test_le_reste_a_vivre_suit_les_charges_fixes(self):
+        """Le lien que l'interface ne montrait pas : cocher une categorie
+        change le chiffre."""
+        mois = self.un_mois()
+        self.client.put("/api/settings", json={"categories_charges_fixes": []})
+        sans = self.metrics(mois)
+        self.assertEqual(sans["charges_fixes_mois"], 0)
+
+        self.client.put("/api/settings", json={"categories_charges_fixes": ["Logement"]})
+        avec = self.metrics(mois)
+        self.assertEqual(avec["charges_fixes_mois"], 700.0)
+        self.assertEqual(avec["reste_a_vivre_mois"], sans["reste_a_vivre_mois"] - 700.0)
+
+
+class TestBudgets(ApiTestCase):
+    """Le patrimoine avait ses cibles avec l'ecart affiche ; les depenses
+    n'avaient ni objectif global ni plafond par categorie."""
+
+    def test_vide_par_defaut(self):
+        self.assertEqual(self.get("/api/meta")["budgets"], {})
+
+    def test_aller_retour_du_reglage(self):
+        self.client.put("/api/settings",
+                        json={"budgets_categories": {"Alimentation": 400}})
+        self.assertEqual(self.get("/api/meta")["budgets"], {"Alimentation": 400})
+        self.assertEqual(
+            self.get("/api/settings")["budgets_categories"], {"Alimentation": 400})
+
+    def test_le_consomme_vient_de_par_categorie(self):
+        """Aucun calcul serveur n'est ajoute : la comparaison se fait sur
+        `par_categorie`, que `month_flows` renvoyait deja."""
+        mois = month_key()
+        self.post("/api/transactions", {
+            "date": mois + "-03", "amount": -450, "description": "Courses",
+            "category": "Alimentation"})
+        flows = self.get("/api/month?month=" + mois)
+        par_cat = {c["category"]: c["montant"] for c in flows["par_categorie"]}
+        self.assertEqual(par_cat["Alimentation"], 450.0)
+
+
+class TestCloture(ApiTestCase):
+    """La colonne `archived`, la route et la pastille existaient ; aucun
+    ecran ne permettait d'archiver quoi que ce soit."""
+
+    def deux_actifs(self):
+        a = self.post("/api/assets", {"type": "Livret", "label": "Ouvert",
+                                      "valeur_actuelle": 1000})
+        b = self.post("/api/assets", {"type": "Livret", "label": "A clore",
+                                      "valeur_actuelle": 500})
+        return a["id"], b["id"]
+
+    def test_un_produit_cloture_sort_du_patrimoine(self):
+        _, bid = self.deux_actifs()
+        self.assertEqual(self.get("/api/assets")["total_actif"], 1500.0)
+        self.client.put("/api/assets/" + bid, json={"archived": True})
+        snap = self.get("/api/assets")
+        self.assertEqual(snap["total_actif"], 1000.0)
+        self.assertEqual(snap["nb_archives"], 1)
+        self.assertNotIn("A clore", [a["label"] for a in snap["assets"]])
+
+    def test_il_reste_consultable(self):
+        _, bid = self.deux_actifs()
+        self.client.put("/api/assets/" + bid, json={"archived": True})
+        tous = self.get("/api/assets?archived=1")
+        self.assertIn("A clore", [a["label"] for a in tous["assets"]])
+
+    def test_rouvrir_le_ramene(self):
+        _, bid = self.deux_actifs()
+        self.client.put("/api/assets/" + bid, json={"archived": True})
+        self.client.put("/api/assets/" + bid, json={"archived": False})
+        snap = self.get("/api/assets")
+        self.assertEqual(snap["total_actif"], 1500.0)
+        self.assertEqual(snap["nb_archives"], 0)
+
+
+class TestFrais(ApiTestCase):
+    """Les frais n'avaient qu'un endroit ou vivre, et il etait global : deux
+    montants tapes a la main pour tout le patrimoine. Rien ne rattachait un
+    courtage au PEA qui l'avait paye.
+
+    Deux ecritures, parce que l'argent ne circule pas pareil. Un courtage ne
+    rentre jamais dans le produit : il part chez le courtier et gonfle le prix
+    de revient. Des frais de gestion, eux, sortent du produit et font baisser
+    sa valeur. Les deux baissent la plus-value du montant du frais.
+    """
+
+    def compte(self):
+        return self.post("/api/assets", {
+            "type": "CTO", "label": "Compte-titres",
+            "date_acquisition": "2024-01-10", "valeur_acquisition": 0,
+        })["id"]
+
+    def fiche(self, aid):
+        return self.get("/api/assets/" + aid)
+
+    def test_un_courtage_gonfle_le_prix_de_revient(self):
+        aid = self.compte()
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "CW8", "quantite": 10, "prix_unitaire": 100, "frais": 5,
+            "date": "2024-02-01",
+        })
+        a = self.fiche(aid)["asset"]
+        self.assertEqual(a["investi"], 1005.0)
+        self.assertEqual(a["valeur"], 1000.0)
+        self.assertEqual(a["plus_value"], -5.0)
+
+    def test_un_frais_autonome_fait_baisser_la_valeur(self):
+        """Et surtout : son montant N'ENTRE PAS dans le capital investi. L'y
+        compter annulerait son effet et le ferait disparaitre des comptes."""
+        aid = self.compte()
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "CW8", "quantite": 10, "prix_unitaire": 100,
+            "date": "2024-02-01",
+        })
+        avant = self.fiche(aid)["asset"]
+        self.post("/api/assets/" + aid + "/movements", {
+            "date": "2024-06-30", "type": "frais", "montant": 12,
+            "note": "Droits de garde",
+        })
+        apres = self.fiche(aid)["asset"]
+        self.assertEqual(apres["investi"], avant["investi"])
+        self.assertEqual(apres["valeur"], avant["valeur"] - 12)
+        self.assertEqual(apres["plus_value"], avant["plus_value"] - 12)
+
+    def test_un_frais_se_voit_meme_sur_un_solde_declare(self):
+        """Pour la date du jour, `asset_value_at` rend `valeur_actuelle` sans
+        regarder les mouvements : un frais y restait invisible."""
+        aid = self.post("/api/assets", {
+            "type": "AssuranceVie", "label": "AV", "valeur_actuelle": 5000,
+        })["id"]
+        avant = self.fiche(aid)["asset"]["valeur"]
+        self.post("/api/assets/" + aid + "/movements", {
+            "date": date.today().isoformat(), "type": "frais", "montant": 42.5,
+        })
+        self.assertEqual(self.fiche(aid)["asset"]["valeur"], round(avant - 42.5, 2))
+
+    def test_le_courtage_entre_dans_le_pru(self):
+        """Sans lui, le PRU affiche serait plus bas que celui du releve de
+        courtier."""
+        aid = self.compte()
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "CW8", "quantite": 10, "prix_unitaire": 100, "frais": 5,
+            "date": "2024-02-01",
+        })
+        lignes = self.get("/api/assets/" + aid + "/positions")["lignes"]
+        self.assertAlmostEqual(lignes[0]["pru"], 100.5, places=4)
+
+    def test_frais_payes_remontes_sur_la_fiche(self):
+        aid = self.compte()
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "CW8", "quantite": 10, "prix_unitaire": 100, "frais": 5,
+            "date": "2024-02-01",
+        })
+        self.post("/api/assets/" + aid + "/movements", {
+            "date": "2024-06-30", "type": "frais", "montant": 12,
+        })
+        self.assertEqual(self.fiche(aid)["frais_payes"], 17.0)
+
+    def test_le_total_annuel_est_calcule_par_produit(self):
+        """Il etait tape a la main pour tout le patrimoine."""
+        aid = self.compte()
+        annee = date.today().year
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "CW8", "quantite": 10, "prix_unitaire": 100, "frais": 7,
+            "date": f"{annee}-02-01",
+        })
+        m = self.get("/api/metrics")
+        self.assertEqual(m["frais_annuels"], 7.0)
+        detail = m["frais_annuels_detail"]
+        self.assertEqual(detail[0]["label"], "Compte-titres")
+        self.assertEqual(detail[0]["payes"], 7.0)
+
+    def test_le_ter_est_estime_et_compte_a_part(self):
+        """Un TER n'est jamais preleve : il est integre au cours et ne sort
+        d'aucun compte. Aucun mouvement ne peut le porter."""
+        annee = date.today().year
+        aid = self.post("/api/assets", {
+            "type": "CTO", "label": "PEA ETF", "valeur_actuelle": 10000,
+            "metadata": {"ter_annuel": 0.2},
+        })["id"]
+        detail = self.get("/api/metrics")["frais_annuels_detail"]
+        ligne = next(f for f in detail if f["asset_id"] == aid)
+        self.assertEqual(ligne["ter_estime"], 20.0)
+        self.assertEqual(ligne["payes"], 0.0)
+
+
+class TestReduireUneQuantite(ApiTestCase):
+    """Une quantite ne pouvait qu'augmenter : l'ecran n'offrait que
+    « + Achat ». Le serveur acceptait pourtant deja un type."""
+
+    def portefeuille(self):
+        aid = self.post("/api/assets", {
+            "type": "Crypto", "label": "Crypto",
+            "date_acquisition": "2024-01-10", "valeur_acquisition": 0,
+        })["id"]
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "bitcoin", "quantite": 0.5, "prix_unitaire": 40000,
+            "date": "2024-02-01",
+        })
+        return aid
+
+    def test_une_vente_reduit_la_quantite(self):
+        aid = self.portefeuille()
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "bitcoin", "quantite": 0.2, "prix_unitaire": 50000,
+            "type": "retrait", "date": "2024-08-01",
+        })
+        ligne = self.get("/api/assets/" + aid + "/positions")["lignes"][0]
+        self.assertAlmostEqual(ligne["quantite"], 0.3, places=8)
+
+    def test_le_pru_ne_bouge_pas_a_la_vente(self):
+        """Convention francaise, deja tenue par `pru_par_ligne`."""
+        aid = self.portefeuille()
+        avant = self.get("/api/assets/" + aid + "/positions")["lignes"][0]["pru"]
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "bitcoin", "quantite": 0.2, "prix_unitaire": 50000,
+            "type": "retrait", "date": "2024-08-01",
+        })
+        apres = self.get("/api/assets/" + aid + "/positions")["lignes"][0]["pru"]
+        self.assertAlmostEqual(avant, apres, places=4)
+
+    def test_des_frais_en_nature_reduisent_la_quantite(self):
+        """Les frais de reseau sont preleves EN crypto : ils reduisent le
+        nombre de jetons, pas seulement un montant en euros."""
+        aid = self.portefeuille()
+        self.post("/api/assets/" + aid + "/movements", {
+            "date": "2024-08-01", "type": "frais", "montant": 3,
+            "ticker": "bitcoin", "quantite": 0.0001,
+        })
+        ligne = self.get("/api/assets/" + aid + "/positions")["lignes"][0]
+        self.assertAlmostEqual(ligne["quantite"], 0.4999, places=8)
+
+
+class TestEchange(ApiTestCase):
+    """Un swap n'est ni un achat ni une vente : aucun euro n'entre ni ne
+    sort du produit, deux lignes changent de taille. Faute de pouvoir
+    l'exprimer, le frais de la plateforme n'avait nulle part ou se poser."""
+
+    def portefeuille(self):
+        aid = self.post("/api/assets", {
+            "type": "Crypto", "label": "Crypto",
+            "date_acquisition": "2026-01-01", "valeur_acquisition": 0,
+        })["id"]
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "ethereum", "quantite": 1, "prix_unitaire": 3000,
+            "date": "2026-01-10",
+        })
+        return aid
+
+    def lignes(self, aid):
+        return {l["ticker"]: l
+                for l in self.get("/api/assets/" + aid + "/positions")["lignes"]}
+
+    def echange(self, aid, **kw):
+        base = {"de": "ethereum", "vers": "solana", "quantite_sortie": 0.5,
+                "quantite_recue": 20, "valeur": 1600, "date": "2026-03-01"}
+        base.update(kw)
+        return self.post("/api/assets/" + aid + "/swap", base)
+
+    def test_les_deux_quantites_bougent(self):
+        aid = self.portefeuille()
+        self.echange(aid)
+        l = self.lignes(aid)
+        self.assertAlmostEqual(l["ethereum"]["quantite"], 0.5, places=8)
+        self.assertAlmostEqual(l["solana"]["quantite"], 20.0, places=8)
+
+    def test_un_echange_ne_change_pas_le_capital_investi(self):
+        """C'est le meme argent qui change de forme. Seuls les frais
+        l'augmentent."""
+        aid = self.portefeuille()
+        avant = self.get("/api/assets/" + aid)["asset"]["investi"]
+        self.echange(aid)
+        self.assertEqual(self.get("/api/assets/" + aid)["asset"]["investi"], avant)
+
+    def test_l_echange_ne_demande_pas_la_valeur(self):
+        """Le prix de revient est simplement transfere : un echange entre
+        cryptos ne realise rien. Demander la valeur, c'etait demander un chiffre
+        que l'application connait deja."""
+        aid = self.portefeuille()
+        self.post("/api/assets/" + aid + "/swap", {
+            "de": "ethereum", "vers": "solana",
+            "quantite_sortie": 0.5, "quantite_recue": 20,
+        })
+        l = self.lignes(aid)
+        # 0,5 ETH a 3 000 = 1 500, repartis sur 20 SOL.
+        self.assertAlmostEqual(l["solana"]["pru"], 75.0, places=4)
+        self.assertEqual(self.get("/api/assets/" + aid)["asset"]["investi"], 3000.0)
+
+    def test_des_frais_en_jetons_ne_demandent_que_la_quantite(self):
+        """Sur une plateforme crypto la commission est prise en jetons. Ce
+        qu'elle valait en euros, c'est ce que ces jetons avaient coute."""
+        aid = self.portefeuille()
+        res = self.post("/api/assets/" + aid + "/frais-en-nature", {
+            "ticker": "ethereum", "quantite": 0.01,
+        })
+        self.assertEqual(res["montant"], 30.0)          # 0,01 x 3 000
+        self.assertAlmostEqual(self.lignes(aid)["ethereum"]["quantite"], 0.99, places=8)
+        self.assertEqual(self.get("/api/assets/" + aid)["frais_payes"], 30.0)
+
+    def test_on_ne_paie_pas_plus_de_frais_qu_on_ne_detient(self):
+        aid = self.portefeuille()
+        res = self.client.post("/api/assets/" + aid + "/frais-en-nature",
+                               json={"ticker": "ethereum", "quantite": 99})
+        self.assertEqual(res.status_code, 400)
+
+    def test_les_frais_gonflent_le_prix_de_revient_de_la_ligne_recue(self):
+        aid = self.portefeuille()
+        self.echange(aid, frais=8)
+        l = self.lignes(aid)
+        # (1 600 + 8) / 20
+        self.assertAlmostEqual(l["solana"]["pru"], 80.4, places=2)
+        self.assertEqual(self.get("/api/assets/" + aid)["frais_payes"], 8.0)
+
+    def test_le_pru_de_la_ligne_cedee_ne_bouge_pas(self):
+        aid = self.portefeuille()
+        avant = self.lignes(aid)["ethereum"]["pru"]
+        self.echange(aid, frais=8)
+        self.assertAlmostEqual(self.lignes(aid)["ethereum"]["pru"], avant, places=4)
+
+    def test_on_ne_cede_pas_plus_qu_on_ne_detient(self):
+        aid = self.portefeuille()
+        res = self.client.post("/api/assets/" + aid + "/swap", json={
+            "de": "ethereum", "vers": "solana", "quantite_sortie": 5,
+            "quantite_recue": 20, "valeur": 1600,
+        })
+        self.assertEqual(res.status_code, 400)
+
+    def test_echanger_une_ligne_contre_elle_meme_est_refuse(self):
+        aid = self.portefeuille()
+        res = self.client.post("/api/assets/" + aid + "/swap", json={
+            "de": "ethereum", "vers": "ethereum", "quantite_sortie": 0.1,
+            "quantite_recue": 0.1, "valeur": 300,
+        })
+        self.assertEqual(res.status_code, 400)
+
+
+class TestFraisPorteParLeBonCote(ApiTestCase):
+    """Un frais en euros doit etre porte par le cote qui peut le porter.
+
+    Une valeur de marche est recalculee a chaque affichage depuis les cours du
+    jour : elle ne garde aucune trace d'un prelevement passe. Un frais de
+    plateforme sur un portefeuille crypto ne changeait donc RIEN — ni la
+    valeur, ni la plus-value.
+    """
+
+    def test_sur_une_valeur_de_marche_le_frais_est_porte_par_l_investi(self):
+        aid = self.post("/api/assets", {
+            "type": "Crypto", "label": "Crypto",
+            "date_acquisition": "2026-01-01", "valeur_acquisition": 0,
+        })["id"]
+        self.post("/api/assets/" + aid + "/positions", {
+            "ticker": "ethereum", "quantite": 1, "prix_unitaire": 3000,
+            "date": "2026-01-10",
+        })
+        avant = self.get("/api/assets/" + aid)["asset"]
+        self.post("/api/assets/" + aid + "/movements", {
+            "date": "2026-02-01", "type": "frais", "montant": 25,
+        })
+        apres = self.get("/api/assets/" + aid)["asset"]
+        self.assertEqual(apres["plus_value"], avant["plus_value"] - 25)
+
+    def test_un_solde_redeclare_ne_compte_pas_le_frais_deux_fois(self):
+        """Le solde que vous declarez apres coup contient deja le frais :
+        le porter aussi sur le capital investi le ferait payer deux fois."""
+        aid = self.post("/api/assets", {
+            "type": "AssuranceVie", "label": "AV",
+            "date_acquisition": "2026-01-01",
+            "valeur_acquisition": 4000, "valeur_actuelle": 5000,
+        })["id"]
+        self.post("/api/assets/" + aid + "/movements", {
+            "date": date.today().isoformat(), "type": "frais", "montant": 42.5,
+        })
+        avec_frais = self.get("/api/assets/" + aid)["asset"]
+        self.assertEqual(avec_frais["valeur"], 4957.5)
+        self.post("/api/assets/" + aid + "/valorisation", {"valeur": 4957.5})
+        apres = self.get("/api/assets/" + aid)["asset"]
+        self.assertEqual(apres["valeur"], 4957.5)
+        self.assertEqual(apres["plus_value"], avec_frais["plus_value"])
+
+
+class TestTauxSansRevenuCredible(ApiTestCase):
+    """Un taux dont le dénominateur n'est pas un revenu crédible n'est pas un
+    taux : c'est du bruit affiché comme un fait.
+
+    Le 1er du mois, le salaire n'est pas encore tombé. Rapporter la mensualité
+    d'un prêt aux quelques centimes d'intérêts déjà crédités affichait un taux
+    d'endettement de plusieurs milliers de pour cent — et un taux d'épargne du
+    même acabit.
+    """
+
+    def test_endettement_ne_s_emballe_pas_sur_un_mois_a_peine_commence(self):
+        self.post("/api/liabilities", {
+            "type": "PretImmobilier", "label": "Pret", "montant_emprunte": 100000,
+            "taux_annuel": 2.0, "duree_mois": 240, "date_debut": "2024-01-01",
+        })
+        # Quatre centimes d'interets, et rien d'autre, pour tout revenu du mois.
+        self.post("/api/transactions", {
+            "date": f"{month_key()}-01", "description": "Interets",
+            "amount": 0.04, "category": "Interets",
+        })
+        m = self.get("/api/overview?month=" + month_key())["metrics"]
+        self.assertGreater(m["mensualites_mois"], 0)
+        self.assertIsNone(m["taux_endettement"])
+        self.assertIsNone(m["part_charges_fixes"])
+
+    def test_taux_epargne_muet_sans_revenu(self):
+        pea = self.post("/api/assets", {
+            "type": "PEA", "label": "PEA", "date_acquisition": "2023-01-01",
+            "valeur_acquisition": 0,
+        })
+        self.post(f"/api/assets/{pea['id']}/movements", {
+            "date": f"{month_key()}-01", "montant": 300, "type": "versement",
+        })
+        self.post("/api/transactions", {
+            "date": f"{month_key()}-01", "description": "Interets",
+            "amount": 0.04, "category": "Interets",
+        })
+        flux = self.get("/api/overview?month=" + month_key())["mois"]
+        self.assertEqual(flux["epargne"], 300.0)
+        self.assertIsNone(flux["taux_epargne"])   # et non 750 000 %
+
+    def test_un_vrai_revenu_donne_bien_un_taux(self):
+        """Le garde-fou ne doit pas faire taire les cas normaux."""
+        self.post("/api/transactions", {
+            "date": f"{month_key()}-01", "description": "Salaire",
+            "amount": 2000, "category": "Salaire",
+        })
+        pea = self.post("/api/assets", {
+            "type": "PEA", "label": "PEA", "date_acquisition": "2023-01-01",
+            "valeur_acquisition": 0,
+        })
+        self.post(f"/api/assets/{pea['id']}/movements", {
+            "date": f"{month_key()}-01", "montant": 400, "type": "versement",
+        })
+        flux = self.get("/api/overview?month=" + month_key())["mois"]
+        self.assertAlmostEqual(flux["taux_epargne"], 0.2, places=6)
+
+
 class TestAnalytics(ApiTestCase):
     def seed(self):
         self.post("/api/assets", {
@@ -390,8 +1124,11 @@ class TestAnalytics(ApiTestCase):
             "valeur_acquisition": 0,
         })
         this_month = month_key()
+        # Le 1er du mois : le patrimoine est value a la date du jour, et un
+        # versement date du 3 n'a pas encore eu lieu. Dater du 1er rend le test
+        # vrai tous les jours du mois plutot que vingt-huit jours sur trente.
         self.post(f"/api/assets/{pea['id']}/movements", {
-            "date": f"{this_month}-03", "montant": 400, "type": "versement",
+            "date": f"{this_month}-01", "montant": 400, "type": "versement",
         })
         self.post("/api/transactions", {
             "date": f"{this_month}-01", "description": "Salaire", "amount": 2000,
@@ -411,8 +1148,30 @@ class TestAnalytics(ApiTestCase):
         self.assertEqual(data["mois"]["epargne"], 400.0)
         self.assertAlmostEqual(data["mois"]["taux_epargne"], 0.2, places=6)
         self.assertEqual(len(data["patrimoine_serie"]), 12)
-        self.assertEqual(len(data["depenses_serie"]), 6)
+        # Douze mois depuis l'ajout de la courbe de depenses ; l'histogramme
+        # des flux n'en affiche que les six derniers, cote interface.
+        self.assertEqual(len(data["depenses_serie"]), 12)
         self.assertEqual(data["metrics"]["patrimoine_net"], 6400.0)
+
+    def test_repartition_par_famille(self):
+        """Le camembert du patrimoine : actifs regroupes par famille."""
+        self.seed()
+        data = self.get(f"/api/overview?month={month_key()}")
+        familles = {f["famille"]: f["montant"] for f in data["patrimoine_par_famille"]}
+        self.assertEqual(familles["Epargne reglementee"], 6000.0)
+        self.assertEqual(familles["Marches financiers"], 400.0)
+        # La plus grosse famille d'abord : le camembert se lit dans cet ordre.
+        self.assertEqual(data["patrimoine_par_famille"][0]["famille"], "Epargne reglementee")
+
+    def test_une_famille_a_zero_ne_fait_pas_de_part(self):
+        """Une part de camembert nulle n'apprend rien et brouille la legende."""
+        self.post("/api/assets", {
+            "type": "CompteCourant", "label": "Compte vide",
+            "date_acquisition": "2023-01-01", "valeur_acquisition": 0,
+            "valeur_actuelle": 0,
+        })
+        data = self.get(f"/api/overview?month={month_key()}")
+        self.assertEqual(data["patrimoine_par_famille"], [])
 
     def test_savings_transfer_is_not_an_expense(self):
         self.post("/api/transactions", {
@@ -511,7 +1270,20 @@ class TestInternalTransfers(ApiTestCase):
         preview = self.post("/api/imports/preview", {"text": text})
         line = preview["lignes"][0]
         self.assertEqual(line["category"], "Transfert interne")
-        self.assertEqual(line["origine"], "transfert")
+        # Depuis la fusion, un motif de virement EST une regle : meme resultat,
+        # mais annonce comme tel, et visible dans le tableau des regles.
+        self.assertEqual(line["origine"], "regle")
+        self.assertIn("revolut", [r["pattern"] for r in self.get("/api/rules")])
+
+    def test_motif_de_virement_supprimable(self):
+        """Ces motifs etaient caches dans un reglage : on ne pouvait ni les
+        voir dans le tableau des regles, ni en retirer un seul."""
+        regle = next(r for r in self.get("/api/rules") if r["pattern"] == "revolut")
+        self.client.delete("/api/rules/" + regle["id"])
+        text = ("Date,Description,Amount" + chr(10)
+                + month_key() + "-10,VIR SEPA VERS REVOLUT,-500.00" + chr(10))
+        preview = self.post("/api/imports/preview", {"text": text})
+        self.assertNotEqual(preview["lignes"][0]["category"], "Transfert interne")
 
     def test_pair_detection_across_two_statements(self):
         month = month_key()
@@ -596,8 +1368,14 @@ class TestSettingsAndRules(ApiTestCase):
         })
         settings = self.get("/api/settings")
         self.assertEqual(settings["repartition_cible"][0]["pct"], 100)
+        # Les frais sont desormais CALCULES depuis les mouvements, produit par
+        # produit. L'ancien reglage global ne se saisit plus, mais ce qu'il
+        # portait deja n'est pas perdu : il est compte a part, sous son nom,
+        # parce qu'on ne sait pas a quel produit l'attribuer.
         m = self.get("/api/metrics")
         self.assertEqual(m["frais_annuels"], 57.0)
+        detail = m["frais_annuels_detail"]
+        self.assertEqual([f["label"] for f in detail], ["Non rattaches (ancien reglage)"])
 
     def test_apply_rules_to_existing_transactions(self):
         self.post("/api/transactions", {

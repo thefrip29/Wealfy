@@ -9,21 +9,289 @@ Faire entrer ses données, et ce que l'application en fait.
 
 ## Import de relevés
 
-Coller le contenu dans *Dépenses → Importer un relevé*. Le séparateur (`,` `;`
-tabulation `|`), les colonnes (FR/EN, montant unique ou débit/crédit séparés) et
-le format des montants (`1 234,56` / `1,234.56` / `(12,00)`) sont détectés
-automatiquement.
+Déposez le fichier dans *Dépenses → Ajouter un relevé*, ou cliquez pour le
+choisir. Il est lu, puis **analysé sans second clic** : il n'y a rien à
+demander de plus. Le collage reste possible dans le champ en dessous, pour un
+extrait pris à la main.
 
-- **Revolut** : export CSV natif, collé tel quel. Les lignes `REVERTED`,
+Le séparateur (`,` `;` tabulation `|`), les colonnes (FR/EN, montant unique ou
+débit/crédit séparés) et le format des montants (`1 234,56` / `1,234.56` /
+`(12,00)`) sont détectés automatiquement. **Il n'y a plus de menu « Source »** :
+il ne servait qu'à étiqueter le journal des imports, et le nom du fichier le dit
+mieux qu'une banque choisie dans une liste de quatre.
+
+- **Revolut** : export CSV natif, déposé tel quel. Les lignes `REVERTED`,
   `DECLINED` ou `PENDING` sont écartées, les frais déduits du montant.
-- **LCL** : pas de parsing PDF dans l'app. Faites extraire le relevé en texte
-  tabulé (une conversation Claude suffit), puis collez-le au même endroit.
+- **LCL et relevés PDF** : le PDF téléchargé depuis votre espace client se
+  dépose directement. Plus de conversion préalable. Un PDF **scanné** ne
+  contient qu'une image et reste illisible — l'application le dit plutôt que de
+  renvoyer une liste vide.
 - **Trade Republic / courtier** : *Patrimoine → fiche du compte → Mes supports →
-  Importer un relevé*. Voir la section dédiée ci-dessous.
+  Importer un relevé*, même zone de dépôt. Voir la section dédiée ci-dessous.
+
+### Relevés sans séparateur
+
+Un relevé imprimé ou extrait d'un PDF n'a aucun séparateur : ses colonnes sont
+alignées à l'espace. `csv.reader` n'y voyait qu'une colonne par ligne et
+renvoyait zéro transaction. Une seconde lecture prend le relais, ligne à ligne.
+Elle ne connaît aucune banque en particulier : elle s'appuie sur ce que tous les
+relevés ont en commun.
+
+**Une date en tête, dans n'importe quelle écriture.** `12/08/2026`, `2026-08-01`,
+`Aug 1, 2026`, `1er août 2026` : les mois en toutes lettres, français comme
+anglais, ouvrent la ligne aussi bien que les chiffres. Sans eux, un relevé
+étranger ne présentait *aucune* ligne au lecteur et l'import entier rendait zéro
+transaction.
+
+**Le solde courant n'est pas le montant de l'opération.** Presque tous les
+relevés impriment un solde *après* le montant. Le lecteur prenait le dernier
+montant de la ligne : sur `Grab €6.94 €241.26`, il enregistrait 241,26 €.
+Silencieusement, et faux partout.
+
+Un solde se trahit tout seul : d'une ligne à la suivante, il varie exactement du
+montant de l'opération. Le lecteur teste cette hypothèse sur tout le relevé et
+l'accepte à la majorité — jamais à l'unanimité, car un relevé qui enchaîne
+plusieurs comptes repart d'un autre solde à chaque section. C'est de
+l'arithmétique : cela vaut pour n'importe quelle banque, dans n'importe quelle
+langue, sans rien savoir de la mise en page.
+
+**Le sens de l'opération, du plus sûr au moins sûr.** Un signe écrit fait foi.
+Sinon, la variation du solde le donne. Sinon seulement, la colonne : les montants
+sont alignés à droite, donc c'est la position de **fin** qui est stable. Et
+quand le solde a tranché la plupart des lignes, il a du même coup montré *où* se
+tiennent les débits et où se tiennent les crédits — les rares lignes qu'il ne
+couvre pas, la première de chaque section, se rangent dans la colonne la plus
+proche. À défaut de tout cela, la ligne est lue comme un débit, et l'application
+le dit plutôt que d'inventer un sens.
+
+**Un libellé trop long passe à la ligne**, et emporte les montants avec lui. La
+ligne suivante n'a pas de date à elle : c'est la suite, pas une opération. Le
+lecteur la raccorde, sur deux lignes au plus. Sans ce raccord, vingt-trois
+opérations sur cent quatre-vingt-dix-sept se perdaient en silence dans le relevé
+qui a servi de témoin.
+
+**Les sections annexes sont écartées.** Un relevé range à part les opérations
+annulées, refusées ou en attente. Elles portent une date et un montant comme les
+autres : rien dans la ligne ne les distingue, seul le titre de la section qui les
+précède le dit. Un titre se reconnaît à ce qu'une ligne d'en-têtes de colonnes le
+suit de près — le squelette commun à tous les relevés, plutôt que le vocabulaire
+d'une banque. Les compter comme des dépenses fausserait les totaux, et la banque
+ne les compte pas dans les siens non plus. Le nombre écarté est annoncé.
+
+Les lignes de solde (« solde précédent », « nouveau solde », « report ») portent
+une date et un montant comme les autres : seul leur libellé les distingue. Elles
+sont écartées, sans quoi tous les totaux seraient faux.
+
+**Ce que vaut cette lecture, mesuré.** Sur un relevé réel de 197 opérations qui
+rendait auparavant *zéro* ligne : 192 opérations lues, 5 écartées à juste titre
+parce qu'annulées, et le montant de **chacune des 192 lignes est d'accord avec la
+variation du solde imprimé par la banque**. Le mouvement net tombe au centime sur
+le récapitulatif du relevé.
+
+La lecture délimitée garde la priorité quand elle aboutit vraiment : c'est elle
+qui distingue débit et crédit sans avoir à deviner. Deux signes la déclarent en
+échec : aucune ligne reconnue, ou des libellés qui commencent eux-mêmes par une
+date — preuve que le découpage n'a rien découpé et que la ligne entière a atterri
+dans une seule cellule.
+
+Le fichier déposé est converti en texte **sur votre machine** (`POST
+/api/imports/text`, aucun appel réseau) et le texte extrait revient dans le
+champ, visible et modifiable : l'extraction d'un PDF est imparfaite par nature,
+la cacher reviendrait à demander une confiance aveugle.
 
 Chaque ligne reçoit un hash `date + montant + libellé normalisé`. Les doublons
 sont signalés et décochés avant confirmation ; un index unique en base bloque
 l'insertion même si on force.
+
+
+## Les frais, rattachés à ce qui les cause
+
+Il n'y avait qu'un réglage **global** : `frais_annuels`, deux montants tapés à
+la main pour tout le patrimoine. Rien ne rattachait un courtage au PEA qui
+l'avait payé, ni un frais de réseau au portefeuille crypto. Le total mélangeait
+des coûts sans rapport, et « combien me coûte ce produit » restait sans réponse.
+
+### Deux écritures, parce que l'argent ne circule pas pareil
+
+| | Effet sur la valeur | Effet sur le capital investi |
+|---|---|---|
+| Colonne `frais` sur un versement / retrait | aucun — cet argent n'est jamais entré dans le produit | **ajouté** |
+| Mouvement de type `frais` | **retiré** — l'argent sort du produit | aucun |
+
+- **Un courtage** part chez le courtier : il ne rentre pas dans le produit, mais
+  il gonfle votre prix de revient. Achat 1 000 € + 5 € → valeur 1 000, investi
+  1 005, plus-value −5.
+- **Des frais de gestion** sortent du produit : sa valeur baisse. Investi
+  inchangé, plus-value −12.
+
+Les deux baissent la plus-value du montant du frais, ce qui est le résultat
+attendu. Ce sont deux écritures, pas deux conventions.
+
+**Le piège** : compter le montant d'un mouvement `frais` dans
+`invested_amount` annulerait son effet et le ferait disparaître des comptes.
+Un test le garde.
+
+### Le courtage entre dans le PRU
+
+C'est la convention française, celle d'une déclaration fiscale — et celle que
+`pru_par_ligne` tenait déjà pour les ventes. Sans lui, le PRU affiché serait
+plus bas que celui de votre relevé de courtier.
+
+### Des frais prélevés en nature
+
+Les frais de réseau d'un envoi crypto sont prélevés **en jetons**. Un mouvement
+`frais` qui porte un ticker et une quantité réduit donc la quantité détenue,
+comme une cession — le PRU ne bouge pas, le prix de revient baisse au prorata.
+
+Un frais **en euros**, lui, ne nomme aucune ligne : il ne doit pas en fabriquer
+une. Sans ce garde-fou, des frais de gestion créaient une ligne « (sans
+ticker) » à zéro part dans la liste des positions.
+
+### Un frais doit se voir
+
+Pour la date du jour, `asset_value_at` rend `valeur_actuelle` telle quelle sans
+regarder les mouvements : le montant déclaré en dernier fait autorité. Un frais
+enregistré ne changeait donc **rien à l'écran**. Enregistrer des frais prélevés
+diminue désormais le solde déclaré du produit — un frais qu'on ne voit pas n'est
+pas comptabilisé.
+
+### Un échange n'est ni un achat ni une vente
+
+Sur une plateforme, échanger de l'ETH contre du SOL ne fait entrer ni sortir le
+moindre euro : **deux lignes changent de taille**. L'opération n'existait pas —
+il fallait la simuler par une vente puis un achat — et le frais de la plateforme
+n'appartenait proprement ni à l'une ni à l'autre.
+
+Le bouton **« ⇄ Échanger »** de chaque ligne écrit **deux mouvements de même
+montant, en sens inverse**. Le capital investi ne bouge donc pas : c'est le même
+argent qui change de forme.
+
+**Trois informations suffisent** : ce qui sort, ce qui entre, combien. Ni la
+valeur en euros, ni les frais ne sont demandés.
+
+- **La valeur se déduit** du prix de revient de la ligne cédée. Un échange entre
+  cryptos ne réalise rien — ni gain ni perte, y compris au sens fiscal français,
+  où seule une sortie vers l'euro compte. Le prix de revient est donc
+  simplement *transféré* : ce que vous aviez payé pour les jetons cédés devient
+  ce que vous avez payé pour ceux reçus.
+- **Les frais sont déjà dedans.** Sur une plateforme, la commission est prise
+  sur les jetons : la quantité que vous avez réellement reçue est nette. La
+  saisir une seconde fois la compterait deux fois.
+
+Le prix de revient de la ligne **cédée** ne change pas : seule la part sortie en
+est retirée, au prorata (convention française).
+
+### Des frais prélevés en jetons
+
+Pour ce qui est prélevé **en plus** — retrait, transfert, commission facturée à
+part — la sortie d'une ligne propose « Frais prélevés » à côté de « Vente » :
+deux gestes qui font la même chose, des jetons partent, et ne diffèrent que par
+ce qu'on reçoit en échange.
+
+Un frais ne demande alors **que la quantité**. Ce qu'elle valait en euros, c'est
+ce que ces jetons avaient coûté — leur prix de revient — et l'application le
+sait déjà. Le demander serait demander un chiffre qu'elle a sous la main.
+
+### Un frais est porté par le côté qui peut le porter
+
+Une **valeur de marché** est recalculée à chaque affichage depuis les cours du
+jour : elle ne garde **aucune trace** d'un prélèvement passé. Enregistrer 25 €
+de frais de plateforme sur un portefeuille crypto ne changeait donc rien — ni la
+valeur, ni la plus-value. Le frais était écrit et sans effet.
+
+| Valeur du produit | Qui porte le frais en euros |
+|---|---|
+| Recalculée au cours du marché ou par indice | le **capital investi** |
+| Déclarée par vous, ou reconstituée depuis les mouvements | la **valeur** |
+
+Les deux font baisser la plus-value du montant du frais. Ce qui les sépare est
+la capacité de la valeur à en garder trace.
+
+**Un solde re-déclaré contient déjà les frais qui l'ont précédé** : les porter
+une seconde fois les ferait payer deux fois. Le partage se fait donc sur l'ordre
+de **saisie**, pas sur la date de l'opération — un frais enregistré après votre
+dernière déclaration est une information nouvelle, même s'il porte une date
+passée. `created_at` ne descend pas sous la seconde : le `rowid`, strictement
+croissant, départage deux écritures rapprochées.
+
+Un frais prélevé **en jetons** n'entre pas dans ce partage : il nomme une ligne,
+en réduit la quantité, et fait donc baisser la valeur tout seul.
+
+### Le TER, qui n'est jamais prélevé
+
+Un TER n'est pas une transaction : il est **intégré au cours** du support et ne
+sort d'aucun compte. Aucun mouvement ne peut le porter.
+
+Il reste donc une **estimation**, saisie en pourcentage sur la fiche du produit
+(`ter_annuel` dans ses `metadata`), appliquée à sa valeur. Elle est rendue à
+part — `ter_estime` — pour ne jamais être confondue avec les frais réellement
+payés.
+
+### Ce que devient l'ancien réglage
+
+Il ne se saisit plus. Ce qu'il portait déjà n'est pas perdu pour autant : il est
+compté sous le nom **« Non rattachés (ancien réglage) »**. On ne sait pas à quel
+produit ces montants appartenaient — c'est précisément le défaut qu'on corrige —
+et leur en inventer un serait pire que de le dire.
+
+`services.frais_par_produit(annee)` rend le détail, `metrics.frais_annuels` le
+total. Il est désormais **calculé**, là où il était tapé.
+
+
+## Vendre, retirer, réduire une quantité
+
+L'écran des positions n'offrait que **« + Achat »** : une quantité ne pouvait
+qu'augmenter. Impossible d'enregistrer une vente, ni des frais de réseau qui
+réduisent réellement le nombre de jetons.
+
+Le manque était **entièrement dans l'écran**. `add_position`
+(`app/routes/positions.py`) acceptait déjà un `type` et gérait le signe du
+montant ; `finance.quantity_held` soustrait depuis toujours toute quantité qui
+n'est pas un versement. Seul le formulaire n'envoyait jamais autre chose.
+
+Chaque ligne porte donc **« − Vendre »** à côté de « + Achat ». Une vente
+supérieure à la quantité détenue est refusée, avec le solde rappelé : sans ce
+contrôle, une faute de frappe produit une quantité négative qui traverse ensuite
+toute la valorisation sans que rien ne l'arrête.
+
+Un support **hors cote** — un fonds euro — se tient en euros et non en parts :
+« vendre une quantité » n'y veut rien dire, le bouton n'y apparaît pas.
+
+
+## Un solde declare est date du jour ou on le declare
+
+Le formulaire demande **« Montant aujourd'hui »** et **« Depuis le »**, en
+invitant à saisir la vraie date d'ouverture. L'application stockait alors le
+couple (2003, 3 985 €), qui affirme que la somme était là dès l'ouverture.
+
+Sur un livret, cela faisait courir les intérêts sur vingt-deux ans. Un Livret A
+ouvert en 2003 et déclaré 3 985 € en 2026 « valait » ainsi 5 798 € au
+31 décembre précédent :
+
+    3 985,01 x 1,017^22,2 = 5 798 €
+
+soit **1 813 € d'intérêts que la banque n'a jamais versés**. Le retour au solde
+réel le lendemain se lisait comme une perte, et le gain de l'année affichait
+− 949 € alors que rien n'avait été perdu.
+
+C'est le symétrique du principe déjà tenu vers l'avant — *on ne fabrique pas de
+performance sur un produit déjà constitué*. La garde manquait vers l'arrière.
+
+**Deux corrections, qui se répondent.**
+
+1. **À la création**, un montant du jour sur un produit ouvert antérieurement
+   pose une **valorisation datée d'aujourd'hui**. Le solde devient un fait daté
+   au lieu d'une affirmation sur le passé. La date d'ouverture reste ce qu'elle
+   est : l'ancienneté du produit, qui compte pour un PEA.
+2. **Avant le premier solde connu**, `valeur_livret` ne compose plus rien. Le
+   montant est reporté tel quel, corrigé des seuls mouvements réels. Plat, parce
+   qu'on ne sait pas — et c'est le seul choix qui n'invente pas de passé.
+
+**Sans aucune valorisation, rien ne change** : la valeur d'acquisition est alors
+bien ce qu'elle dit, un dépôt à cette date, et ses intérêts sont dus. C'est ce
+qui distingue « j'ai déposé 10 000 € en janvier 2024 » de « mon livret ouvert
+en 2024 contient 10 000 € aujourd'hui » : le second passe par le formulaire, qui
+date le solde.
 
 
 ## Déclarer son patrimoine existant
@@ -108,14 +376,26 @@ non plus, mais il **compte comme épargne**. Les deux réglages se règlent dans
 
 ### Deux mécanismes de détection
 
-**1. Mots-clés, à l'import.** `mots_cles_transfert` (par défaut `revolut`,
-`virement interne`, `topup`, `transfert compte`…) est cherché dans le libellé,
-sans casse ni accents. Attrape les deux sens : le `VIR SEPA VERS REVOLUT` côté
-LCL comme le `Top-Up by card` côté Revolut. Vos règles de classification restent
-prioritaires.
+**1. Une règle de classification.** Un motif (`revolut`, `virement interne`,
+`topup`, `transfert compte`…) est cherché dans le libellé, sans casse ni
+accents, et attribue une catégorie marquée « virement interne ». Attrape les
+deux sens : le `VIR SEPA VERS REVOLUT` côté LCL comme le `Top-Up by card` côté
+Revolut.
+
+C'était un réglage séparé, `mots_cles_transfert`, avec son propre écran et son
+propre vocabulaire — alors qu'une règle fait exactement cela : chercher un texte
+dans un libellé pour attribuer une catégorie. **Deux mécanismes pour une seule
+idée.** Les motifs sont donc devenus des règles ordinaires : visibles dans le
+tableau des règles, modifiables et supprimables comme les autres.
+
+Ils portent la priorité **200**, au-dessus de la valeur par défaut de 100 : ils
+passent donc après les règles que vous écrivez, exactement comme les mots-clés
+passaient après elles. Une base existante est convertie au premier démarrage
+(`_fondre_mots_cles_dans_les_regles`, `app/db.py`), une base neuve reçoit les
+mêmes motifs directement en règles.
 
 **2. Rapprochement par paires**, proposé **juste après un import**. Pour les
-libellés opaques que les mots-clés ne peuvent pas attraper (`VIR M SAMUEL 88213`
+libellés opaques qu'aucun motif ne décrit (`VIR M SAMUEL 88213`
 → `Payment from SAMUEL`), on apparie un débit et un crédit de même montant, à
 quelques jours d'écart. Les paires sont proposées avec leur écart de date, à
 cocher avant application — rien n'est reclassé sans votre accord.
@@ -149,12 +429,58 @@ Ordre d'application :
    6 jours de l'échéance théorique, la ligne est classée « Remboursement pret »
    et rattachée au prêt (`liability_id`).
 3. **Virement interne** — voir la section précédente.
-4. **Mots-clés intégrés** — filet de sécurité pour les enseignes courantes.
-5. Sinon « Non categorise ».
+4. **Modèle appris** (`app/classifier.py`), au-dessus d'un seuil de confiance.
+5. **Mots-clés intégrés** — filet de sécurité pour les enseignes courantes.
+6. Sinon « Non categorise ».
+
+L'utilisateur garde le dernier mot : une règle passe toujours devant le modèle.
 
 Les tolérances sont dans les paramètres (`tolerance_mensualite`,
 `tolerance_jours_echeance`). Le bouton *Appliquer aux transactions non
 catégorisées* rejoue les règles sur l'existant.
+
+### Le classifieur local
+
+Les mots-clés intégrés étaient strictement français. Mesurés sur un relevé réel
+de 192 opérations — un compte utilisé à l'étranger — ils en reconnaissaient
+**neuf, soit 5 %**. Deux mécanismes s'ajoutent, et ils ne servent pas au même
+moment.
+
+**Le regroupement par marchand** travaille dès le premier import, sur une base
+vide. Il réduit chaque libellé à sa racine — « Grab* A-9la554nwwmgeav, Jakarta »
+et « Grab* A-9lf26h6gwtxvav » sont le même marchand — puis remonte les racines
+qui reviennent. Sur le relevé témoin : **quatorze marchands couvrant 79 % des
+lignes**. Quatorze décisions au lieu de deux cents, sans qu'aucun modèle n'ait
+rien appris. Accepter une proposition crée une règle ordinaire, qui garde donc
+la priorité sur tout le reste.
+
+**Le modèle** prend le relais ensuite. C'est un bayésien naïf multinomial — la
+technique des filtres anti-spam — écrit à la main, **sans aucune dépendance** :
+ajouter scikit-learn ferait entrer NumPy, et l'exécutable doublerait de taille.
+Il regarde les mots du libellé et les tranches de quatre caractères, ces
+dernières rapprochant « CARREFOUR MKT 1234 » de « CARREFOUR CITY ». Dépenses et
+revenus ont chacun leur modèle : le signe du montant dit lequel interroger.
+
+Il s'entraîne sur vos propres transactions déjà catégorisées, et **la boucle
+d'apprentissage est gratuite** : une correction faite à la main dans le tableau
+des dépenses est déjà enregistrée dans `transactions.category`. Aucune table
+supplémentaire, aucun réglage — corriger une ligne suffit à instruire le prochain
+import. La taxonomie intégrée lui sert d'amorçage, sans quoi il ne saurait rien
+le premier jour, qui est justement celui où l'on importe le plus.
+
+**Le seuil de confiance est ce qui l'empêche d'inventer.** La confiance est
+l'écart entre les deux meilleures hypothèses, ramené au nombre de traits *déjà
+vus* — un trait inconnu compte pareil pour toutes les catégories et ne ferait que
+diluer l'information des autres. En dessous du seuil, le modèle se tait et la
+ligne reste à classer : une ligne « à classer » se voit et se corrige, une ligne
+mal classée passe inaperçue et fausse les totaux. Sans seuil, sur des marchands
+retirés de l'entraînement, il ne tranchait juste que six fois sur dix.
+
+Tout se calcule sur votre machine, sans appel réseau, comme le reste.
+
+**Ce que cela donne, mesuré.** Sur le relevé témoin, qui rendait auparavant zéro
+ligne : 192 opérations lues en 147 ms, **78 % catégorisées automatiquement**, et
+les 22 % restantes ramenées à quatre décisions de groupe.
 
 
 ## Valorisation en direct (cours de marché)
@@ -185,9 +511,10 @@ Trois règles tenues par le code :
 
 | Type | Source | Détail |
 |---|---|---|
-| PEA, CTO, AV, PER | Twelve Data | Σ quantité × cours, ligne par ligne, converti en EUR |
+| PEA, CTO, AV, PER | Twelve Data ou Yahoo | Σ quantité × cours, ligne par ligne, converti en EUR |
+| Support non coté (fonds euro…) | calcul local | capital + intérêts au taux saisi, **sans réseau** |
 | Crypto | CoinGecko | quantité × cours, coté directement en EUR, sans clé |
-| Livret, LDDS, LEP, Livret Jeune, PEL, CEL, dépôt à terme | calcul local | intérêts par quinzaines au taux saisi, **sans réseau ni réglage** |
+| Livret, LDDS, LEP, Livret Jeune, PEL, CEL, dépôt à terme | calcul local | capital, intérêts crédités au 31 décembre, **sans réseau** |
 | Immobilier, SCPI | indice INSEE | réévaluation du prix d'acquisition, ou taux annuel manuel |
 | Tout le reste | saisie manuelle | inchangé |
 
@@ -231,6 +558,60 @@ Les cryptos saisies avant ce changement continuent de fonctionner.
 Le bouton « Saisir un symbole à la main » reste disponible quand vous êtes hors
 ligne ou sans clé API.
 
+### Livrets : le capital, et les intérêts à venir
+
+**La valeur affichée d'un livret est son capital**, celui de votre relevé
+bancaire. Les intérêts de l'année en cours ne sont pas encore acquis : votre
+banque ne les affiche pas, l'application non plus. Ils figurent à côté, sous la
+forme **« +72 € prévus au 31 décembre »**, avec le taux annuel.
+
+Une version précédente ajoutait ces intérêts au capital en continu. L'application
+affichait donc, toute l'année, plus que le relevé — et une « plus-value » sur un
+livret, qui n'en a pas : ce chiffre n'était rien d'autre que les intérêts courus,
+présentés comme un rendement partiel non annualisé.
+
+Le calcul suit la règle française des quinzaines : un versement porte intérêt au
+1er ou au 16 qui suit, un retrait cesse d'en produire au 1er ou au 16 qui
+précède, et **une quinzaine ne paie qu'une fois révolue**. Un livret déclaré
+aujourd'hui vaut donc exactement ce que vous avez saisi, sans un centime de plus.
+
+**La date de crédit se règle** dans *Paramètres → Objectifs et frais → Produits à
+taux*. Le 31 décembre par défaut, ce qui vaut pour le Livret A, le LDDS, le LEP,
+le Livret Jeune, le PEL et le CEL. À changer si vous détenez un dépôt à terme
+qui crédite à sa date anniversaire.
+
+Enfin, **« Valeur aujourd'hui » recale le calcul** : la saisir pose une
+valorisation datée, et les intérêts repartent de là. Auparavant ce champ n'avait
+aucun effet sur un produit à taux, et le montant affiché ignorait ce que vous
+aviez inscrit.
+
+### Ce qu'aucune place ne cote : fonds euro et supports non cotés
+
+Un fonds euro n'a ni ticker, ni ISIN, ni cours : ce n'est pas un instrument
+coté, c'est l'actif général de l'assureur. **Aucune API ne le renverra jamais**,
+et le chercher chez un fournisseur est une impasse. Le bouton
+**« + Support non coté »** de l'onglet *Mes supports* existe pour lui, et pour
+tout ce qui est dans le même cas : SCPI logée en unité de compte, UC introuvable
+chez le fournisseur, support en attente d'arbitrage.
+
+Vous saisissez un nom, un montant, et **un taux annuel facultatif**. Sans taux,
+la valeur reste celle que vous avez inscrite. Avec, les intérêts sont calculés
+au prorata et crédités au 31 décembre — le rythme réel d'un fonds euro, dont la
+participation aux bénéfices tombe une fois l'an, là où un livret réglementé
+compte par quinzaines. Comme pour les livrets, le taux est laissé vide par
+défaut : un taux inventé produirait une valorisation fausse en silence.
+
+Deux conséquences à connaître :
+
+- **Aucun appel réseau** n'est fait pour ces lignes, ni à la saisie ni au
+  rafraîchissement. Elles sont donc saisissables **cours de marché désactivés**,
+  exactement comme les livrets.
+- **Elles ne cassent plus la valorisation de l'enveloppe.** Une ligne sans cours
+  fait normalement retomber tout le compte sur sa valeur saisie — mieux vaut une
+  valeur assumée qu'un total partiel présenté comme complet. Un support non coté
+  n'entre pas dans ce cas : il fournit toujours une valeur, donc une assurance
+  vie « fonds euro + ETF » garde sa valorisation de marché.
+
 ### Vérifier la couverture avant de s'y fier
 
 C'est le point de vigilance du cahier des charges : les offres gratuites
@@ -240,10 +621,10 @@ symbole à la fois, en symbole court puis en ISIN. **À faire pour chacune de vo
 lignes avant de vous fier aux montants affichés.**
 
 > Cette vérification n'a pas pu être faite pendant le développement : elle
-> demande votre clé API. Si Twelve Data ne cote pas vos ETF Euronext, le repli
-> sérieux est Yahoo Finance (excellente couverture `.PA`, sans clé, mais API non
-> officielle) — l'abstraction `Provider` de `app/market.py` rend le basculement
-> peu coûteux.
+> demande votre clé API. Si Twelve Data ne cote pas vos ETF Euronext,
+> **Yahoo Finance est désormais disponible** dans le même écran : bonne
+> couverture `.PA`, aucune clé à saisir, mais API non officielle, susceptible
+> de changer sans préavis. Twelve Data reste le choix par défaut.
 
 Vos mouvements portent souvent un ISIN, que le fournisseur n'accepte pas tel
 quel : la table `securities` fait la correspondance ISIN → symbole, place,

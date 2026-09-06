@@ -1,10 +1,43 @@
 """Import de releves bancaires."""
-from flask import jsonify
+from collections import Counter
 
-from .. import importer, services
+from flask import jsonify, request
+
+from .. import classifier, importer, services
 from ..db import execute, get_setting, new_id, query, rows_to_list
 from ._blueprint import bp
 from ._helpers import as_date, as_float, body, fail
+
+# Un an de releves d'un compte tres actif tient largement dedans. La borne
+# existe pour qu'un fichier depose par erreur ne fasse pas gonfler la memoire.
+TAILLE_MAX = 10 * 1024 * 1024
+
+
+@bp.post("/api/imports/text")
+def import_text():
+    """Texte d'un fichier depose : PDF extrait, sinon decode.
+
+    Renvoie le texte plutot que la previsualisation, pour deux raisons. Le
+    meme point d'entree sert alors aux releves bancaires et aux releves de
+    titres, qui n'ont pas la meme analyse derriere. Et l'utilisateur VOIT ce
+    qui a ete extrait de son PDF, ou l'extraction est imparfaite par nature :
+    il peut le corriger avant d'analyser.
+
+    Aucune ecriture, aucun appel reseau : tout se fait sur la machine.
+    """
+    fichier = request.files.get("fichier")
+    if fichier is None:
+        return fail("Aucun fichier recu.")
+    data = fichier.read(TAILLE_MAX + 1)
+    if len(data) > TAILLE_MAX:
+        return fail("Fichier trop volumineux : 10 Mo au maximum.", 413)
+    try:
+        texte = importer.extract_text(data, fichier.filename or "")
+    except ValueError as exc:
+        return fail(str(exc))
+    if not texte.strip():
+        return fail("Ce fichier est vide.")
+    return jsonify({"text": texte, "nom": fichier.filename or ""})
 
 
 @bp.post("/api/imports/preview")
@@ -15,8 +48,7 @@ def preview_import():
     liabs = services.liabilities_with_summary()
     tol = float(get_setting("tolerance_mensualite", 2.0) or 2.0)
     tol_days = int(get_setting("tolerance_jours_echeance", 6) or 6)
-    mots_transfert = get_setting("mots_cles_transfert", []) or []
-    cat_transfert = (get_setting("categories_transfert", []) or ["Transfert interne"])[0]
+    modele = classifier.modele_entraine()
 
     existing = {r["dedup_hash"] for r in query(
         "SELECT dedup_hash FROM transactions WHERE dedup_hash IS NOT NULL"
@@ -28,8 +60,9 @@ def preview_import():
         seen.add(h)
         if duplicate:
             doublons += 1
-        category, liability_id, origine = importer.classify(
-            line, rules, liabs, tol, tol_days, mots_transfert, cat_transfert
+        category, liability_id, origine, confiance = importer.classify(
+            line, rules, liabs, tol, tol_days,
+            modele, classifier.SEUIL_CONFIANCE,
         )
         out.append({
             **line,
@@ -39,13 +72,39 @@ def preview_import():
             "category": category,
             "liability_id": liability_id,
             "origine": origine,
+            "confiance": round(confiance, 3),
         })
     return jsonify({
         "lignes": out,
         "avertissements": warnings,
         "total": len(out),
         "doublons": doublons,
+        "groupes": _marchands(out),
     })
+
+
+# Les categories fourre-tout : une ligne qui y atterrit n'est pas classee, elle
+# attend une decision.
+A_CLASSER = ("Non categorise", "Autre revenu")
+
+
+def _marchands(lignes):
+    """Les marchands qui reviennent, et ce qu'on propose pour chacun.
+
+    C'est ce qui rend le premier import possible sur une base vide : sur le
+    releve temoin, treize marchands couvraient 79 % des lignes. Treize decisions
+    au lieu de deux cents, sans qu'aucun modele ait rien appris.
+
+    Les groupes qui attendent une decision passent devant : ce sont eux qui
+    coutent du temps a l'utilisateur, pas ceux qui sont deja classes.
+    """
+    groupes = classifier.regrouper(lignes)
+    for g in groupes:
+        comptes = Counter(lignes[i]["category"] for i in g["indices"])
+        g["categorie"] = comptes.most_common(1)[0][0]
+        g["a_classer"] = g["categorie"] in A_CLASSER
+    groupes.sort(key=lambda g: (not g["a_classer"], -g["nb"], g["racine"]))
+    return groupes
 
 
 @bp.post("/api/imports/confirm")

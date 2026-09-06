@@ -5,14 +5,12 @@ App.tabs.wealth = {
   RATE: ['Livret', 'LDDS', 'LEP', 'LivretJeune', 'PEL', 'CEL', 'DepotTerme'],
   openGroups: new Set(),
 
+  /* Ne lit plus le serveur : `App.loadRefs` vient de le faire, a la date
+     d'arret du mois affiche. Les deux memes appels partaient ici une seconde
+     fois apres chaque ecriture. */
   async load() {
-    const archived = App.el('#we-archived').checked ? '1' : '0';
-    const [snap, market] = await Promise.all([
-      App.api.get(`/api/assets?archived=${archived}`),
-      App.api.get('/api/market/status'),
-    ]);
-    App.state.portfolio = snap;
-    App.state.market = market;
+    const snap = App.state.portfolio;
+    const market = App.state.market;
     App.tabs.wealth.renderKpis(snap);
     App.tabs.wealth.renderAssets(snap);
     App.tabs.wealth.renderLiabilities(snap.liabilities);
@@ -60,21 +58,42 @@ App.tabs.wealth = {
     btn.classList.remove('busy');
   },
 
+  /* Patrimoine net, et sa décomposition. Deux cases ne s'affichent que
+     lorsqu'elles ont quelque chose à dire.
+
+     « Capital restant dû » à zéro juste au-dessus d'un tableau qui annonce
+     « Aucun prêt enregistré » n'apprenait rien. Et un gain de marché n'existe
+     pas sur un patrimoine qui n'est fait que de livrets : ceux-ci rapportent
+     des intérêts, affichés ligne par ligne.
+
+     La dernière case a porté le poids de la crypto en sous-titre — sujet sans
+     rapport, et divisé par `patrimoine_net` alors que la condition d'affichage
+     testait `total_actif`, si bien qu'un net nul donnait l'infini. */
   renderKpis(snap) {
     const host = App.el('#we-kpis');
     App.clear(host);
     const kpi = App.tabs.overview.kpi;
-    const crypto = snap.assets.filter((a) => a.type === 'Crypto')
-      .reduce((s, a) => s + a.valeur, 0);
-    const pv = snap.assets.reduce((s, a) => s + a.plus_value, 0);
-    host.append(
+    const gain = snap.gain_annuel || { montant: 0, annee: new Date().getFullYear() };
+    const cotables = snap.assets.some((a) => a.valeur_source !== 'taux');
+    // `.filter(Boolean)` : `Element.append()` transforme un null en texte
+    // « null », contrairement à `App.h` qui filtre ses enfants.
+    host.append(...[
       kpi('Patrimoine net', App.fmt.eur(snap.patrimoine_net)),
       kpi('Total actifs', App.fmt.eur(snap.total_actif), `${snap.assets.length} actif(s)`),
-      kpi('Capital restant dû', App.fmt.eur(snap.total_passif), `${snap.liabilities.length} prêt(s)`),
-      kpi('Plus-value latente', App.fmt.signed(pv),
-        snap.total_actif ? `crypto : ${App.fmt.pct(100 * crypto / snap.patrimoine_net)} du net` : null,
-        pv >= 0 ? 'good' : 'bad'),
-    );
+      snap.liabilities.length
+        ? kpi('Capital restant dû', App.fmt.eur(snap.total_passif),
+          `${snap.liabilities.length} prêt(s)`)
+        : null,
+      // C'était la plus-value CUMULÉE depuis l'acquisition de chaque produit :
+      // un chiffre sans période, qui ne bouge presque plus une fois le
+      // patrimoine constitué. C'est maintenant le gain de l'année en cours,
+      // versements exclus — voir `services.gain_annuel`.
+      cotables
+        ? kpi(`Gain ${gain.annee}`, App.fmt.signed(gain.montant),
+          `depuis le 1er janvier ${gain.annee}`,
+          gain.montant >= 0 ? 'good' : 'bad')
+        : null,
+    ].filter(Boolean));
   },
 
   renderAssets(snap) {
@@ -129,33 +148,127 @@ App.tabs.wealth = {
           App.h('div', { class: 'right' },
             App.h('div', { class: 'num' }, App.fmt.eur(a.valeur)),
             App.tabs.wealth.sourceBadge(a)),
-          App.h('div', { class: `right num ${pvClass}` },
-            App.fmt.signed(a.plus_value),
-            a.plus_value_pct !== null
-              ? App.h('div', { class: 'a-meta' }, App.fmt.ratio(a.plus_value_pct)) : null),
-          App.h('div', { class: 'right sub' }, `investi ${App.fmt.eur(a.investi, true)}`),
+          App.tabs.wealth.gainCell(a, pvClass),
           App.h('div', { class: 'right' },
             App.h('button', {
               class: 'btn small',
               onclick: () => App.tabs.wealth.openAssetDetail(a.id),
-            }, 'Détail'))));
+            }, 'Détail')),
+          // La part se lisait uniquement en chiffres, à comparer de tête.
+          //
+          // Seul dans sa famille, un produit en fait 100 % : le filet serait
+          // plein et ne dirait rien. Il faut au moins deux lignes pour qu'une
+          // proportion se compare.
+          assets.length > 1 && total > 0
+            ? App.h('div', { class: 'part-bar' },
+              App.h('span', { style: `width:${Math.min(100, 100 * a.valeur / total)}%` }))
+            : null));
       }
       group.append(bodyNode);
       host.append(group);
     }
+    App.tabs.wealth.renderArchives(host, snap);
+  },
+
+  /* Les produits clôturés, à la demande.
+
+     Ils ne comptent pas dans le patrimoine — l'appel principal les exclut — et
+     le dire ici évite de faire chercher une erreur de total. Ils ne sont
+     chargés que si on les demande : un second appel, jamais au premier rendu.
+
+     `nb_archives` vient de `services.portfolio()`, qui le déduit de son cache
+     sans lecture supplémentaire. */
+  archivesOuvertes: false,
+
+  async renderArchives(host, snap) {
+    if (!snap.nb_archives) return;
+    const n = snap.nb_archives;
+    const bloc = App.h('div', { class: 'archives' });
+    host.append(bloc);
+
+    const lien = App.h('button', {
+      class: 'btn small',
+      onclick: async () => {
+        App.tabs.wealth.archivesOuvertes = !App.tabs.wealth.archivesOuvertes;
+        await App.tabs.wealth.peindreArchives(bloc, lien, n);
+      },
+    });
+    bloc.append(App.h('div', { class: 'archives-tete' },
+      App.h('span', { class: 'sub' },
+        `${n} produit(s) clôturé(s), hors du patrimoine`),
+      lien));
+    await App.tabs.wealth.peindreArchives(bloc, lien, n);
+  },
+
+  async peindreArchives(bloc, lien, n) {
+    App.els('.archives-liste', bloc).forEach((el) => el.remove());
+    lien.textContent = App.tabs.wealth.archivesOuvertes ? 'Masquer' : 'Afficher';
+    if (!App.tabs.wealth.archivesOuvertes) return;
+
+    let tous;
+    try {
+      tous = await App.api.get(
+        `/api/assets?archived=1&date=${App.monthAsOf(App.state.month)}`);
+    } catch (e) { return App.toast(e.message, 'error'); }
+
+    const liste = App.h('div', { class: 'archives-liste' });
+    for (const a of tous.assets.filter((x) => x.archived)) {
+      liste.append(App.h('div', { class: 'asset-row' },
+        App.h('div', {},
+          App.h('div', { class: 'a-name' }, a.label),
+          App.h('div', { class: 'a-meta' },
+            `${a.type} · clôturé, ne compte pas dans le total`)),
+        App.h('div', { class: 'right num' }, App.fmt.eur(a.valeur)),
+        App.h('div', {}),
+        App.h('div', { class: 'right' },
+          App.h('button', {
+            class: 'btn small',
+            onclick: () => App.tabs.wealth.openAssetDetail(a.id),
+          }, 'Détail'))));
+    }
+    bloc.append(liste);
+  },
+
+  /* Colonne de droite : plus-value pour un actif coté, intérêts pour un
+     produit à taux.
+
+     Un livret n'a pas de plus-value. Ce qui s'y affichait — la valeur moins le
+     capital investi, en euros et en pourcentage — n'était que les intérêts
+     courus présentés comme un rendement partiel non annualisé : un « +0,1 % »
+     que rien ne permettait d'interpréter. Le taux annuel, lui, dit quelque
+     chose. */
+  gainCell(a, pvClass) {
+    if (a.valeur_source === 'taux') {
+      const prevus = a.interets_prevus || 0;
+      return App.h('div', { class: `right num ${prevus > 0 ? 'pos' : 'muted'}` },
+        prevus ? App.fmt.signed(prevus) : '—',
+        App.h('div', { class: 'a-meta' },
+          prevus ? `prévus au ${App.fmt.jourMois(a.date_credit)}` : 'aucun intérêt'),
+        a.taux_annuel
+          ? App.h('div', { class: 'a-meta' }, `${App.fmt.num(a.taux_annuel, 2)} %/an`) : null);
+    }
+    return App.h('div', { class: `right num ${pvClass}` },
+      App.fmt.signed(a.plus_value),
+      a.plus_value_pct !== null
+        ? App.h('div', { class: 'a-meta' }, App.fmt.ratio(a.plus_value_pct)) : null);
   },
 
   /* D'où vient la valeur affichée : cours de marché, taux, indice, ou saisie. */
   sourceBadge(asset) {
     const map = {
       marche: ['live', 'cours de marché'],
-      taux: ['ok', 'intérêts calculés'],
+      // « intérêts calculés » laissait croire que les intérêts de l'année
+      // étaient dans le chiffre. C'est le capital, celui du relevé bancaire.
+      taux: ['ok', 'capital'],
       indice: ['accent', 'estimation indicielle'],
     };
     const badge = map[asset.valeur_source];
     if (!badge) return null;
-    const title = asset.valeur_saisie !== undefined && asset.valeur_saisie !== null
-      ? `Valeur saisie : ${App.fmt.eur(asset.valeur_saisie)}` : '';
+    const title = asset.valeur_source === 'taux'
+      ? 'Capital, intérêts des années passées inclus. Ceux de l’année en cours '
+        + 'seront crédités à l’échéance.'
+      : (asset.valeur_saisie !== undefined && asset.valeur_saisie !== null
+        ? `Valeur saisie : ${App.fmt.eur(asset.valeur_saisie)}` : '');
     return App.h('div', { class: 'a-meta' },
       App.h('span', { class: `pill ${badge[0]}`, title }, badge[1]));
   },
@@ -235,15 +348,26 @@ App.tabs.wealth = {
           App.h('div', { class: 'a-meta' },
             App.h('code', {}, ligne.ticker),
             ligne.symbole && ligne.symbole !== ligne.ticker ? ` · ${ligne.symbole}` : '')),
-        App.h('td', { class: 'right num' }, App.fmt.num(ligne.quantite, 6)),
+        // Un fonds euro se tient en euros, pas en parts : afficher « 0 » ferait
+        // croire à une ligne vide.
+        App.h('td', { class: 'right num' },
+          ligne.kind === 'non_cote' ? '—' : App.fmt.num(ligne.quantite, 6)),
         App.h('td', { class: 'right num' },
           ligne.pru == null ? '—' : App.fmt.eur(ligne.pru)),
         App.h('td', { class: 'right num' },
-          ligne.cours == null
-            ? App.h('span', { class: 'pill warn' }, 'non coté')
-            : App.fmt.eur(ligne.cours),
-          ligne.cours_date
-            ? App.h('div', { class: 'a-meta' }, App.fmt.date(ligne.cours_date)) : null),
+          // Un support hors cote n'est pas un cours manquant : c'est une ligne
+          // qui n'a jamais eu vocation à être cotée. La pastille d'alerte
+          // laissait croire à une configuration ratée.
+          ligne.kind === 'non_cote'
+            ? App.h('span', { class: 'pill' }, 'hors cote')
+            : (ligne.cours == null
+              ? App.h('span', { class: 'pill warn' }, 'non coté')
+              : App.fmt.eur(ligne.cours)),
+          ligne.kind === 'non_cote'
+            ? App.h('div', { class: 'a-meta' }, ligne.taux_annuel
+              ? `${App.fmt.num(ligne.taux_annuel, 2)} %/an` : 'valeur saisie')
+            : (ligne.cours_date
+              ? App.h('div', { class: 'a-meta' }, App.fmt.date(ligne.cours_date)) : null)),
         App.h('td', { class: 'right num' },
           ligne.valeur == null ? '—' : App.fmt.eur(ligne.valeur)),
         App.h('td', {
@@ -251,19 +375,40 @@ App.tabs.wealth = {
         }, gain == null ? '—' : App.fmt.signed(gain),
           ligne.ecart_pru_pct == null ? null
             : App.h('div', { class: 'a-meta' }, App.fmt.pct(ligne.ecart_pru_pct, 2))),
-        App.h('td', { class: 'right' },
+        // Une quantite ne pouvait qu'augmenter : il n'y avait que « + Achat ».
+        // Le serveur acceptait pourtant deja un `type` (`add_position`), et
+        // `finance.quantity_held` soustrait deja tout ce qui n'est pas un
+        // versement. Seul le formulaire n'envoyait jamais autre chose.
+        App.h('td', { class: 'right nowrap' },
           App.h('button', {
             class: 'btn small',
             title: `Ajouter un ${kind === 'crypto' ? 'achat' : 'versement'} sur cette ${mot}`,
             onclick: () => App.tabs.wealth.openPositionForm(asset, host, {
               ticker: ligne.ticker, symbol: ligne.symbole, label: ligne.libelle,
             }),
-          }, '+ Achat'))));
+          }, '+ Achat'),
+          ' ',
+          // Un support hors cote se tient en euros, pas en parts : « vendre une
+          // quantite » n'y veut rien dire.
+          ligne.kind === 'non_cote' ? null : App.h('button', {
+            class: 'btn small',
+            title: `Vendre, ou passer des frais preleves sur cette ${mot}`,
+            onclick: () => App.tabs.wealth.openSortieForm(asset, host, ligne),
+          }, '\u2212 Sortie'),
+          ' ',
+          // Un echange n'est ni un achat ni une vente : aucun euro n'entre ni
+          // ne sort, deux lignes changent de taille. Faute de pouvoir
+          // l'exprimer, le frais de la plateforme n'avait nulle part ou se
+          // poser — c'est ce qui manquait.
+          ligne.kind === 'non_cote' ? null : App.h('button', {
+            class: 'btn small',
+            title: 'Echanger cette ligne contre une autre',
+            onclick: () => App.tabs.wealth.openSwapForm(asset, host, ligne),
+          }, '\u21c4 \u00c9changer'))));
     }
 
     // Chiffres de synthèse en tête : ils occupaient auparavant deux onglets
     // séparés (« Résumé » et « PRU & TRI ») pour les mêmes lignes.
-    const resume = App.h('div', { class: 'metric-list' });
     const rows = [
       ['Capital investi', App.fmt.eur(positions.investi_total)],
       ['Valeur de marché', positions.valeur_totale == null
@@ -278,10 +423,7 @@ App.tabs.wealth = {
     if (marche.tri_pct != null) {
       rows.push(['TRI annualisé', App.fmt.pct(marche.tri_pct, 2)]);
     }
-    for (const [l, v] of rows) {
-      resume.append(App.h('div', { class: 'metric-row' },
-        App.h('span', { class: 'm-label' }, l), App.h('span', { class: 'm-value' }, v)));
-    }
+    const resume = App.metricList(rows);
 
     const benchHost = App.h('div', {});
     const loadBenchmark = async (btn) => {
@@ -314,19 +456,35 @@ App.tabs.wealth = {
             App.h('th', { class: 'right' }, 'Gain'),
             App.h('th', {}))),
           tbody)),
-      App.h('div', { class: 'actions', style: 'margin-top:14px' },
+      // Un seul bouton plein. Il y en avait quatre côte à côte pour un même
+      // but — ajouter une ligne — et rien ne disait lequel prendre. Les trois
+      // autres sont des cas particuliers : ils se replient, comme tout le
+      // secondaire ailleurs dans l'application.
+      // Liste vide : l'appel à l'action est déjà dans le tableau, à la place
+      // des lignes absentes. Le répéter juste en dessous ferait deux boutons
+      // identiques à trois centimètres l'un de l'autre.
+      positions.lignes.length ? App.h('div', { class: 'actions', style: 'margin-top:14px' },
         App.h('button', {
           class: 'btn primary',
           onclick: () => App.tabs.wealth.openInstrumentSearch(asset, host),
-        }, kind === 'crypto' ? '+ Ajouter une crypto' : '+ Ajouter un support'),
-        App.h('button', {
-          class: 'btn',
-          onclick: () => App.tabs.wealth.openMovementImport(asset),
-        }, 'Importer un relevé'),
-        App.h('button', {
-          class: 'btn',
-          onclick: () => App.tabs.wealth.openPositionForm(asset, host, null),
-        }, 'Saisir un symbole à la main')),
+        }, kind === 'crypto' ? '+ Ajouter une crypto' : '+ Ajouter un support')) : null,
+      App.note('Autres façons d’ajouter une ligne',
+        App.h('div', { class: 'actions', style: 'margin-top:8px' },
+          // Aucune place ne cote un fonds euro : c'est l'actif général de
+          // l'assureur. Il ne peut donc pas venir d'une recherche — et ne
+          // touche jamais au réseau.
+          kind === 'crypto' ? null : App.h('button', {
+            class: 'btn',
+            onclick: () => App.tabs.wealth.openNonCoteForm(asset, host),
+          }, 'Support non coté (fonds euro…)'),
+          App.h('button', {
+            class: 'btn',
+            onclick: () => App.tabs.wealth.openMovementImport(asset),
+          }, 'Importer un relevé de titres'),
+          App.h('button', {
+            class: 'btn',
+            onclick: () => App.tabs.wealth.openPositionForm(asset, host, null),
+          }, 'Saisir un symbole à la main'))),
       // Comparaison à l'indice : repliée, elle ne se charge qu'à la demande
       // (les séries historiques coûtent plus de quota que les cours du jour).
       kind === 'crypto' || !positions.lignes.length ? null
@@ -370,6 +528,12 @@ App.tabs.wealth = {
           return;
         }
         for (const item of res.resultats) {
+          // `type` et `isin` étaient déjà renvoyés par le serveur sans jamais
+          // être affichés. Ce sont pourtant eux qui permettent de distinguer
+          // une action d'un certificat portant le même nom.
+          const meta = [item.code, item.type, item.exchange, item.pays,
+            item.currency, item.isin, item.rang ? `#${item.rang}` : null];
+          const autres = (item.autres_places || []).length;
           results.append(App.h('button', {
             class: 'search-item',
             onclick: () => {
@@ -378,9 +542,9 @@ App.tabs.wealth = {
           },
           App.h('div', {},
             App.h('div', {}, item.label || item.ticker),
-            App.h('div', { class: 'a-meta' },
-              [item.code, item.exchange, item.pays, item.currency,
-                item.rang ? `#${item.rang}` : null].filter(Boolean).join(' · '))),
+            App.h('div', { class: 'a-meta' }, meta.filter(Boolean).join(' · ')),
+            autres ? App.h('div', { class: 'a-meta' },
+              `cotée sur ${autres} autre${autres > 1 ? 's' : ''} place${autres > 1 ? 's' : ''}`) : null),
           App.h('span', { class: 'pill accent' }, 'Choisir')));
         }
       } catch (e) {
@@ -410,6 +574,214 @@ App.tabs.wealth = {
     setTimeout(() => input.focus(), 50);
   },
 
+  /* --- sortie d'une ligne : vente ou frais ---
+
+     Deux gestes qui font la meme chose — des jetons partent — et ne different
+     que par ce qu'on recoit en echange. Les separer en deux boutons aurait
+     ajoute une quatrieme action par ligne ; ils partagent donc un formulaire.
+
+     Un frais ne demande QUE la quantite : sur une plateforme crypto la
+     commission est prise en jetons, et ce qu'elle valait en euros, c'est ce que
+     ces jetons avaient coute. L'application le sait deja. */
+  openSortieForm(asset, host, ligne) {
+    const detenu = ligne.quantite || 0;
+    const nature = App.select('nature', [
+      ['vente', 'Vente'],
+      ['frais', 'Frais prélevés'],
+    ], 'vente');
+
+    const prix = App.field('Prix unitaire (€)', App.input('prix_unitaire', {
+      type: 'number', step: '0.0001',
+    }), { hint: 'Ce que vous en avez tiré' });
+    const courtage = App.field('Frais de la vente (€)', App.input('frais', {
+      type: 'number', step: '0.01', placeholder: '0',
+    }));
+
+    const form = App.h('form', { class: 'form-grid', onsubmit: (e) => e.preventDefault() },
+      App.field('Nature', nature),
+      App.field('Quantité', App.input('quantite', {
+        type: 'number', step: '0.00000001', required: true,
+      }), { hint: `Sur ${App.fmt.num(detenu, 8)} détenus` }),
+      prix, courtage,
+      App.field('Date', App.dateField('date', { value: App.todayISO() })));
+
+    const majuster = () => {
+      const frais = nature.value === 'frais';
+      prix.hidden = frais;
+      courtage.hidden = frais;
+    };
+    nature.addEventListener('change', majuster);
+    majuster();
+
+    const save = async () => {
+      const v = App.formValues(form);
+      if (!v.quantite) return App.invalide(form, 'quantite', 'Indiquez une quantité.');
+      // Sortir plus qu'on ne detient produit une quantite negative, qui
+      // traverse ensuite toute la valorisation sans que rien ne l'arrete.
+      if (parseFloat(v.quantite) > detenu + 1e-9) {
+        return App.invalide(form, 'quantite',
+          `Vous n\u2019en détenez que ${App.fmt.num(detenu, 8)}.`);
+      }
+      const frais = v.nature === 'frais';
+      try {
+        if (frais) {
+          await App.api.post(`/api/assets/${asset.id}/frais-en-nature`, {
+            ticker: ligne.ticker, quantite: v.quantite, date: v.date,
+          });
+        } else {
+          await App.api.post(`/api/assets/${asset.id}/positions`, {
+            ticker: ligne.ticker, symbol: ligne.symbole || ligne.ticker,
+            type: 'retrait', quantite: v.quantite,
+            prix_unitaire: v.prix_unitaire, frais: v.frais, date: v.date,
+          });
+        }
+        App.modal.close();
+        App.toast(frais ? 'Frais enregistrés' : 'Vente enregistrée', 'success');
+        await App.tabs.wealth.renderPositions(host, asset);
+        await App.refreshOthers();
+      } catch (e) { App.toast(e.message, 'error'); }
+    };
+
+    App.modal.open({
+      title: `Sortie — ${ligne.libelle || ligne.ticker}`,
+      body: App.h('div', {}, form,
+        App.note('Frais prélevés',
+          App.h('p', {},
+            'Sur une plateforme crypto, la commission est prise EN JETONS. '
+            + 'Indiquez combien sont partis : ce qu’ils valaient en euros, '
+            + 'c’est ce qu’ils vous avaient coûté, et l’application le sait.'),
+          App.h('p', {},
+            'Après un échange, rien à saisir ici : la quantité que vous avez '
+            + 'réellement reçue contient déjà la commission.'))),
+      footer: [
+        App.h('button', { class: 'btn', onclick: () => App.modal.close() }, 'Annuler'),
+        App.h('button', { class: 'btn primary', onclick: save }, 'Enregistrer'),
+      ],
+    });
+  },
+
+  /* --- échange entre deux lignes du même produit ---
+
+     Un swap n'est ni un achat ni une vente. Aucun euro n'entre ni ne sort du
+     produit : deux lignes changent de taille. Il fallait donc le simuler par
+     une vente puis un achat, et le frais de la plateforme n'appartenait
+     proprement ni à l'une ni à l'autre.
+
+     Le serveur écrit deux mouvements de MÊME montant, en sens inverse : le
+     capital investi ne bouge pas — c'est le même argent — seul le frais
+     l'augmente. */
+  openSwapForm(asset, host, ligne) {
+    const kind = asset.type === 'Crypto' ? 'crypto' : 'titre';
+    const form = App.h('form', { class: 'form-grid', onsubmit: (e) => e.preventDefault() },
+      App.field('Quantité cédée', App.input('quantite_sortie', {
+        type: 'number', step: '0.00000001', required: true,
+      }), { hint: `Sur ${App.fmt.num(ligne.quantite, 8)} détenus` }),
+      App.field('Reçu en échange', App.input('vers', {
+        placeholder: kind === 'crypto' ? 'solana' : 'CW8', required: true,
+      })),
+      App.field('Quantité reçue', App.input('quantite_recue', {
+        type: 'number', step: '0.00000001', required: true,
+      }), { hint: 'Ce que vous avez réellement reçu' }),
+      App.field('Date', App.dateField('date', { value: App.todayISO() })));
+
+    const save = async () => {
+      const v = App.formValues(form);
+      if (!v.quantite_sortie) {
+        return App.invalide(form, 'quantite_sortie', 'Indiquez la quantité cédée.');
+      }
+      if (parseFloat(v.quantite_sortie) > ligne.quantite + 1e-9) {
+        return App.invalide(form, 'quantite_sortie',
+          `Vous n\u2019en détenez que ${App.fmt.num(ligne.quantite, 8)}.`);
+      }
+      if (!(v.vers || '').trim()) {
+        return App.invalide(form, 'vers', 'Indiquez ce que vous recevez.');
+      }
+      if (!v.quantite_recue) {
+        return App.invalide(form, 'quantite_recue', 'Indiquez la quantité reçue.');
+      }
+      try {
+        await App.api.post(`/api/assets/${asset.id}/swap`, { ...v, de: ligne.ticker });
+        App.modal.close();
+        App.toast('Échange enregistré', 'success');
+        await App.tabs.wealth.renderPositions(host, asset);
+        await App.refreshOthers();
+      } catch (e) { App.toast(e.message, 'error'); }
+    };
+
+    App.modal.open({
+      title: `Échanger — ${ligne.libelle || ligne.ticker}`,
+      body: App.h('div', {}, form,
+        App.note('Pourquoi si peu de questions',
+          App.h('p', {},
+            'La valeur de l’échange n’est pas demandée : votre prix de revient '
+            + 'est simplement TRANSFÉRÉ d’une ligne à l’autre. Un échange entre '
+            + 'cryptos ne réalise rien — ni gain ni perte, y compris au sens '
+            + 'fiscal, où seule une sortie vers l’euro compte.'),
+          App.h('p', {},
+            'Les frais non plus : sur une plateforme, la commission est prise '
+            + 'sur les jetons. Indiquez ce que vous avez RÉELLEMENT reçu, elle '
+            + 'est déjà déduite. Pour des frais prélevés en plus — un retrait, '
+            + 'un transfert — passez par « − Sortie ».'))),
+      footer: [
+        App.h('button', { class: 'btn', onclick: () => App.modal.close() }, 'Annuler'),
+        App.h('button', { class: 'btn primary', onclick: save }, 'Échanger'),
+      ],
+    });
+  },
+
+  /* --- support non coté : fonds euro, SCPI en UC, support en arbitrage ---
+     Aucun réseau, donc disponible même cours de marché désactivés. Un fonds
+     euro se tient en euros et non en parts : ni quantité, ni prix unitaire. */
+  openNonCoteForm(asset, host) {
+    const form = App.h('form', { onsubmit: (e) => e.preventDefault() },
+      App.h('div', { class: 'form-grid' },
+        App.field('Nom du support', App.input('label', {
+          placeholder: 'Fonds euro', required: true,
+        }), { full: true }),
+        App.field('Montant (€)', App.input('montant', {
+          type: 'number', step: '0.01', required: true,
+        }), { hint: 'Ce que vous avez dessus' }),
+        App.field('Taux annuel (%)', App.input('taux_annuel', {
+          type: 'number', step: '0.01', placeholder: 'facultatif',
+        }), { hint: 'Vide : la valeur reste celle que vous saisissez' }),
+        App.field('Date', App.dateField('date', { value: App.todayISO() }))));
+
+    const save = async () => {
+      const v = App.formValues(form);
+      const label = (v.label || '').trim();
+      if (!label) return App.invalide(form, 'label', 'Indiquez le nom du support.');
+      if (!v.montant) return App.invalide(form, 'montant', 'Indiquez un montant.');
+      try {
+        await App.api.post(`/api/assets/${asset.id}/positions`, {
+          ...v,
+          kind: 'non_cote',
+          // Le libellé sert de clé : un fonds euro n'a ni ticker ni ISIN à
+          // recopier, et en inventer un serait pire que de s'en passer.
+          ticker: label,
+          symbol: label,
+        });
+        App.modal.close();
+        App.toast('Support ajouté', 'success');
+        await App.tabs.wealth.renderPositions(host, asset);
+        await App.refreshOthers();
+      } catch (e) { App.toast(e.message, 'error'); }
+    };
+
+    App.modal.open({
+      title: 'Ajouter un support non coté',
+      body: App.h('div', {},
+        App.h('p', { class: 'hint' },
+          'Pour ce qu’aucune place ne cote : fonds euro, SCPI logée en unité de '
+          + 'compte, support en attente d’arbitrage. La valeur est calculée sur '
+          + 'votre machine, sans aucun appel réseau.'),
+        form),
+      footer: [
+        App.h('button', { class: 'btn', onclick: () => App.modal.close() }, 'Annuler'),
+        App.h('button', { class: 'btn primary', onclick: save }, 'Ajouter'),
+      ],
+    });
+  },
+
   /* --- saisie de la quantité pour l'instrument choisi ---
      Quand l'instrument vient de la recherche, tout est déjà connu : on ne
      demande que combien et à quel prix. Les champs techniques (place, devise,
@@ -419,21 +791,36 @@ App.tabs.wealth = {
     const item = instrument || {};
     const choisi = !!item.ticker;
 
+    // « Nom affiché » vit ici et non dans les détails repliés : les
+    // référentiels ne connaissent que les raisons sociales, jamais les marques
+    // — SpaceX s'y appelle « Space Exploration Technologies Corp. Class A ».
+    // Cacher le champ derrière un accordéon fermé revenait à imposer ce nom.
     const principal = App.h('div', { class: 'form-grid' },
+      App.field('Nom affiché', App.input('label', { value: item.label || '' }),
+        { full: true, hint: 'Le nom du référentiel. Remplacez-le par le vôtre.' }),
       App.field('Quantité', App.input('quantite', {
         type: 'number', step: '0.00000001', required: true,
       })),
       App.field('Prix unitaire (€)', App.input('prix_unitaire', {
         type: 'number', step: '0.0001',
       }), { hint: 'Sert au PRU et au TRI' }),
-      App.field('Date', App.input('date', { type: 'date', value: App.todayISO() })));
+      // Le frais appartient à l'opération qui l'a causé. Il n'entre pas dans le
+      // montant — cet argent n'est pas allé dans le produit, il est allé au
+      // courtier — mais il gonfle votre prix de revient.
+      App.field('Frais (€)', App.input('frais', {
+        type: 'number', step: '0.01', placeholder: '0',
+      }), {
+        hint: kind === 'crypto'
+          ? 'Frais de réseau ou de plateforme'
+          : 'Courtage. Compte dans le prix de revient',
+      }),
+      App.field('Date', App.dateField('date', { value: App.todayISO() })));
 
     const avance = App.h('div', { class: 'form-grid' },
       App.field('Instrument', App.input('ticker', {
         value: item.ticker || '',
         placeholder: kind === 'crypto' ? 'bitcoin' : 'CW8 ou ISIN',
       })),
-      App.field('Nom affiché', App.input('label', { value: item.label || '' })),
       kind === 'crypto' ? null : App.field('Place', App.input('exchange', {
         value: item.exchange || '', placeholder: 'Euronext',
       })),
@@ -456,14 +843,17 @@ App.tabs.wealth = {
     const save = async () => {
       const v = App.formValues(form);
       const ticker = (v.ticker || item.ticker || '').trim();
-      if (!ticker) return App.toast('Instrument requis', 'error');
-      if (!v.quantite) return App.toast('Quantité requise', 'error');
+      if (!ticker) return App.invalide(form, 'ticker', 'Indiquez un instrument.');
+      if (!v.quantite) return App.invalide(form, 'quantite', 'Indiquez une quantité.');
       try {
         await App.api.post(`/api/assets/${asset.id}/positions`, {
           ...v,
           ticker,
           symbol: item.symbol || ticker,
           currency: v.currency || item.currency || 'EUR',
+          // La colonne `securities.isin` existait mais restait toujours NULL :
+          // le formulaire ne l'envoyait jamais.
+          isin: item.isin || '',
         });
         App.modal.close();
         App.toast('Position ajoutée', 'success');
@@ -491,94 +881,116 @@ App.tabs.wealth = {
   },
 
   /* ==================================================================
-     Un seul point d'entrée pour tout ajouter.
+     Deux niveaux : d'abord la nature de ce qu'on ajoute, ensuite le produit.
 
-     Il y avait trois boutons — « + Prêt », « + Actif détaillé »,
-     « + Ajouter mes produits » — dont deux faisaient la même chose à des
-     moments différents. On choisit d'abord QUOI ajouter, la saisie suit.
+     Il y a eu trois boutons côte à côte, puis un seul bouton ouvrant vingt
+     cartes d'un coup. Les vingt cartes étaient lisibles mais mélangeaient un
+     Livret A, un prêt immobilier et un formulaire libre sur le même plan.
+
+     La catégorie répond « quelle sorte de chose », les cartes « laquelle » —
+     avec, parmi elles, la déclaration groupée pour qui arrive avec tout son
+     patrimoine à saisir d'un coup.
      ================================================================== */
+  carteChoix(libelle, sousTitre, action) {
+    return App.h('button', { class: 'choice', onclick: action },
+      App.h('div', {},
+        App.h('div', { class: 'choice-title' }, libelle),
+        sousTitre ? App.h('div', { class: 'choice-sub' }, sousTitre) : null),
+      App.h('span', { class: 'choice-go' }, '\u2192'));
+  },
+
   openAddChooser() {
-    const carte = (type, libelle, sousTitre, action) => App.h('button', {
-      class: 'choice', onclick: action,
-    },
-    App.h('div', {},
-      App.h('div', { class: 'choice-title' }, libelle),
-      sousTitre ? App.h('div', { class: 'choice-sub' }, sousTitre) : null),
-    App.h('span', { class: 'choice-go' }, '→'));
-
-    const body = App.h('div', {});
-    for (const [groupe, produits] of App.tabs.wealth.CATALOGUE) {
-      body.append(App.h('div', { class: 'section-title' }, groupe));
-      const grid = App.h('div', { class: 'choice-grid' });
-      for (const [type, libelle, avecTaux] of produits) {
-        grid.append(carte(type, libelle,
-          App.tabs.wealth.SOUS_TITRES[type] || null,
-          () => App.tabs.wealth.openSimpleAssetForm(type, libelle, avecTaux)));
-      }
-      body.append(grid);
-    }
-
-    body.append(
-      App.h('div', { class: 'section-title' }, 'Emprunts'),
-      App.h('div', { class: 'choice-grid' },
-        carte('pret', 'Prêt ou crédit',
-          'Mensualité et capital restant dû calculés',
-          () => App.tabs.wealth.openLiabilityForm(null))),
-      App.h('div', { class: 'section-title' }, 'Autre'),
-      App.h('div', { class: 'choice-grid' },
-        carte('bulk', 'Déclarer plusieurs produits d’un coup',
-          'Pour la première mise en route',
-          () => App.tabs.wealth.openQuickAdd()),
-        carte('custom', 'Actif d’un autre genre',
-          'Formulaire complet, tous les champs',
-          () => App.tabs.wealth.openAssetForm(null))));
-
+    const carte = App.tabs.wealth.carteChoix;
     App.modal.open({
-      title: 'Qu’est-ce que vous voulez ajouter ?',
-      wide: true,
-      body,
+      title: 'Qu\u2019est-ce que vous voulez ajouter ?',
+      body: App.h('div', { class: 'choice-grid' },
+        carte('Un produit d\u2019\u00e9pargne ou de placement',
+          'Livret, PEA, assurance vie, crypto, bien immobilier\u2026',
+          () => App.tabs.wealth.openProduitChooser()),
+        carte('Un pr\u00eat ou un cr\u00e9dit',
+          'Mensualit\u00e9 et capital restant d\u00fb calcul\u00e9s',
+          () => App.tabs.wealth.openLiabilityForm(null)),
+        carte('Autre chose',
+          'Formulaire complet, pour ce qui n\u2019entre dans aucune case',
+          () => App.tabs.wealth.openAssetForm(null))),
       footer: [App.h('button', {
         class: 'btn', onclick: () => App.modal.close(),
       }, 'Annuler')],
     });
   },
 
+  /* Second niveau : une carte par produit, group\u00e9es par famille. La
+     d\u00e9claration group\u00e9e est une carte parmi les autres, en t\u00eate d'une section
+     \u00e0 elle : c'est un chemin d'entr\u00e9e, pas un produit. */
+  openProduitChooser() {
+    const carte = App.tabs.wealth.carteChoix;
+    const body = App.h('div', {});
+
+    body.append(
+      App.h('div', { class: 'section-title' }, 'Tout d\u2019un coup'),
+      App.h('div', { class: 'choice-grid' },
+        carte('Ajouter plusieurs produits',
+          'La liste compl\u00e8te, un montant par ligne \u2014 pour la premi\u00e8re mise en route',
+          () => App.tabs.wealth.openQuickAdd())));
+
+    for (const [groupe, produits] of App.tabs.wealth.CATALOGUE) {
+      body.append(App.h('div', { class: 'section-title' }, groupe));
+      const grid = App.h('div', { class: 'choice-grid' });
+      for (const [type, libelle, avecTaux] of produits) {
+        grid.append(carte(libelle, App.tabs.wealth.SOUS_TITRES[type] || null,
+          () => App.tabs.wealth.openSimpleAssetForm(type, libelle, avecTaux)));
+      }
+      body.append(grid);
+    }
+
+    App.modal.open({
+      title: 'Quel produit ?',
+      wide: true,
+      body,
+      footer: [App.h('button', {
+        class: 'btn', onclick: () => App.tabs.wealth.openAddChooser(),
+      }, 'Retour')],
+    });
+  },
+
   SOUS_TITRES: {
-    Livret: 'Intérêts calculés au taux que vous indiquez',
-    LDDS: 'Intérêts calculés au taux que vous indiquez',
-    LEP: 'Intérêts calculés au taux que vous indiquez',
-    LivretJeune: 'Intérêts calculés au taux que vous indiquez',
-    PEL: 'Intérêts calculés au taux que vous indiquez',
-    CEL: 'Intérêts calculés au taux que vous indiquez',
-    DepotTerme: 'Intérêts calculés au taux que vous indiquez',
+    Livret: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
+    LDDS: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
+    LEP: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
+    LivretJeune: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
+    PEL: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
+    CEL: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
+    DepotTerme: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
     PEA: 'Vous choisirez vos supports ensuite',
     CTO: 'Vous choisirez vos supports ensuite',
     AssuranceVie: 'Vous choisirez vos supports ensuite',
     PER: 'Vous choisirez vos supports ensuite',
     Crypto: 'Vous choisirez vos cryptos ensuite',
-    Immobilier: 'Réévaluation possible par indice',
-    SCPI: 'Réévaluation possible par indice',
+    Immobilier: 'R\u00e9\u00e9valuation possible par indice',
+    SCPI: 'R\u00e9\u00e9valuation possible par indice',
   },
 
-  /* Formulaire court : le type est déjà choisi, on ne demande que
-     l'indispensable. Le reste se règle ensuite dans la fiche. */
+  /* Formulaire court : le type est d\u00e9j\u00e0 choisi, on ne demande que
+     l'indispensable. Le reste se r\u00e8gle ensuite dans la fiche. */
   openSimpleAssetForm(type, libelle, avecTaux) {
     const marche = App.tabs.wealth.MARKET.includes(type);
     const form = App.h('form', { class: 'form-grid', onsubmit: (e) => e.preventDefault() },
       App.field('Nom', App.input('label', { value: libelle, required: true })),
-      App.field('Montant aujourd’hui (€)', App.input('valeur_actuelle', {
+      App.field('Montant aujourd\u2019hui (\u20ac)', App.input('valeur_actuelle', {
         type: 'number', step: '0.01', required: true,
       })),
-      App.field('Depuis le', App.input('date_acquisition', {
-        type: 'date', value: App.todayISO(),
+      App.field('Depuis le', App.dateField('date_acquisition', {
+        value: App.todayISO(),
       })),
       avecTaux ? App.field('Taux annuel (%)', App.input('taux_annuel', {
         type: 'number', step: '0.01',
-      }), { hint: 'Laissé vide, le montant reste figé' }) : null);
+      }), { hint: 'Laiss\u00e9 vide, le montant reste fig\u00e9' }) : null);
 
     const save = async () => {
       const v = App.formValues(form);
-      if (!v.valeur_actuelle) return App.toast('Indiquez un montant', 'error');
+      if (!v.valeur_actuelle) {
+        return App.invalide(form, 'valeur_actuelle', 'Indiquez un montant.');
+      }
       const metadata = {};
       if (v.taux_annuel) metadata.taux_annuel = parseFloat(v.taux_annuel);
       try {
@@ -591,22 +1003,22 @@ App.tabs.wealth = {
           metadata,
         });
         App.modal.close();
-        App.toast(`${v.label || libelle} ajouté`, 'success');
+        App.toast(`${v.label || libelle} ajout\u00e9`, 'success');
         await App.refreshAll();
-        // Un compte-titres ou un portefeuille crypto n'a d'intérêt qu'une fois
-        // ses lignes renseignées : on y emmène directement.
+        // Un compte-titres ou un portefeuille crypto n'a d'int\u00e9r\u00eat qu'une fois
+        // ses lignes renseign\u00e9es : on y emm\u00e8ne directement.
         if (marche) await App.tabs.wealth.openAssetDetail(asset.id);
       } catch (e) { App.toast(e.message, 'error'); }
     };
 
     App.modal.open({
-      title: `Ajouter — ${libelle}`,
+      title: `Ajouter \u2014 ${libelle}`,
       body: App.h('div', {}, form,
         marche ? App.h('p', { class: 'hint', style: 'margin-top:14px' },
-          'Vous pourrez choisir vos supports juste après, par une recherche.') : null),
+          'Vous pourrez choisir vos supports juste apr\u00e8s, par une recherche.') : null),
       footer: [
         App.h('button', {
-          class: 'btn', onclick: () => App.tabs.wealth.openAddChooser(),
+          class: 'btn', onclick: () => App.tabs.wealth.openProduitChooser(),
         }, 'Retour'),
         App.h('button', { class: 'btn primary', onclick: save }, 'Ajouter'),
       ],
@@ -645,7 +1057,7 @@ App.tabs.wealth = {
 
   openQuickAdd() {
     const lignes = [];
-    const dateIn = App.input('date', { type: 'date', value: App.todayISO() });
+    const dateIn = App.dateField('date', { value: App.todayISO() });
     const totalNode = App.h('strong', {}, App.fmt.eur(0));
 
     const updateTotal = () => {
@@ -698,6 +1110,16 @@ App.tabs.wealth = {
         App.toast(`${res.crees} produit(s) ajouté(s) — ${App.fmt.eur(res.total)}`,
           'success');
         await App.refreshAll();
+        // Un compte-titres ou un portefeuille crypto vide n'a aucun intérêt :
+        // sa valeur vient de ses lignes. On y emmène directement — mais
+        // seulement s'il n'y en a qu'un, sinon le choix serait arbitraire.
+        const comptes = (res.actifs || [])
+          .filter((a) => App.tabs.wealth.MARKET.includes(a.type));
+        if (comptes.length === 1) {
+          await App.tabs.wealth.openAssetDetail(comptes[0].id);
+        } else if (comptes.length > 1) {
+          App.toast('Ouvrez chaque compte pour y déclarer vos supports.', 'info', 6000);
+        }
       } catch (e) { App.toast(e.message, 'error'); }
     });
 
@@ -724,7 +1146,9 @@ App.tabs.wealth = {
       footer: [
         App.h('div', { style: 'margin-right:auto' },
           App.h('span', { class: 'sub' }, 'Total déclaré : '), totalNode),
-        App.h('button', { class: 'btn', onclick: () => App.modal.close() }, 'Annuler'),
+        App.h('button', {
+          class: 'btn', onclick: () => App.tabs.wealth.openProduitChooser(),
+        }, 'Retour'),
         submit,
       ],
     });
@@ -768,6 +1192,12 @@ App.tabs.wealth = {
       if (App.tabs.wealth.MARKET.includes(t) && t !== 'Crypto') {
         add('Courtier', 'courtier');
         add('Numéro de compte', 'numero_compte');
+        add('TER annuel (%)', 'ter_annuel', { type: 'number', step: '0.01' });
+        metaHost.append(App.h('p', { class: 'hint', style: 'grid-column:1/-1' },
+          'Le TER n’est jamais prélevé : il est intégré au cours du support et '
+          + 'ne sort d’aucun compte. Aucun mouvement ne peut donc le porter — '
+          + 'c’est une estimation, appliquée à la valeur du produit, et comptée '
+          + 'à part des frais réellement payés.'));
       }
       if (t === 'Crypto') {
         add('Identifiant CoinGecko', 'coingecko_id', { placeholder: 'ex : bitcoin' });
@@ -795,11 +1225,17 @@ App.tabs.wealth = {
       App.h('div', { class: 'form-grid' },
         App.field('Type', typeSelect),
         App.field('Libellé', App.input('label', { value: (asset && asset.label) || '', required: true })),
-        App.field('Valeur aujourd’hui (€)', App.input('valeur_actuelle', {
-          type: 'number', step: '0.01', value: (asset && asset.valeur_actuelle) ?? '',
-        }), { hint: 'Le montant que vous avez dessus maintenant' }),
-        App.field('Depuis le', App.input('date_acquisition', {
-          type: 'date', value: (asset && asset.date_acquisition) || App.todayISO(),
+        // À la CRÉATION seulement. Trois chemins fixaient la valeur d'un actif :
+        // ce champ, le bouton « Valoriser », et un mouvement de type
+        // « valorisation ». Seuls les deux derniers datent le point et
+        // alimentent la courbe de patrimoine ; celui-ci l'écrasait en silence.
+        // Il ne reste donc que la déclaration initiale, datée elle aussi par
+        // « Depuis le », et la valorisation.
+        isEdit ? null : App.field('Valeur aujourd’hui (€)',
+          App.input('valeur_actuelle', { type: 'number', step: '0.01' }),
+          { hint: 'Le montant que vous avez dessus maintenant' }),
+        App.field('Depuis le', App.dateField('date_acquisition', {
+          value: (asset && asset.date_acquisition) || App.todayISO(),
         }), { hint: 'Ouverture, achat, ou simplement aujourd’hui' }),
         App.field('Montant investi (€)', App.input('valeur_acquisition', {
           type: 'number', step: '0.01',
@@ -808,7 +1244,10 @@ App.tabs.wealth = {
         }), {
           hint: 'Laissez vide si vous ne connaissez pas l’historique : '
             + 'la plus-value démarrera à zéro plutôt qu’inventée',
-        })),
+        }),
+        isEdit ? App.h('p', { class: 'hint', style: 'grid-column:1/-1' },
+          'La valeur du jour ne se modifie pas ici : le bouton « Valoriser » '
+          + 'l’enregistre à une date, ce qui alimente la courbe de patrimoine.') : null),
       App.h('div', { class: 'section-title' }, 'Champs spécifiques au type'),
       metaHost);
     renderMeta();
@@ -834,7 +1273,7 @@ App.tabs.wealth = {
         valeur_actuelle: v.valeur_actuelle === '' ? null : v.valeur_actuelle,
         metadata,
       };
-      if (!payload.label) return App.toast('Le libellé est obligatoire', 'error');
+      if (!payload.label) return App.invalide(form, 'label', 'Indiquez un libellé.');
       try {
         if (isEdit) await App.api.put(`/api/assets/${asset.id}`, payload);
         else await App.api.post('/api/assets', payload);
@@ -907,6 +1346,13 @@ App.tabs.wealth = {
       body: App.h('div', {}, nav, stack),
       wide: true,
       footer: [
+        // « Cloturer » et non « archiver » : c'est le mot d'un livret ferme.
+        // La colonne `archived`, la route et la pastille existaient depuis
+        // toujours ; aucun ecran ne permettait de s'en servir.
+        App.h('button', {
+          class: 'btn',
+          onclick: () => App.tabs.wealth.basculerArchive(a),
+        }, a.archived ? 'Rouvrir' : 'Clôturer'),
         App.h('button', { class: 'btn', onclick: () => App.tabs.wealth.openAssetForm(a) }, 'Modifier'),
         App.h('button', { class: 'btn', onclick: () => App.tabs.wealth.openRevalue(a) }, 'Valoriser'),
         App.h('button', { class: 'btn primary', onclick: () => App.modal.close() }, 'Fermer'),
@@ -914,29 +1360,87 @@ App.tabs.wealth = {
     });
   },
 
+  /* Clôture d'un produit : il sort du patrimoine sans perdre son passé.
+
+     Un livret fermé, une crypto revendue, un véhicule vendu n'ont plus à
+     compter dans le total, mais leur historique reste une partie de la vôtre.
+     Supprimer l'actif effacerait ses mouvements ; le clôturer ne fait que le
+     retirer de la photo du jour. */
+  async basculerArchive(a) {
+    const clore = !a.archived;
+    const suite = async () => {
+      try {
+        await App.api.put(`/api/assets/${a.id}`, { archived: clore });
+        App.modal.close();
+        App.toast(clore ? `${a.label} clôturé` : `${a.label} rouvert`, 'success');
+        App.tabs.wealth.archivesOuvertes = false;
+        await App.refreshAll();
+      } catch (e) { App.toast(e.message, 'error'); }
+    };
+    if (!clore) return suite();
+    App.confirm(
+      `Clôturer « ${a.label} » ? Il sortira du patrimoine, ses mouvements sont `
+      + 'conservés, et vous pourrez le rouvrir.',
+      suite, 'Clôturer');
+  },
+
+  /* Libellés des champs de `metadata`, qui s'affichaient jusqu'ici sous leur
+     clé technique — la fiche portait littéralement « taux_annuel  2.4 ». Une
+     clé absente de cette table reste masquée : mieux vaut ne rien montrer
+     qu'un identifiant de code. */
+  META_LABELS: {
+    taux_annuel: ['Taux annuel', (v) => `${App.fmt.num(v, 2)} %`],
+    taux_revalorisation_annuel: ['Revalorisation annuelle', (v) => `${App.fmt.num(v, 2)} %`],
+    indice_insee: ['Indice INSEE', String],
+    coingecko_id: ['Identifiant CoinGecko', String],
+    ter_annuel: ['TER annuel (estimé)', (v) => `${App.fmt.num(v, 2)} %`],
+    quantite: ['Quantité détenue', (v) => App.fmt.num(v, 6)],
+    isin: ['ISIN', String],
+    surface: ['Surface', (v) => `${App.fmt.num(v, 0)} m²`],
+    loyer_mensuel: ['Loyer mensuel', (v) => App.fmt.eur(v)],
+    charges_annuelles: ['Charges annuelles', (v) => App.fmt.eur(v)],
+  },
+
   panelSummary(data) {
     const a = data.asset;
-    const rows = [
-      ['Valeur actuelle', App.fmt.eur(a.valeur)],
-      ['Capital investi', App.fmt.eur(a.investi)],
-      ['Plus-value latente', `${App.fmt.signed(a.plus_value)}${a.plus_value_pct !== null ? ` (${App.fmt.ratio(a.plus_value_pct)})` : ''}`],
-      ["Date d'acquisition", App.fmt.date(a.date_acquisition)],
-      ["Valeur d'acquisition", App.fmt.eur(a.valeur_acquisition)],
-      ['Valeur saisie manuellement', a.valeur_actuelle === null ? 'non (reconstituée)' : App.fmt.eur(a.valeur_actuelle)],
-      ['Mouvements enregistrés', String(a.nb_mouvements)],
-    ];
-    const list = App.h('div', { class: 'metric-list' });
-    for (const [l, v] of rows) {
-      list.append(App.h('div', { class: 'metric-row' },
-        App.h('span', { class: 'm-label' }, l), App.h('span', { class: 'm-value' }, v)));
+    // Un produit à taux ne se lit pas comme un actif coté : pas de plus-value,
+    // et « capital investi » ferait doublon avec la valeur d'acquisition.
+    const rows = a.valeur_source === 'taux'
+      ? [
+        ['Capital', App.fmt.eur(a.valeur)],
+        [`Intérêts prévus au ${App.fmt.jourMois(a.date_credit)}`,
+          a.interets_prevus ? App.fmt.signed(a.interets_prevus) : '—'],
+        ['Taux annuel', a.taux_annuel ? `${App.fmt.num(a.taux_annuel, 2)} %` : 'non renseigné'],
+        ['Ouvert le', App.fmt.date(a.date_acquisition)],
+        ['Mouvements enregistrés', String(a.nb_mouvements)],
+      ]
+      : [
+        ['Valeur actuelle', App.fmt.eur(a.valeur)],
+        ['Capital investi', App.fmt.eur(a.investi)],
+        ['Plus-value latente', `${App.fmt.signed(a.plus_value)}${a.plus_value_pct !== null ? ` (${App.fmt.ratio(a.plus_value_pct)})` : ''}`],
+        ["Date d'acquisition", App.fmt.date(a.date_acquisition)],
+        ["Valeur d'acquisition", App.fmt.eur(a.valeur_acquisition)],
+        ['Valeur saisie manuellement', a.valeur_actuelle === null ? 'non (reconstituée)' : App.fmt.eur(a.valeur_actuelle)],
+        ['Mouvements enregistrés', String(a.nb_mouvements)],
+      ];
+    if (data.frais_payes) {
+      rows.push(['Frais payés depuis l’origine', App.fmt.eur(data.frais_payes)]);
     }
-    const metaEntries = Object.entries(a.metadata || {});
+    const list = App.metricList(rows);
+
+    // Le taux est déjà dans le tableau ci-dessus pour un produit à taux : le
+    // répéter dans « Champs spécifiques » ferait doublon.
+    const dejaVus = a.valeur_source === 'taux' ? ['taux_annuel'] : [];
+    const metaEntries = Object.entries(a.metadata || {})
+      .filter(([k, v]) => App.tabs.wealth.META_LABELS[k] && !dejaVus.includes(k)
+        && v !== null && v !== '');
+
     return App.h('div', {}, list,
       metaEntries.length ? App.h('div', { class: 'section-title' }, 'Champs spécifiques') : null,
-      metaEntries.length ? App.h('div', { class: 'metric-list' },
-        ...metaEntries.map(([k, v]) => App.h('div', { class: 'metric-row' },
-          App.h('span', { class: 'm-label' }, k),
-          App.h('span', { class: 'm-value' }, String(v))))) : null,
+      metaEntries.length ? App.metricList(metaEntries.map(([k, v]) => {
+        const [label, fmt] = App.tabs.wealth.META_LABELS[k];
+        return [label, fmt(v)];
+      })) : null,
       data.transactions.length ? App.h('div', { class: 'section-title' }, 'Transactions rattachées') : null,
       data.transactions.length ? App.tabs.wealth.txTable(data.transactions) : null);
   },
@@ -964,7 +1468,7 @@ App.tabs.wealth = {
     const rebuild = () => {
       App.clear(tbody);
       if (!data.movements.length) {
-        tbody.append(App.h('tr', {}, App.h('td', { colspan: 7, class: 'empty' }, 'Aucun mouvement.')));
+        tbody.append(App.h('tr', {}, App.h('td', { colspan: 8, class: 'empty' }, 'Aucun mouvement.')));
       }
       for (const m of data.movements) {
         tbody.append(App.h('tr', {},
@@ -974,6 +1478,8 @@ App.tabs.wealth = {
           App.h('td', { class: 'right num' }, m.quantite === null ? '—' : App.fmt.num(m.quantite, 6)),
           App.h('td', { class: 'right num' }, m.prix_unitaire === null ? '—' : App.fmt.eur(m.prix_unitaire)),
           App.h('td', { class: `right num ${m.montant < 0 ? 'neg' : ''}` }, App.fmt.eur(m.montant)),
+          App.h('td', { class: 'right num' },
+            m.frais ? App.fmt.eur(m.frais) : '—'),
           App.h('td', { class: 'right' }, App.h('button', {
             class: 'icon-btn',
             onclick: () => App.confirm('Supprimer ce mouvement ?', async () => {
@@ -989,12 +1495,26 @@ App.tabs.wealth = {
 
     const isMarket = App.tabs.wealth.MARKET.includes(a.type);
     const form = App.h('form', { class: 'form-grid', onsubmit: (e) => e.preventDefault() },
-      App.field('Date', App.input('date', { type: 'date', value: App.todayISO() })),
-      App.field('Type', App.select('type', [['versement', 'Versement / achat'], ['retrait', 'Retrait / vente'], ['valorisation', 'Valorisation']], 'versement')),
+      App.field('Date', App.dateField('date', { value: App.todayISO() })),
+      // « Valorisation » a quitté ce menu. Le bouton « Valoriser » fait la même
+      // chose sous un nom qui se comprend, avec l'explication qui va avec — et
+      // proposer les deux revenait à demander de choisir entre deux mots pour
+      // un seul geste. Les valorisations déjà enregistrées restent listées
+      // au-dessus : c'est leur historique.
+      App.field('Type', App.select('type', [
+        ['versement', 'Versement / achat'],
+        ['retrait', 'Retrait / vente'],
+        // Frais de gestion, droits de garde : aucune transaction ne les porte,
+        // ils sortent du produit tout seuls.
+        ['frais', 'Frais prélevés'],
+      ], 'versement')),
       App.field('Montant (€)', App.input('montant', { type: 'number', step: '0.01' })),
       isMarket ? App.field('Ticker / ISIN', App.input('ticker')) : null,
       isMarket ? App.field('Quantité', App.input('quantite', { type: 'number', step: '0.000001' })) : null,
       isMarket ? App.field('Prix unitaire (€)', App.input('prix_unitaire', { type: 'number', step: '0.0001' })) : null,
+      App.field('Frais sur ce mouvement (€)', App.input('frais', {
+        type: 'number', step: '0.01', placeholder: '0',
+      }), { hint: 'Courtage ou commission payés en plus du montant' }),
       App.field('Note', App.input('note'), { full: true }));
 
     const add = async () => {
@@ -1002,7 +1522,7 @@ App.tabs.wealth = {
       if (!v.montant && v.quantite && v.prix_unitaire) {
         v.montant = String(parseFloat(v.quantite) * parseFloat(v.prix_unitaire));
       }
-      if (!v.montant) return App.toast('Montant requis', 'error');
+      if (!v.montant) return App.invalide(form, 'montant', 'Indiquez un montant.');
       try {
         await App.api.post(`/api/assets/${a.id}/movements`, v);
         App.toast('Mouvement ajouté', 'success');
@@ -1018,15 +1538,16 @@ App.tabs.wealth = {
             App.h('th', {}, 'Date'), App.h('th', {}, 'Type'), App.h('th', {}, 'Ticker'),
             App.h('th', { class: 'right' }, 'Quantité'),
             App.h('th', { class: 'right' }, 'Prix unit.'),
-            App.h('th', { class: 'right' }, 'Montant'), App.h('th', {}))),
+            App.h('th', { class: 'right' }, 'Montant'),
+            App.h('th', { class: 'right' }, 'Frais'), App.h('th', {}))),
           tbody)),
       App.h('div', { class: 'section-title' }, 'Ajouter un mouvement'),
       form,
+      // L'import de relevé de titres vivait ici ET sous les positions, pour le
+      // même geste. Il ne reste que celui des positions, là où les lignes se
+      // gèrent — cet onglet-ci raconte l'historique.
       App.h('div', { class: 'actions', style: 'margin-top:12px' },
-        App.h('button', { class: 'btn primary', onclick: add }, 'Ajouter'),
-        isMarket ? App.h('button', {
-          class: 'btn', onclick: () => App.tabs.wealth.openMovementImport(a),
-        }, 'Importer un relevé de titres') : null));
+        App.h('button', { class: 'btn primary', onclick: add }, 'Ajouter')));
   },
 
   renderBenchmark(host, res) {
@@ -1048,11 +1569,7 @@ App.tabs.wealth = {
         [`Performance de ${ligne.indice_label}`, App.fmt.pct(ligne.perf_indice, 2)],
         ['Écart', `${ligne.ecart > 0 ? '+' : ''}${App.fmt.pct(ligne.ecart, 2)}`],
       ];
-      const list = App.h('div', { class: 'metric-list' });
-      for (const [l, v] of rows) {
-        list.append(App.h('div', { class: 'metric-row' },
-          App.h('span', { class: 'm-label' }, l), App.h('span', { class: 'm-value' }, v)));
-      }
+      const list = App.metricList(rows);
       host.append(
         App.h('div', { class: 'section-title' }, `${ligne.symbole} vs ${ligne.indice_label}`),
         list,
@@ -1061,7 +1578,7 @@ App.tabs.wealth = {
       setTimeout(() => App.chart(canvasId, {
         type: 'line',
         data: {
-          labels: ligne.serie_ligne.map((p) => p.date),
+          labels: ligne.serie_ligne.map((p) => App.fmt.date(p.date)),
           datasets: [
             {
               label: ligne.symbole, data: ligne.serie_ligne.map((p) => p.valeur),
@@ -1100,11 +1617,7 @@ App.tabs.wealth = {
       ['Rendement après mensualités',
         p.rendement_net_pct === null ? '—' : App.fmt.pct(p.rendement_net_pct, 2)],
     ];
-    const list = App.h('div', { class: 'metric-list' });
-    for (const [l, v] of rows) {
-      list.append(App.h('div', { class: 'metric-row' },
-        App.h('span', { class: 'm-label' }, l), App.h('span', { class: 'm-value' }, v)));
-    }
+    const list = App.metricList(rows);
     const out = App.h('div', {}, list,
       App.note('Pourquoi deux rendements',
         App.h('p', {},
@@ -1137,11 +1650,7 @@ App.tabs.wealth = {
       ['Intérêts totaux', App.fmt.eur(loan.interets_totaux)],
       ['Coût total du crédit', App.fmt.eur(loan.cout_total)],
     ];
-    const list = App.h('div', { class: 'metric-list' });
-    for (const [l, v] of rows) {
-      list.append(App.h('div', { class: 'metric-row' },
-        App.h('span', { class: 'm-label' }, l), App.h('span', { class: 'm-value' }, v)));
-    }
+    const list = App.metricList(rows);
     const tbody = App.h('tbody', {});
     for (const e of loan.echeancier || []) {
       tbody.append(App.h('tr', {},
@@ -1168,7 +1677,7 @@ App.tabs.wealth = {
   /* ---------- valorisation ---------- */
   openRevalue(asset) {
     const form = App.h('form', { class: 'form-grid', onsubmit: (e) => e.preventDefault() },
-      App.field('Date de valorisation', App.input('date', { type: 'date', value: App.todayISO() })),
+      App.field('Date de valorisation', App.dateField('date', { value: App.todayISO() })),
       App.field('Valeur totale (€)', App.input('valeur', {
         type: 'number', step: '0.01', value: asset.valeur_actuelle ?? '',
       })),
@@ -1176,7 +1685,7 @@ App.tabs.wealth = {
 
     const save = async () => {
       const v = App.formValues(form);
-      if (!v.valeur) return App.toast('Valeur requise', 'error');
+      if (!v.valeur) return App.invalide(form, 'valeur', 'Indiquez une valeur.');
       try {
         await App.api.post(`/api/assets/${asset.id}/valorisation`, v);
         App.modal.close();
@@ -1201,8 +1710,8 @@ App.tabs.wealth = {
   /* ---------- import de mouvements de titres ---------- */
   openMovementImport(asset) {
     const textarea = App.h('textarea', {
-      rows: 12,
-      placeholder: 'Collez le relevé (date, ticker/ISIN, quantité, prix unitaire, montant)…',
+      rows: 10,
+      placeholder: '… ou collez le relevé (date, ticker/ISIN, quantité, prix unitaire, montant)',
     });
     const analyse = async () => {
       try {
@@ -1211,15 +1720,23 @@ App.tabs.wealth = {
         App.tabs.wealth.showMovementPreview(asset, res);
       } catch (e) { App.toast(e.message, 'error'); }
     };
+    // Même composant que pour les relevés bancaires : un relevé de titres
+    // arrive dans les mêmes formats, et souvent en PDF.
+    const depot = App.fileDrop({
+      hint: 'CSV, TSV, TXT, ou PDF de votre courtier',
+      onText: (text) => { textarea.value = text; analyse(); },
+    });
     App.modal.open({
       title: `Importer des mouvements — ${asset.label}`,
       wide: true,
+      garder: true,
       body: App.h('div', {},
         App.h('p', { class: 'hint' },
           'Objectif : récupérer quantité, prix unitaire et ticker de chaque achat pour '
           + 'calculer le PRU et le TRI réels. Colonnes détectées automatiquement.'),
-        App.h('div', { class: 'field full', style: 'margin-top:10px' },
-          App.h('label', {}, 'Contenu'), textarea)),
+        App.h('div', { style: 'margin-top:12px' }, depot),
+        App.h('div', { class: 'field full', style: 'margin-top:14px' },
+          App.h('label', {}, 'Ou coller le contenu'), textarea)),
       footer: [
         App.h('button', { class: 'btn', onclick: () => App.modal.close() }, 'Annuler'),
         App.h('button', { class: 'btn primary', onclick: analyse }, 'Analyser'),
@@ -1263,6 +1780,7 @@ App.tabs.wealth = {
     App.modal.open({
       title: `Prévisualisation — ${asset.label}`,
       wide: true,
+      garder: true,
       body: App.h('div', {},
         App.h('p', { class: 'hint' },
           `${res.total} ligne(s) lue(s), ${res.doublons} déjà présente(s) `
@@ -1310,8 +1828,8 @@ App.tabs.wealth = {
       App.field('Durée (mois)', App.input('duree_mois', {
         type: 'number', step: '1', value: liab ? liab.duree_mois : '',
       })),
-      App.field('Date de début', App.input('date_debut', {
-        type: 'date', value: (liab && liab.date_debut) || App.todayISO(),
+      App.field('Date de début', App.dateField('date_debut', {
+        value: (liab && liab.date_debut) || App.todayISO(),
       })),
       App.field('Assurance mensuelle (€)', App.input('assurance_mensuelle', {
         type: 'number', step: '0.01', value: liab ? liab.assurance_mensuelle : 0,

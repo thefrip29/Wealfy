@@ -11,13 +11,117 @@ App.tabs.overview = {
     App.tabs.overview.expanded = null;
     App.els('#tab-overview .card.expanded').forEach((c) => c.classList.remove('expanded'));
     App.els('#tab-overview .card-extra').forEach(App.clear);
+    // Base vide : on s'arrete la. Rendre un heros a zero, quatre indicateurs a
+    // « — » et deux camemberts « aucun actif » ne dit rien, et le masquage des
+    // montants floute ces zeros par-dessus le marché.
+    if (App.tabs.overview.renderAccueil(data)) return;
     App.tabs.overview.renderHero(data);
     App.tabs.overview.renderAlertes(data.alertes || []);
     App.tabs.overview.renderKpis(data);
     App.tabs.overview.renderNetWorth(data.patrimoine_serie);
+    App.tabs.overview.renderPatrimoine(data.patrimoine_par_famille);
+    App.tabs.overview.renderFlux(data.depenses_serie);
     App.tabs.overview.renderCategories(data.mois);
     App.tabs.overview.renderRepartition(data.repartition, data.metrics);
-    App.tabs.overview.renderFlows(data.depenses_serie);
+    App.tabs.overview.renderMois(data);
+  },
+
+  /* Ce que le mois laisse une fois les charges fixes et l'épargne mises de
+     côté : le reste à vivre.
+
+     `services.metrics()` produit vingt-deux grandeurs ; l'interface en
+     affichait sept. Celle-ci a sa propre section dans `docs/interface.md` et
+     n'apparaissait sur aucun écran — alors que la colonne « Charge fixe » du
+     tableau des rôles n'a pas d'autre raison d'être que de l'alimenter. On
+     cochait donc des catégories pour nourrir un chiffre que personne ne
+     montrait.
+
+     Rien n'est calculé ici : tout arrive déjà dans `/api/overview`. */
+  renderMois(data) {
+    const host = App.el('#ov-mois');
+    const label = App.el('#ov-mois-label');
+    App.clear(host);
+    if (label) label.textContent = App.fmt.month(data.mois.mois);
+
+    const m = data.metrics;
+    const fixes = m.charges_fixes_mois || 0;
+    const configurees = ((App.state.meta || {}).categories_charges_fixes || []).length;
+
+    // Deux situations que le même zéro ne sépare pas, et qui n'appellent pas la
+    // même phrase : le réglage n'a jamais été fait, ou il l'est mais ce mois-ci
+    // ne porte rien. Inviter à configurer ce qui l'est déjà ferait chercher un
+    // écran qu'on a sous les yeux.
+    if (!configurees) {
+      host.append(
+        App.h('p', { class: 'muted' },
+          'Marquez vos catégories de charges fixes — loyer, assurances, '
+          + 'abonnements — pour connaître ce qui vous reste une fois le '
+          + 'récurrent et l’épargne mis de côté.'),
+        App.h('div', { class: 'actions', style: 'margin-top:12px' },
+          App.h('button', {
+            class: 'btn',
+            onclick: () => App.settings.open('classement'),
+          }, 'Choisir mes charges fixes')));
+      return;
+    }
+
+    // Sans revenu sur le mois, le reste à vivre serait un négatif sans objet :
+    // il se compte SUR des revenus.
+    if (!m.revenus_mois) {
+      host.append(App.h('p', { class: 'muted' },
+        `Aucun revenu enregistré en ${App.fmt.month(data.mois.mois)}. `
+        + 'Le reste à vivre se compte sur les revenus du mois.'));
+      return;
+    }
+
+    // Un chiffre domine, le reste descend d'un cran.
+    host.append(App.h('div', { class: 'reste' },
+      App.h('div', { class: 'reste-label' }, 'Reste à vivre'),
+      App.h('div', { class: 'reste-value' }, App.fmt.eur(m.reste_a_vivre_mois)),
+      App.h('div', { class: 'hero-meta' },
+        App.h('span', {}, 'une fois les charges fixes et l’épargne mises de côté'))));
+
+    const lignes = [
+      ['Revenus', App.fmt.eur(m.revenus_mois)],
+      ['Charges fixes', App.fmt.eur(fixes)
+        + (m.part_charges_fixes === null ? ''
+          : ` · ${App.fmt.pct(m.part_charges_fixes, 0)} des revenus`)],
+      ['Épargne', App.fmt.eur(m.epargne_mois)],
+    ];
+    if (m.mensualites_mois) {
+      lignes.push(['Mensualités de prêt', App.fmt.eur(m.mensualites_mois)
+        + (m.taux_endettement === null ? ''
+          : ` · ${App.fmt.pct(m.taux_endettement, 0)} des revenus`)]);
+    }
+    host.append(App.metricList(lignes));
+  },
+
+  /* Accueil d'une base vide.
+
+     Les deux points d'entree existaient deja, mais sur les onglets Patrimoine
+     et Depenses : invisibles depuis l'ecran ou l'application s'ouvre. */
+  renderAccueil(data) {
+    const panneau = App.el('#tab-overview');
+    const host = App.el('#ov-vide');
+    App.clear(host);
+    panneau.classList.toggle('vide', !!data.aucune_donnee);
+    if (!data.aucune_donnee) return false;
+
+    host.append(App.h('div', { class: 'empty-cta accueil' },
+      App.h('h2', {}, 'Rien n’est encore enregistré'),
+      App.h('p', {},
+        'Deux façons de commencer, dans l’ordre que vous voulez. '
+        + 'Tout reste modifiable ensuite.'),
+      App.h('div', { class: 'actions' },
+        App.h('button', {
+          class: 'btn primary big',
+          onclick: () => App.tabs.wealth.openAddChooser(),
+        }, 'Déclarer mon patrimoine'),
+        App.h('button', {
+          class: 'btn big',
+          onclick: () => App.tabs.expenses.openImport(),
+        }, 'Importer un relevé bancaire'))));
+    return true;
   },
 
   /* Observations factuelles.
@@ -160,10 +264,12 @@ App.tabs.overview = {
     if (!data) return;
     if (kind === 'networth' && App.tabs.overview.expanded !== 'networth') {
       App.tabs.overview.renderNetWorth(data.patrimoine_serie);
+    } else if (kind === 'patrimoine') {
+      App.tabs.overview.renderPatrimoine(data.patrimoine_par_famille);
+    } else if (kind === 'flux') {
+      App.tabs.overview.renderFlux(data.depenses_serie);
     } else if (kind === 'categories') {
       App.tabs.overview.renderCategories(data.mois);
-    } else if (kind === 'flows') {
-      App.tabs.overview.renderFlows(data.depenses_serie);
     }
     const c = App.state.charts[`chart-${kind}`];
     if (c) c.resize();
@@ -176,8 +282,14 @@ App.tabs.overview = {
     if (kind === 'networth') return App.tabs.overview.buildAssetFilters(host);
     // Le camembert donne la forme, le tableau les chiffres exacts : les deux
     // se lisent ensemble.
+    if (kind === 'patrimoine') {
+      host.append(App.tabs.overview.tablePatrimoine(data.patrimoine_par_famille));
+    }
+    // Le tableau porte les DOUZE mois, alors que les barres n'en montrent que
+    // six : c'est la période du trait de moyenne, et agrandir sert justement à
+    // voir ce que le graphique résume.
+    if (kind === 'flux') host.append(App.tabs.overview.tableFlows(data.depenses_serie));
     if (kind === 'categories') host.append(App.tabs.overview.tableCategories(data.mois));
-    if (kind === 'flows') host.append(App.tabs.overview.tableFlows(data.depenses_serie));
     return null;
   },
 
@@ -268,6 +380,30 @@ App.tabs.overview = {
         tbody));
   },
 
+  tablePatrimoine(familles) {
+    const lignes = familles || [];
+    const total = lignes.reduce((s, f) => s + f.montant, 0);
+    const tbody = App.h('tbody', {});
+    for (const f of lignes) {
+      tbody.append(App.h('tr', {},
+        App.h('td', {}, App.fmt.famille(f.famille)),
+        App.h('td', { class: 'right num' }, App.fmt.eur(f.montant)),
+        App.h('td', { class: 'right num' },
+          total ? App.fmt.pct(100 * f.montant / total) : '—')));
+    }
+    tbody.append(App.h('tr', {},
+      App.h('td', {}, App.h('strong', {}, 'Total des actifs')),
+      App.h('td', { class: 'right num' }, App.h('strong', {}, App.fmt.eur(total))),
+      App.h('td', {})));
+    return App.h('div', { class: 'table-wrap scroll-y' },
+      App.h('table', { class: 'table' },
+        App.h('thead', {}, App.h('tr', {},
+          App.h('th', {}, 'Famille'),
+          App.h('th', { class: 'right' }, 'Montant'),
+          App.h('th', { class: 'right' }, 'Part'))),
+        tbody));
+  },
+
   tableFlows(serie) {
     const tbody = App.h('tbody', {});
     for (const p of serie) {
@@ -318,10 +454,12 @@ App.tabs.overview = {
     // au lieu de le répéter.
     host.append(
       App.tabs.overview.kpi('Dépensé ce mois', App.fmt.eur(cur.depenses), deltaText, deltaClass),
+      // `nb_transactions` comptait TOUT le mois, dépenses comprises : sous
+      // « Revenus du mois », le nombre ne parlait de rien.
       App.tabs.overview.kpi('Revenus du mois', App.fmt.eur(cur.revenus),
         cur.transferts_internes
           ? `hors ${App.fmt.eur(cur.transferts_internes)} de virements internes`
-          : `${cur.nb_transactions} transaction(s)`),
+          : `${cur.nb_revenus} ligne(s) de revenu`),
       App.tabs.overview.kpi("Taux d'épargne",
         cur.taux_epargne === null ? '—' : App.fmt.ratio(cur.taux_epargne),
         `${App.fmt.eur(cur.epargne)} épargnés sur ${App.fmt.eur(cur.revenus)} de revenus`,
@@ -362,6 +500,48 @@ App.tabs.overview = {
           },
         },
         scales: { y: { ticks: { callback: (v) => App.fmt.eur(v, true) } } },
+      },
+    });
+  },
+
+  /* Répartition réelle du patrimoine, par famille d'actifs.
+
+     C'est l'actif brut : les passifs n'y figurent pas, une part de camembert
+     ne pouvant pas être négative. Le total est rappelé dans le titre pour que
+     l'écart avec le patrimoine net du héros ne surprenne pas. */
+  renderPatrimoine(familles) {
+    const total = (familles || []).reduce((s, f) => s + f.montant, 0);
+    const titre = App.el('#ov-pat-total');
+    if (titre) titre.textContent = total ? `${App.fmt.eur(total, true)} d’actifs` : '';
+
+    if (!familles || !familles.length) {
+      App.chart('chart-patrimoine', {
+        type: 'doughnut',
+        data: { labels: ['Aucun actif'], datasets: [{ data: [1], backgroundColor: ['#2a3242'] }] },
+        options: { plugins: { tooltip: { enabled: false }, legend: { display: false } } },
+      });
+      return;
+    }
+    App.chart('chart-patrimoine', {
+      type: 'doughnut',
+      data: {
+        labels: familles.map((f) => App.fmt.famille(f.famille)),
+        datasets: [{
+          data: familles.map((f) => f.montant),
+          backgroundColor: familles.map((_, i) => App.chartColors[i % App.chartColors.length]),
+          borderWidth: 0,
+        }],
+      },
+      options: {
+        cutout: '62%',
+        plugins: {
+          legend: { position: 'right' },
+          tooltip: {
+            callbacks: {
+              label: (c) => `${c.label} : ${App.fmt.eur(c.parsed)} (${App.fmt.pct(100 * c.parsed / total)})`,
+            },
+          },
+        },
       },
     });
   },
@@ -437,26 +617,51 @@ App.tabs.overview = {
     host.append(App.h('div', { class: 'rep-legend' },
       App.h('span', {}, `Base : ${App.fmt.eur(rep.base)}`),
       rep.hors_poches ? App.h('span', {}, `Hors poches : ${App.fmt.eur(rep.hors_poches)}`) : null,
-      App.h('span', {}, '| trait vertical = cible')));
+      App.h('span', {}, 'Trait vertical : la cible')));
   },
 
-  renderFlows(series) {
-    App.chart('chart-flows', {
+  /* Une seule carte de flux.
+
+     Il y en avait deux : une courbe « Dépenses — 12 mois » et un histogramme
+     « Dépenses / revenus — 6 mois », dans deux rangées différentes. La dépense
+     y était tracée deux fois, sur deux échelles, et il fallait faire l'aller-
+     retour pour savoir si un mois était au-dessus de l'ordinaire.
+
+     Les barres donnent les trois flux du mois, le trait la moyenne des douze
+     derniers : la tendance longue devient un repère posé sur le détail court.
+     Six colonnes au maximum — au-delà, trois grandeurs côte à côte deviennent
+     illisibles. Le tableau de la vue agrandie porte les douze mois. */
+  renderFlux(series) {
+    const points = series || [];
+    const s6 = points.slice(-6);
+    const moyenne = points.length
+      ? Math.round((points.reduce((s, p) => s + p.depenses, 0) / points.length) * 100) / 100
+      : 0;
+    App.chart('chart-flux', {
       type: 'bar',
       data: {
-        labels: series.map((p) => App.fmt.month(p.mois)),
+        labels: s6.map((p) => App.fmt.month(p.mois)),
         datasets: [
-          { label: 'Revenus', data: series.map((p) => p.revenus), backgroundColor: App.chartColors[1], borderRadius: 4 },
-          { label: 'Dépenses', data: series.map((p) => p.depenses), backgroundColor: App.chartColors[4], borderRadius: 4 },
-          { label: 'Épargne', data: series.map((p) => p.epargne), backgroundColor: App.chartColors[0], borderRadius: 4 },
+          { label: 'Revenus', data: s6.map((p) => p.revenus), backgroundColor: App.chartColors[1], borderRadius: 4 },
+          { label: 'Dépenses', data: s6.map((p) => p.depenses), backgroundColor: App.chartColors[4], borderRadius: 4 },
+          { label: 'Épargne', data: s6.map((p) => p.epargne), backgroundColor: App.chartColors[0], borderRadius: 4 },
+          {
+            type: 'line',
+            label: 'Dépense moyenne sur 12 mois',
+            data: s6.map(() => moyenne),
+            borderColor: App.chartColors[8],
+            borderDash: [5, 4], borderWidth: 1.5,
+            pointRadius: 0, fill: false,
+          },
         ],
       },
       options: {
+        interaction: { mode: 'index', intersect: false },
         plugins: {
           tooltip: { callbacks: { label: (c) => `${c.dataset.label} : ${App.fmt.eur(c.parsed.y)}` } },
         },
         scales: { y: { ticks: { callback: (v) => App.fmt.eur(v, true) } } },
       },
     });
-  }
+  },
 };

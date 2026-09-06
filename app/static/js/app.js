@@ -5,9 +5,16 @@ App.loadMeta = async function () {
   App.state.meta = await App.api.get('/api/meta');
 };
 
+/* Donnees de reference, lues UNE fois par navigation.
+
+   `/api/assets` et `/api/market/status` etaient demandes deux fois apres
+   chaque ecriture : une fois ici, une fois par `wealth.load()`. Cette
+   fonction est desormais seule a les lire, et porte le parametre dont
+   l'onglet Patrimoine a besoin : le mois affiche. */
 App.loadRefs = async function () {
+  const arrete = App.monthAsOf(App.state.month);
   const [portfolio, liabilities, market] = await Promise.all([
-    App.api.get('/api/assets'),
+    App.api.get(`/api/assets?date=${arrete}`),
     App.api.get('/api/liabilities'),
     App.api.get('/api/market/status'),
   ]);
@@ -16,6 +23,11 @@ App.loadRefs = async function () {
   App.state.portfolio = portfolio;
   App.state.market = market;
 };
+
+/* Onglets qui lisent `App.state.assets` ou `App.state.liabilities` au rendu.
+   La vue d'ensemble et l'archive tirent tout de leur propre appel : leur
+   imposer trois lectures de plus n'apporterait rien. */
+App.BESOIN_REFS = { expenses: true, wealth: true };
 
 /* Rangées dont les cellules entrent une par une, au lieu d'arriver d'un bloc
    au milieu du déroulement.
@@ -79,6 +91,7 @@ App.playReveal = function (sens) {
   }
   void panneau.offsetWidth;          // reflow : l'animation peut repartir
   panneau.classList.add('revealing');
+  App.doserFond(panneau);
 
   // Même image, même instant : la page qui part et celle qui arrive doivent
   // se mettre en mouvement ensemble, sinon ce n'est plus un défilement.
@@ -155,6 +168,21 @@ App.snapshotPanel = function () {
   zone.append(copie);
 };
 
+/* Intensité du fond animé, selon ce que la page a à montrer.
+
+   Sur un panneau long, les masses ne se voient que dans les marges et le
+   mouvement reste un décor. Sur l'accueil vide ou sur un patrimoine de trois
+   lignes, elles occupent presque toute la surface : le contenu flotte dessus
+   au lieu de s'y poser.
+
+   Le seuil est la hauteur de la fenêtre — au-delà, il y a de quoi remplir
+   l'écran. `--lava-opacity` existe déjà et pilote seule l'intensité : rien
+   d'autre à toucher, et la transition CSS fait le reste. */
+App.doserFond = function (panneau) {
+  const court = panneau.scrollHeight < window.innerHeight * 0.9;
+  document.documentElement.dataset.fond = court ? 'court' : 'long';
+};
+
 App.dropSnapshot = function () {
   clearTimeout(App.snapshotTimer);
   App.els('.panel-leaving').forEach((el) => el.remove());
@@ -178,42 +206,35 @@ App.revealOrder = function (panneau) {
 };
 
 /* Richesse des animations : le mode est posé dans l'en-tête du document, à
-   partir du nombre de cœurs et de la mémoire. C'est une estimation, et elle peut
-   se tromper — un processeur récent avec un affichage intégré modeste passe pour
-   une bonne machine.
+   partir du seul réglage de l'utilisateur (voir la section Apparence des
+   paramètres) et de `prefers-reduced-motion`.
 
-   On mesure donc la fluidité RÉELLE pendant la première animation, et on
-   rétrograde si elle n'y est pas. La décision est mémorisée : elle vaut pour la
-   machine, pas pour la session. Un choix explicite de l'utilisateur n'est jamais
-   écrasé. */
-App.CLE_ANIM = 'patrimoine.animations';
+   IL N'Y A PLUS DE DÉTECTION AUTOMATIQUE, et c'est délibéré. Deux mécanismes
+   décidaient à la place de l'utilisateur :
 
-App.mesurerFluidite = function () {
-  const racine = document.documentElement;
-  if (racine.dataset.anim !== 'complet') return;      // déjà économe
-  try {
-    if (localStorage.getItem(App.CLE_ANIM)) return;   // choix explicite, on n'y touche pas
-  } catch (e) { return; }
+   - une estimation d'après `navigator.hardwareConcurrency` et
+     `navigator.deviceMemory`. Cette seconde API n'existe pas dans WebKit :
+     elle valait `undefined`, le repli donnait 4, et le test était `<= 4`. Tout
+     Mac basculait donc en mode économe, quel que soit son processeur ;
+   - une mesure de fluidité sur les 32 premières images, qui rétrogradait puis
+     MÉMORISAIT sa décision. Une machine momentanément occupée se retrouvait
+     durablement en mode dégradé, sans que rien ne le signale ni ne permette
+     d'en sortir.
 
-  const intervalles = [];
-  let precedent = performance.now();
-  let restant = 32;                                   // environ une demi-seconde
+   Le mode complet est désormais le défaut partout, et le mode économe un choix
+   assumé. Une machine qui peine, c'est à son propriétaire de le constater. */
+App.CLE_ANIM = 'wealfy.animations';
 
-  const image = (t) => {
-    intervalles.push(t - precedent);
-    precedent = t;
-    if (--restant > 0) { requestAnimationFrame(image); return; }
+App.animationsEconomes = function () {
+  try { return localStorage.getItem(App.CLE_ANIM) === 'economes'; } catch (e) { return false; }
+};
 
-    // Médiane plutôt que moyenne : une seule image longue (un ramasse-miettes,
-    // une fenêtre qui prend le focus) ne doit pas condamner la machine.
-    intervalles.sort((a, b) => a - b);
-    const mediane = intervalles[intervalles.length >> 1];
-    if (mediane > 22) {                               // moins de ~45 images/s
-      racine.dataset.anim = 'econome';
-      try { localStorage.setItem(App.CLE_ANIM, 'economes'); } catch (e) { /* ignore */ }
-    }
-  };
-  requestAnimationFrame(image);
+App.setAnimations = function (economes) {
+  try { localStorage.setItem(App.CLE_ANIM, economes ? 'economes' : 'completes'); } catch (e) { /* ignore */ }
+  // `prefers-reduced-motion` reste prioritaire : une préférence système
+  // explicite ne se laisse pas contredire par un réglage applicatif.
+  const force = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  document.documentElement.dataset.anim = (economes || force) ? 'econome' : 'complet';
 };
 
 /* Place le trait de navigation sous l'onglet actif.
@@ -270,6 +291,11 @@ App.showTab = async function (name, sens) {
   App.currentTab = name;
   App.els('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   App.els('.panel').forEach((p) => p.classList.toggle('active', p.id === `tab-${name}`));
+  // L'archive est multi-mois par nature : un sélecteur de mois n'a rien à y
+  // commander. Il y restait pourtant, et en changer jouait l'animation de
+  // carrousel sur un tableau identique. Les trois autres onglets s'y réfèrent
+  // vraiment, Patrimoine compris depuis qu'il prend sa photo à cette date.
+  App.el('.month-picker').hidden = name === 'history';
   // Le trait part tout de suite, avec le changement de libellé : il accompagne
   // le clic au lieu d'attendre la fin du chargement des données.
   App.placeIndicator();
@@ -281,6 +307,7 @@ App.showTab = async function (name, sens) {
   App.el(`#tab-${name}`).classList.add('attente');
 
   try {
+    if (App.BESOIN_REFS[name]) await App.loadRefs();
     await App.tabs[name].load();
   } catch (e) {
     App.toast(e.message, 'error');
@@ -294,10 +321,66 @@ App.showTab = async function (name, sens) {
   App.playReveal(sens);
 };
 
-/* Recharge l'onglet courant. */
+/* Raccourcis clavier.
+
+   Il n'y en avait aucun : sur une application de bureau ouverte tous les jours,
+   changer de mois demandait la souris à chaque fois.
+
+   Trois refus, dans cet ordre : une modale ouverte (le clavier lui appartient),
+   un champ de saisie qui a le focus (taper « 2 » dans un montant ne doit pas
+   changer d'onglet), une touche de modification enfoncée (Ctrl+1 appartient au
+   navigateur). */
+App.CHAMPS = 'input, select, textarea, [contenteditable]';
+
+App.raccourcis = function (e) {
+  if (!App.el('#modal-backdrop').hidden) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target && e.target.closest && e.target.closest(App.CHAMPS)) return;
+
+  const onglets = App.els('.tab').map((b) => b.dataset.tab);
+  const index = '1234'.indexOf(e.key);
+  if (index >= 0 && onglets[index]) {
+    e.preventDefault();
+    if (onglets[index] !== App.currentTab) App.showTab(onglets[index]);
+    return;
+  }
+
+  // Les flèches ne font rien là où le sélecteur de mois est masqué : on
+  // rendrait au clavier ce qu'on vient de retirer à la souris.
+  if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight')
+      && !App.el('.month-picker').hidden) {
+    e.preventDefault();
+    const sens = e.key === 'ArrowRight' ? 1 : -1;
+    App.setMonth(App.shiftMonth(App.state.month, sens), sens > 0 ? 'next' : 'prev');
+    return;
+  }
+
+  if (e.key === '/') {
+    e.preventDefault();
+    const chercher = () => {
+      const champ = App.el('#ex-search');
+      if (champ) champ.focus();
+    };
+    if (App.currentTab === 'expenses') chercher();
+    else App.showTab('expenses').then(chercher);
+  }
+};
+
+/* Recharge l'onglet courant. Les references suivent, dans `showTab`, et
+   seulement pour les onglets qui les lisent. */
 App.refresh = async function () {
-  await App.loadRefs();
   await App.showTab(App.currentTab);
+};
+
+/* Redessine les graphiques de l'onglet courant depuis les donnees deja
+   chargees. Sert au changement de theme : les couleurs sont lues au rendu. */
+App.redessinerGraphiques = function () {
+  if (App.currentTab !== 'overview' || !App.tabs.overview.dernier) return;
+  // `redraw` connait deja le cas d'une carte agrandie, qu'il ne doit pas
+  // remettre a plat.
+  for (const kind of ['networth', 'patrimoine', 'flux', 'categories']) {
+    App.tabs.overview.redraw(kind);
+  }
 };
 
 /* Recharge tout ce qui est visible après une écriture. */
@@ -311,11 +394,18 @@ App.refreshOthers = async function () {
   await App.loadRefs();
 };
 
+/* Le champ du mois est en lecture seule depuis qu'il n'est plus un
+   `<input type="month">` : celui-ci s'affichait en mm/aaaa ou aaaa-mm selon
+   le format regional du systeme. Il ne porte plus que le libelle. */
+App.setMonthLabel = function (ym) {
+  App.el('#month-input').value = App.fmt.month(ym);
+};
+
 /* `sens` vaut 'next', 'prev', ou rien quand le mois est choisi directement
    dans le sélecteur — aucun sens de déplacement à représenter dans ce cas. */
 App.setMonth = async function (ym, sens) {
   App.state.month = ym;
-  App.el('#month-input').value = ym;
+  App.setMonthLabel(ym);
   localStorage.setItem('patrimoine.month', ym);
 
   // `sens || null` et non `sens` : passer `undefined` laisserait showTab
@@ -327,19 +417,32 @@ App.setMonth = async function (ym, sens) {
    rendu, pour n'avoir qu'une seule transition au lieu de deux enchaînées. */
 App.goToMonth = async function (ym) {
   App.state.month = ym;
-  App.el('#month-input').value = ym;
+  App.setMonthLabel(ym);
   localStorage.setItem('patrimoine.month', ym);
   await App.showTab('expenses');
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // La croix est explicite : elle ferme du premier coup. Le clic hors cadre et
+  // Échap sont ambigus — c'est eux qui emportaient une saisie longue — et
+  // passent donc par `demanderFermeture`.
   App.el('#modal-close').addEventListener('click', () => App.modal.close());
   App.el('#modal-backdrop').addEventListener('click', (e) => {
-    if (e.target.id === 'modal-backdrop') App.modal.close();
+    if (e.target.id === 'modal-backdrop') App.modal.demanderFermeture();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !App.el('#modal-backdrop').hidden) App.modal.close();
+    if (e.key === 'Escape' && !App.el('#modal-backdrop').hidden) App.modal.demanderFermeture();
   });
+  document.addEventListener('keydown', App.modal.piegerFocus);
+  document.addEventListener('keydown', App.raccourcis);
+
+  // Un fichier lâché à côté de la zone de dépôt ferait quitter la page pour
+  // l'afficher, et la saisie en cours partirait avec elle. Tout dépôt hors
+  // des zones prévues est donc refusé ; celles-ci arrêtent l'événement
+  // elles-mêmes, avant qu'il n'arrive ici.
+  for (const nom of ['dragover', 'drop']) {
+    window.addEventListener(nom, (e) => e.preventDefault());
+  }
 
   App.els('.tab').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -362,7 +465,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   const monthInput = App.el('#month-input');
-  monthInput.addEventListener('change', () => App.setMonth(monthInput.value));
+  monthInput.addEventListener('click', () => App.calendrier({
+    ancre: monthInput, iso: App.state.month, mode: 'mois',
+    onPick: (ym) => App.setMonth(ym),
+  }));
   App.el('#month-prev').addEventListener('click',
     () => App.setMonth(App.shiftMonth(App.state.month, -1), 'prev'));
   App.el('#month-next').addEventListener('click',
@@ -373,25 +479,42 @@ document.addEventListener('DOMContentLoaded', async () => {
     () => App.tabs.overview.toggleChart(b.dataset.zoom)));
   App.el('#toggle-privacy').addEventListener('click',
     () => App.setPrivacy(!App.privacyOn()));
-  App.el('#toggle-theme').addEventListener('click', async () => {
-    App.setTheme(App.currentTheme() === 'dark' ? 'light' : 'dark');
-    // Les graphiques lisent leurs couleurs au moment du rendu : on les refait.
-    await App.showTab(App.currentTab);
+  App.el('#toggle-theme').addEventListener('click', () => {
+    // Cycle système -> clair -> sombre -> système. Passer par « système »
+    // à chaque tour est ce qui permet de revenir au suivi automatique ;
+    // l'ancien bouton à deux positions l'interdisait définitivement.
+    const suivant = App.THEMES[(App.THEMES.indexOf(App.themeChoisi()) + 1) % App.THEMES.length];
+    App.setTheme(suivant);
+    // Les graphiques lisent leurs couleurs au rendu : on les refait, et rien
+    // d'autre. Recharger l'onglet entier rejouait toute l'apparition et
+    // redemandait au serveur des séries qu'on avait déjà en mémoire.
+    App.redessinerGraphiques();
   });
 
   App.el('#ex-add').addEventListener('click', () => App.tabs.expenses.openForm(null));
   App.el('#ex-import').addEventListener('click', () => App.tabs.expenses.openImport());
-  App.el('#ex-search').addEventListener('input', () => App.tabs.expenses.renderTable());
+  // Recherche debouncee : `renderTable` reconstruit toutes les lignes, et le
+  // faire a chaque frappe rendait la saisie pateuse sur un mois charge.
+  let rechercheDelai;
+  App.el('#ex-search').addEventListener('input', () => {
+    clearTimeout(rechercheDelai);
+    rechercheDelai = setTimeout(() => App.tabs.expenses.renderTable(), 150);
+  });
   App.el('#ex-filter-cat').addEventListener('change', () => App.tabs.expenses.renderTable());
+  App.el('#ex-select-all').addEventListener('change',
+    (e) => App.tabs.expenses.toutSelectionner(e.target.checked));
 
   App.el('#we-refresh-quotes').addEventListener('click',
     (e) => App.tabs.wealth.refreshQuotes(e.target));
   App.el('#we-add').addEventListener('click', () => App.tabs.wealth.openAddChooser());
-  App.el('#we-archived').addEventListener('change', () => App.tabs.wealth.load());
 
   App.state.month = localStorage.getItem('patrimoine.month') || App.monthISO();
-  monthInput.value = App.state.month;
-  App.setTheme(App.currentTheme());
+  App.setMonthLabel(App.state.month);
+  // `false` : on repeint l'icône et la palette sans RIEN mémoriser. Écrire ici
+  // était le défaut d'origine — la préférence système, lue une fois au premier
+  // lancement, devenait un choix figé que plus rien ne remettait en question.
+  App.setTheme(App.themeChoisi(), false);
+  App.suivreThemeSysteme();
   // Masquage actif par defaut : seul un « 0 » explicitement memorise le leve.
   App.setPrivacy(localStorage.getItem('patrimoine.privacy') !== '0');
 
@@ -399,9 +522,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     await App.loadMeta();
     await App.loadRefs();
     await App.showTab('overview');
-    // Pendant la toute première apparition : c'est le moment le plus chargé de
-    // la session, donc le plus révélateur de ce que la machine encaisse.
-    App.mesurerFluidite();
     // Volontairement après le premier rendu, et sans await : l'interface
     // s'affiche immédiatement depuis le cache, les cours arrivent ensuite.
     App.autoRefreshQuotes();

@@ -38,11 +38,11 @@ DEFAULT_SETTINGS = {
     # tout. Exclues des DEUX cotes, sinon le meme euro serait compte en depense
     # sur un compte et en revenu sur l'autre.
     "categories_transfert": ["Transfert interne"],
-    # Libelles qui trahissent un mouvement entre vos propres comptes.
-    "mots_cles_transfert": [
-        "revolut", "virement interne", "vir interne", "transfert compte",
-        "topup", "top-up", "vers mon compte", "compte a compte",
-    ],
+    # Montant mensuel vise par categorie de depense, {categorie: montant}.
+    # Le patrimoine avait ses cibles (`repartition_cible`) et l'ecart etait
+    # affiche ; les depenses n'avaient rien. Vide par defaut : un budget qu'on
+    # n'a pas choisi ne veut rien dire.
+    "budgets_categories": {},
     # Tolerance de rapprochement automatique des paires de virements.
     "transfert_jours_tolerance": 4,
     "tolerance_mensualite": 2.0,
@@ -69,6 +69,11 @@ DEFAULT_SETTINGS = {
     "categories_charges_fixes": [
         "Logement", "Assurances", "Abonnements", "Remboursement pret", "Impots",
     ],
+    # Jour de capitalisation des produits a taux, au format 'MM-JJ'. Le 31
+    # decembre pour le Livret A, le LDDS, le LEP, le Livret Jeune, le PEL et le
+    # CEL. Reglable parce qu'un depot a terme peut crediter a sa date
+    # anniversaire, et parce qu'un decret peut toujours changer la regle.
+    "date_credit_interets": "12-31",
     "mois_precaution_cible": 4,      # mois de depenses couverts par les livrets
     "seuil_concentration": 40,       # % des actifs financiers sur une seule ligne
     "seuil_crypto": 10,              # % du patrimoine net
@@ -152,12 +157,18 @@ def init_db(app):
     with open(SCHEMA_PATH, "r", encoding="utf-8") as fh:
         con.executescript(fh.read())
     existing = {r["key"] for r in con.execute("SELECT key FROM settings")}
+    base_neuve = not existing
     for key, value in DEFAULT_SETTINGS.items():
         if key not in existing:
             con.execute(
                 "INSERT INTO settings(key, value) VALUES (?, ?)",
                 (key, json.dumps(value, ensure_ascii=False)),
             )
+    # Uniquement a la toute premiere creation : une base existante recoit ses
+    # regles de virement par conversion (voir `_fondre_mots_cles_dans_les_regles`),
+    # et un utilisateur qui a supprime les siennes ne doit pas les voir revenir.
+    if base_neuve:
+        _regles_de_virement(con)
     _migrate_settings(con)
     _migrate_columns(con)
     con.commit()
@@ -171,8 +182,10 @@ def _migrate_columns(con):
     colonne ajoutee au schema doit donc etre appliquee explicitement.
     """
     wanted = {
-        "securities": [("kind", "TEXT NOT NULL DEFAULT 'titre'")],
-        "asset_movements": [("dedup_hash", "TEXT")],
+        "securities": [("kind", "TEXT NOT NULL DEFAULT 'titre'"),
+                       ("taux_annuel", "REAL")],
+        "asset_movements": [("dedup_hash", "TEXT"),
+                            ("frais", "REAL NOT NULL DEFAULT 0")],
     }
     for table, columns in wanted.items():
         try:
@@ -203,6 +216,37 @@ def _read_setting(con, key):
         return None
 
 
+# Motifs qui trahissent un mouvement entre les comptes de l'utilisateur.
+#
+# C'etait un reglage cache, `mots_cles_transfert`, avec son propre ecran et son
+# propre vocabulaire — alors qu'une regle de classification fait exactement
+# cela : chercher un texte dans un libelle pour attribuer une categorie. Ils
+# sont donc poses comme des REGLES ordinaires, sur une base neuve : visibles
+# dans le tableau des regles, modifiables et supprimables comme les autres.
+MOTIFS_VIREMENT = [
+    "revolut", "virement interne", "vir interne", "transfert compte",
+    "topup", "top-up", "vers mon compte", "compte a compte",
+]
+
+# Priorite des regles de virement. Volontairement au-dessus de 100, la valeur
+# par defaut : elles passent APRES les regles ecrites a la main, comme les
+# mots-cles passaient apres elles.
+PRIORITE_VIREMENT = 200
+
+
+def _regles_de_virement(con):
+    """Motifs de virement, en regles. Rendus vers une categorie marquee
+    « virement interne » dans le tableau des roles."""
+    categories = _read_setting(con, "categories_transfert")
+    cible = (categories or ["Transfert interne"])[0]
+    for motif in MOTIFS_VIREMENT:
+        con.execute(
+            "INSERT INTO rules(id, pattern, cible_type, valeur, priorite) "
+            "VALUES (?,?,?,?,?)",
+            (uuid.uuid4().hex, motif, "categorie_depense", cible, PRIORITE_VIREMENT),
+        )
+
+
 def _migrate_settings(con):
     """Ajustements sur une base creee avant l'ajout d'un reglage.
 
@@ -226,6 +270,52 @@ def _migrate_settings(con):
             "UPDATE settings SET value = ? WHERE key = 'categories_depenses'",
             (json.dumps(categories + manquantes, ensure_ascii=False),),
         )
+    _fondre_mots_cles_dans_les_regles(con)
+
+
+def _fondre_mots_cles_dans_les_regles(con):
+    """Convertit `mots_cles_transfert` en regles de classification.
+
+    Deux mecanismes cherchaient un texte dans le libelle d'une operation : les
+    regles, qui attribuent une categorie, et ces mots-cles, qui marquaient un
+    virement interne. Or une regle sait deja attribuer une categorie de
+    virement : le second n'etait qu'un cas particulier du premier, avec son
+    propre ecran et son propre vocabulaire.
+
+    La conversion est faite une seule fois : la presence de la cle en base est
+    ce qui la declenche, sa suppression ce qui l'arrete. Le reglage a donc ete
+    retire de `DEFAULT_SETTINGS`, sinon `get_setting` le ressusciterait.
+
+    Un mot deja couvert par une regle n'est pas duplique.
+    """
+    row = con.execute(
+        "SELECT value FROM settings WHERE key = 'mots_cles_transfert'"
+    ).fetchone()
+    if row is None:
+        return
+    try:
+        mots = json.loads(row["value"])
+    except (ValueError, TypeError):
+        mots = []
+
+    categories = _read_setting(con, "categories_transfert")
+    cible = (categories or ["Transfert interne"])[0]
+    existants = {
+        (r["pattern"] or "").strip().lower()
+        for r in con.execute("SELECT pattern FROM rules")
+    }
+    for mot in mots if isinstance(mots, list) else []:
+        motif = str(mot or "").strip()
+        if not motif or motif.lower() in existants:
+            continue
+        con.execute(
+            "INSERT INTO rules(id, pattern, cible_type, valeur, priorite) "
+            "VALUES (?,?,?,?,?)",
+            (uuid.uuid4().hex, motif, "categorie_depense", cible,
+             PRIORITE_VIREMENT),
+        )
+        existants.add(motif.lower())
+    con.execute("DELETE FROM settings WHERE key = 'mots_cles_transfert'")
 
 
 # --- settings -------------------------------------------------------------

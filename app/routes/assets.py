@@ -4,7 +4,7 @@ from datetime import date
 
 from flask import jsonify, request
 
-from .. import finance, services
+from .. import finance, market, services
 from ..db import execute, new_id, query, row_to_dict
 from ._blueprint import bp
 from ._helpers import as_date, as_float, body, fail
@@ -15,6 +15,10 @@ def list_assets():
     at = as_date(request.args.get("date"), date.today().isoformat())
     include_archived = request.args.get("archived") == "1"
     snap = services.portfolio(at, include_archived)
+    # Le gain de l'annee demande une seconde photo, au 31 decembre precedent.
+    # Elle passe par le meme cache : la lecture des actifs et des mouvements
+    # n'est pas refaite.
+    snap["gain_annuel"] = services.gain_annuel(at, snap)
     return jsonify(snap)
 
 
@@ -28,6 +32,12 @@ def get_asset_detail(aid):
     ctx = services.market_context(at)
     detail = services.asset_detail(asset, movements, at, ctx)
     payload = {"asset": detail, "movements": movements}
+    # Ce que ce produit a coute, tous frais confondus : ceux portes par une
+    # transaction et ceux qui font mouvement a eux seuls.
+    payload["frais_payes"] = round(sum(
+        finance.frais_de(mv)
+        + (abs(float(mv["montant"] or 0)) if mv["type"] == "frais" else 0.0)
+        for mv in movements), 2)
     if asset["type"] in ("PEA", "CTO", "Crypto", "AssuranceVie", "PER"):
         payload["marche"] = services.market_asset_detail(aid, at, ctx)
     if asset["type"] in ("Immobilier", "SCPI", "Vehicule"):
@@ -49,16 +59,33 @@ def create_asset():
         return fail("Le type est obligatoire.")
     d = as_date(data.get("date_acquisition"), date.today().isoformat())
     aid = new_id()
+    actuelle = as_float(data.get("valeur_actuelle"), None)
     execute(
         "INSERT INTO assets(id, type, label, date_acquisition, valeur_acquisition, "
         "valeur_actuelle, metadata) VALUES (?,?,?,?,?,?,?)",
         (
             aid, atype, label, d,
             as_float(data.get("valeur_acquisition"), 0.0) or 0.0,
-            as_float(data.get("valeur_actuelle"), None),
+            actuelle,
             json.dumps(data.get("metadata") or {}, ensure_ascii=False),
         ),
     )
+    # « Montant aujourd'hui » sur un produit ouvert AVANT aujourd'hui : c'est un
+    # solde du jour, pas un depot d'epoque. On le pose donc comme un fait date.
+    #
+    # Sans cela, le couple (date d'ouverture, montant) affirme que la somme
+    # etait la des l'ouverture, et les interets courent sur toute la periode :
+    # un livret ouvert en 2003 et declare aujourd'hui se voyait crediter vingt
+    # ans d'interets que personne n'a touches. La date d'ouverture reste ce
+    # qu'elle est — l'anciennete du produit, qui compte pour un PEA.
+    aujourdhui = date.today().isoformat()
+    if actuelle is not None and d < aujourdhui:
+        execute(
+            "INSERT INTO asset_movements(id, asset_id, date, montant, type, note) "
+            "VALUES (?,?,?,?,'valorisation',?)",
+            (new_id(), aid, aujourdhui, round(actuelle, 2),
+             "Solde declare a la creation"),
+        )
     return jsonify(row_to_dict(query("SELECT * FROM assets WHERE id = ?", (aid,), one=True))), 201
 
 
@@ -108,7 +135,8 @@ def create_assets_batch():
 
 @bp.put("/api/assets/<aid>")
 def update_asset(aid):
-    if not services.get_asset(aid):
+    asset = services.get_asset(aid)
+    if not asset:
         return fail("Actif introuvable.", 404)
     data = body()
     fields, args = [], []
@@ -135,6 +163,36 @@ def update_asset(aid):
         return fail("Rien a modifier.")
     args.append(aid)
     execute(f"UPDATE assets SET {', '.join(fields)} WHERE id = ?", args)
+
+    # Sur un produit a taux, `valeur_actuelle` seule ne servait a rien :
+    # `finance.valeur_livret` ne se recale que sur un mouvement de valorisation
+    # et continuait a composer depuis la valeur d'acquisition. Le champ etait
+    # donc lettre morte — saisir 8 000 EUR laissait afficher un tout autre
+    # chiffre. On pose la valorisation datee qui manquait.
+    nouvelle = as_float(data.get("valeur_actuelle"), None) if "valeur_actuelle" in data else None
+    type_actif = (data.get("type") or asset["type"] or "").strip()
+    ancienne = asset["valeur_actuelle"]
+    # Seulement si le montant CHANGE : enregistrer la fiche pour corriger un
+    # libelle ou un taux empilait sinon une valorisation par sauvegarde.
+    if (nouvelle is not None and type_actif in market.RATE_ASSET_TYPES
+            and (ancienne is None or round(float(ancienne), 2) != round(nouvelle, 2))):
+        # `services.get_asset` rend deja `metadata` sous forme de dict.
+        meta = data["metadata"] if "metadata" in data else (asset["metadata"] or {})
+        if (meta or {}).get("taux_annuel") not in (None, ""):
+            aujourdhui = date.today().isoformat()
+            # Une seule valorisation par jour : on remplace celle du jour au
+            # lieu d'en accumuler une a chaque correction de saisie.
+            execute(
+                "DELETE FROM asset_movements WHERE asset_id = ? AND date = ? "
+                "AND type = 'valorisation'",
+                (aid, aujourdhui),
+            )
+            execute(
+                "INSERT INTO asset_movements(id, asset_id, date, montant, type, note) "
+                "VALUES (?,?,?,?,'valorisation',?)",
+                (new_id(), aid, aujourdhui, round(nouvelle, 2),
+                 "Valeur saisie depuis la fiche"),
+            )
     return jsonify(row_to_dict(query("SELECT * FROM assets WHERE id = ?", (aid,), one=True)))
 
 

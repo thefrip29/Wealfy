@@ -17,6 +17,9 @@ def market_status():
     enabled = bool(get_setting("market_enabled", False))
     securities = rows_to_list(query("SELECT * FROM securities ORDER BY ticker"))
     mapped = {s["ticker"] for s in securities if s["symbol"]}
+    # Un support non cote n'a pas de symbole a mapper : le signaler comme « a
+    # faire » enverrait l'utilisateur chercher une correspondance inexistante.
+    mapped |= {s["ticker"] for s in securities if s["kind"] == market.NON_COTE}
     tickers = market.known_tickers()
     non_mappes = sorted({t for t, atype in tickers
                          if atype in market.MARKET_ASSET_TYPES and t not in mapped})

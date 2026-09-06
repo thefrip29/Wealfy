@@ -213,6 +213,25 @@ def build_version_file():
     print(f"Version {VERSION} : {VERSION_FILE}")
 
 
+def _sans_imagerie():
+    """Ecarte Pillow et NumPy de l'executable.
+
+    pypdf sait extraire les IMAGES d'un PDF, et importe Pillow pour cela.
+    PyInstaller suit cet import optionnel, et le hook de Pillow entraine NumPy
+    derriere lui : l'exe passait de 17 a 37 Mo pour une fonction que
+    l'application n'appelle jamais. Elle ne lit que du texte
+    (`importer.extract_text`), et un releve bancaire scanne reste illisible de
+    toute facon.
+
+    Pillow sert bien au projet, mais uniquement A LA CONSTRUCTION, pour dessiner
+    l'icone : ce script l'importe, l'application non.
+    """
+    return [
+        "--exclude-module", "PIL",
+        "--exclude-module", "numpy",
+    ]
+
+
 def _donnees_embarquees():
     """Ressources a embarquer, destinations alignees sur app/paths.py.
 
@@ -243,10 +262,14 @@ def construire_windows():
         "--version-file", VERSION_FILE,
         *_donnees_embarquees(),
         # PyInstaller ne voit pas ces imports : waitress est charge par nom,
-        # et pywebview choisit son moteur d'affichage a l'execution.
+        # pywebview choisit son moteur d'affichage a l'execution, et pypdf
+        # n'est importe qu'au moment de lire un releve PDF (import tardif,
+        # pour que l'application demarre meme sans lui).
         "--hidden-import", "waitress",
+        "--hidden-import", "pypdf",
         "--hidden-import", "webview.platforms.edgechromium",
         "--hidden-import", "webview.platforms.winforms",
+        *_sans_imagerie(),
         "--collect-all", "webview",
         "run.py",
     ]
@@ -282,6 +305,9 @@ def construire_macos():
         "--osx-bundle-identifier", BUNDLE_ID,
         *_donnees_embarquees(),
         "--hidden-import", "waitress",
+        # Importe tardivement par app/importer.py : l'analyse statique le manque.
+        "--hidden-import", "pypdf",
+        *_sans_imagerie(),
         # Cocoa remplace les moteurs Windows. Les inclure ici ferait echouer
         # l'analyse, faute de pythonnet.
         "--hidden-import", "webview.platforms.cocoa",

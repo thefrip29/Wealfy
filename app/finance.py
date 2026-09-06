@@ -4,7 +4,7 @@ Tout est recalcule a la volee : aucun de ces resultats n'est destine a etre
 stocke en base (cf. cahier des charges, section 6 et 9).
 """
 import calendar
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 # --- utilitaires de dates -------------------------------------------------
 
@@ -181,7 +181,17 @@ def asset_value_at(asset, movements, at_date=None, use_manual_current=True) -> f
         return 0.0
 
     if use_manual_current and at_date >= date.today() and asset["valeur_actuelle"] is not None:
-        return float(asset["valeur_actuelle"])
+        # Le solde declare fait autorite, MAIS il date du jour ou on l'a
+        # declare : les frais preleves depuis lui sont sortis du produit sans
+        # que ce chiffre en sache rien. Sans cette soustraction, enregistrer un
+        # frais ne changeait rien a l'ecran.
+        #
+        # On ne retient que ceux posterieurs a la derniere valorisation :
+        # au-dela, le solde re-declare les contient deja, et les compter une
+        # seconde fois les ferait payer deux fois.
+        return round(float(asset["valeur_actuelle"])
+                     - frais_autonomes(movements, at_date,
+                                       depuis=_derniere_valorisation(movements, at_date)), 2)
 
     base = float(asset["valeur_acquisition"] or 0)
     base_date = acq or at_date
@@ -194,7 +204,9 @@ def asset_value_at(asset, movements, at_date=None, use_manual_current=True) -> f
     flows = 0.0
     for mv in ordered:
         d = parse_date(mv["date"])
-        if d and base_date < d <= at_date and mv["type"] in ("versement", "retrait"):
+        # `frais` compris : l'argent d'un frais autonome quitte reellement le
+        # produit, sa valeur doit baisser d'autant.
+        if d and base_date < d <= at_date and mv["type"] in ("versement", "retrait", "frais"):
             flows += float(mv["montant"] or 0)
     return round(base + flows, 2)
 
@@ -204,7 +216,14 @@ def asset_value_at(asset, movements, at_date=None, use_manual_current=True) -> f
 # Les livrets ne se cotent pas : leurs interets se calculent, selon la regle
 # francaise des quinzaines. Un versement porte interet a partir du 1er ou du 16
 # qui suit ; un retrait cesse d'en produire a partir du 1er ou du 16 qui
-# precede ; les interets sont capitalises le 31 decembre.
+# precede ; les interets sont capitalises a la date de credit (le 31 decembre
+# pour tous les produits reglementes).
+#
+# Le solde renvoye est le CAPITAL, celui du releve bancaire : les interets de
+# l'exercice en cours ne sont pas encore credites et n'y figurent donc pas.
+# `interets_prevus` dit separement ce qui tombera a la prochaine echeance.
+
+CREDIT_PAR_DEFAUT = "12-31"
 
 
 def _quinzaine(d: date) -> int:
@@ -212,11 +231,58 @@ def _quinzaine(d: date) -> int:
     return d.year * 24 + (d.month - 1) * 2 + (0 if d.day <= 15 else 1)
 
 
-def valeur_livret(asset, movements, taux_annuel, at_date=None) -> float:
-    """Capital + interets courus d'un livret a une date donnee.
+def _quinzaine_revolue(d: date) -> bool:
+    """Vrai si `d` est le dernier jour de sa quinzaine (le 15, ou fin de mois).
+
+    Une quinzaine ne paie qu'une fois ecoulee. Sans ce controle, la quinzaine
+    en cours etait creditee d'avance : un livret declare le jour meme affichait
+    aussitot une quinzaine d'interets, soit +0,1 % au taux du Livret A, et une
+    plus-value sortie de nulle part.
+    """
+    return d.day == 15 or d.day == calendar.monthrange(d.year, d.month)[1]
+
+
+def _jour_credit(credit):
+    """'MM-JJ' -> (mois, jour). Retombe sur le 31 decembre si illisible."""
+    try:
+        mois, jour = str(credit or CREDIT_PAR_DEFAUT).split("-")
+        mois, jour = int(mois), int(jour)
+        date(2000, mois, min(jour, calendar.monthrange(2000, mois)[1]))
+        return mois, jour
+    except (ValueError, TypeError):
+        return 12, 31
+
+
+def _quinzaine_credit(annee_quinzaine, mois, jour):
+    """Quinzaine ou tombe la capitalisation, pour une annee donnee."""
+    jour = min(jour, calendar.monthrange(annee_quinzaine, mois)[1])
+    return _quinzaine(date(annee_quinzaine, mois, jour))
+
+
+def _debut_millesime(d, mois, jour):
+    """Lendemain de la derniere capitalisation a la date `d`.
+
+    C'est la que demarre l'annee d'interets en cours. Les interets courus
+    depuis cette date sont dus : la banque les versera a la prochaine echeance,
+    quoi qu'il arrive entre-temps.
+    """
+    echeance = date(d.year, mois, min(jour, calendar.monthrange(d.year, mois)[1]))
+    if echeance >= d:
+        an = d.year - 1
+        echeance = date(an, mois, min(jour, calendar.monthrange(an, mois)[1]))
+    return echeance + timedelta(days=1)
+
+
+def valeur_livret(asset, movements, taux_annuel, at_date=None, credit=None) -> float:
+    """Capital d'un livret a une date donnee, interets deja credites inclus.
 
     Calcul pur, sans reseau, recalcule a chaque appel : une correction sur un
     versement passe se repercute immediatement.
+
+    Ce que la fonction ne renvoie PAS : les interets de l'exercice en cours.
+    Ils ne sont pas encore acquis, la banque ne les affiche pas non plus, et les
+    ajouter faisait diverger l'application du releve toute l'annee. Voir
+    `interets_prevus`.
     """
     at_date = parse_date(at_date) or date.today()
     acq = parse_date(asset["date_acquisition"])
@@ -225,12 +291,63 @@ def valeur_livret(asset, movements, taux_annuel, at_date=None) -> float:
 
     # Point de depart : derniere valorisation connue, sinon l'acquisition.
     base_date, base = acq, float(asset["valeur_acquisition"] or 0)
+    connu = False
+    valorisations = False
     for mv in sorted(movements, key=lambda m: parse_date(m["date"]) or date.min):
         d = parse_date(mv["date"])
-        if d and d <= at_date and mv["type"] == "valorisation":
-            base_date, base = d, float(mv["montant"] or 0)
+        if not d or mv["type"] != "valorisation":
+            continue
+        valorisations = True
+        if d <= at_date:
+            base_date, base, connu = d, float(mv["montant"] or 0), True
 
-    events = [(_quinzaine(base_date), base)]
+    # AUCUN solde connu a cette date, alors qu'il en existe un plus tard.
+    #
+    # C'est la signature d'un produit deja constitue : on l'a declare avec son
+    # solde DU JOUR, sous sa date d'OUVERTURE. Composer les interets depuis
+    # cette ouverture les fait courir sur des annees ou rien ne dit que
+    # l'argent etait la. Un Livret A ouvert en 2003 et declare 3 985 EUR en
+    # 2026 « valait » ainsi 5 798 EUR au 31 decembre precedent — 1 813 EUR que
+    # la banque n'a jamais verses. Le retour au solde reel se lisait ensuite
+    # comme une perte de 1 813 EUR sur l'annee.
+    #
+    # Avant le premier solde connu, on ne sait rien. Le montant declare est
+    # donc reporte tel quel, corrige des seuls mouvements reels. C'est plat, et
+    # c'est le seul choix qui n'invente pas de passe.
+    #
+    # Sans AUCUNE valorisation, en revanche, la valeur d'acquisition est bien
+    # ce qu'elle dit : un depot a cette date, dont les interets sont dus.
+    if not connu and valorisations:
+        total = base
+        for mv in movements:
+            d = parse_date(mv["date"])
+            if d and d <= at_date and mv["type"] in ("versement", "retrait", "frais"):
+                total += float(mv["montant"] or 0)
+        return round(total, 2)
+
+    mois_credit, jour_credit = _jour_credit(credit)
+    rate = (taux_annuel or 0.0) / 100.0 / 24.0
+
+    # L'annee d'interets court depuis la derniere capitalisation, PAS depuis la
+    # derniere valorisation. Une valorisation dit COMBIEN il y a sur le livret,
+    # pas depuis quand : le solde d'un livret ne contient jamais les interets de
+    # l'annee en cours, puisqu'ils ne sont verses qu'a l'echeance. Repartir de sa
+    # date les effacait — recaler son Livret Jeune fin aout sur le meme montant
+    # faisait tomber la projection de 48 EUR a 18 EUR.
+    #
+    # Le solde declare est donc suppose avoir ete la depuis le debut du
+    # millesime. C'est une approximation, la meme que celle qu'on fait de tete en
+    # multipliant son solde par son taux, et elle vaut mieux que de supposer
+    # l'argent apparu le jour de la saisie. Deux garde-fous : on ne remonte
+    # jamais avant l'ouverture du livret (`acq`), ni avant une valorisation plus
+    # ancienne, dont les millesimes suivants doivent etre rejoues pour capitaliser.
+    debut_millesime = max(acq, _debut_millesime(base_date, mois_credit, jour_credit))
+    start_q = min(_quinzaine(base_date), _quinzaine(debut_millesime))
+    end_q = _quinzaine(at_date)
+
+    # Le solde de base entre au debut du millesime, et non a la date de la
+    # valorisation : c'est ce report qui lui rend les quinzaines deja courues.
+    events = [(start_q, base)]
     for mv in movements:
         d = parse_date(mv["date"])
         if not d or not (base_date < d <= at_date):
@@ -238,34 +355,187 @@ def valeur_livret(asset, movements, taux_annuel, at_date=None) -> float:
         montant = float(mv["montant"] or 0)
         if mv["type"] == "versement":
             events.append((_quinzaine(d) + 1, abs(montant)))
-        elif mv["type"] == "retrait":
+        elif mv["type"] in ("retrait", "frais"):
+            # Un retrait comme un frais quittent le livret a la quinzaine
+            # PRECEDENTE : la reglementation ne fait pas de cadeau sur la
+            # quinzaine entamee.
             events.append((_quinzaine(d) - 1, -abs(montant)))
     events.sort()
-
-    rate = (taux_annuel or 0.0) / 100.0 / 24.0
-    start_q, end_q = _quinzaine(base_date), _quinzaine(at_date)
+    # La quinzaine en cours n'entre dans le calcul que le jour ou elle s'acheve.
+    borne = end_q + 1 if _quinzaine_revolue(at_date) else end_q
     balance = accrued = 0.0
     i = 0
-    for q in range(start_q, end_q + 1):
+    for q in range(start_q, borne):
         while i < len(events) and events[i][0] <= q:
             balance += events[i][1]
             i += 1
         accrued += max(balance, 0.0) * rate
-        if q % 24 == 23:  # derniere quinzaine de decembre : capitalisation
+        if q == _quinzaine_credit(q // 24, mois_credit, jour_credit):
             balance += accrued
             accrued = 0.0
     while i < len(events):  # evenements posterieurs a la derniere quinzaine
         balance += events[i][1]
         i += 1
-    return round(balance + accrued, 2)
+    return round(balance, 2)
 
 
-def invested_amount(asset, movements) -> float:
-    """Capital net reellement investi (acquisition + versements - retraits)."""
+def interets_prevus(asset, movements, taux_annuel, at_date=None, credit=None):
+    """Interets qui seront credités a la prochaine echeance, a solde constant.
+
+    Repond a « combien la banque me versera au 31 decembre ». C'est la
+    difference entre le capital a cette echeance et le capital d'aujourd'hui :
+    le moteur de `valeur_livret` sert deux fois plutot que d'etre reecrit.
+    """
+    at_date = parse_date(at_date) or date.today()
+    if not taux_annuel:
+        return 0.0
+    mois, jour = _jour_credit(credit)
+    echeance = date(at_date.year, mois, min(jour, calendar.monthrange(at_date.year, mois)[1]))
+    if echeance < at_date:
+        # L'echeance de l'annee est passee : la prochaine est l'an prochain.
+        an = at_date.year + 1
+        echeance = date(an, mois, min(jour, calendar.monthrange(an, mois)[1]))
+    futur = valeur_livret(asset, movements, taux_annuel, echeance, credit)
+    actuel = valeur_livret(asset, movements, taux_annuel, at_date, credit)
+    return round(max(futur - actuel, 0.0), 2)
+
+
+def valeur_capitalisee(flux, taux_annuel, at_date=None):
+    """Capital place a taux fixe, interets credites en fin d'exercice.
+
+    C'est le rythme d'un fonds euro : la participation aux benefices tombe une
+    fois l'an, au 31 decembre. Un livret reglemente, lui, compte par quinzaines
+    — d'ou deux fonctions et non une seule (cf. `valeur_livret`).
+
+    `flux` est une liste de (date, montant), le montant signe : positif pour un
+    versement, negatif pour un rachat. Calcul pur, sans reseau.
+    """
+    flux = sorted((d, m) for d, m in ((parse_date(d), float(m or 0)) for d, m in flux) if d)
+    if not flux:
+        return None
+    at_date = parse_date(at_date) or date.today()
+    if at_date < flux[0][0]:
+        return 0.0
+
+    taux = (taux_annuel or 0.0) / 100.0
+    solde = 0.0
+    curseur = flux[0][0]
+    i = 0
+    while curseur <= at_date:
+        # Un exercice va jusqu'au 31 decembre, ou jusqu'a la date demandee si
+        # elle tombe avant : le dernier exercice est alors partiel.
+        fin = min(date(curseur.year, 12, 31), at_date)
+        # Prorata temporis : un versement de novembre ne rapporte pas une annee
+        # pleine. Le « +1 » compte le jour du versement lui-meme.
+        base = solde * ((fin - curseur).days + 1)
+        while i < len(flux) and flux[i][0] <= fin:
+            jour, montant = flux[i]
+            solde += montant
+            base += montant * ((fin - max(jour, curseur)).days + 1)
+            i += 1
+        solde += taux * base / 365.0
+        curseur = fin + timedelta(days=1)
+    return round(solde, 2)
+
+
+def _champ(source, nom):
+    """Lit un champ optionnel, que la ligne soit un dict ou une ligne SQLite."""
+    try:
+        return source[nom]
+    except (KeyError, IndexError, TypeError):
+        return None
+
+
+def _saisi_a(mv):
+    """Rang de SAISIE d'un mouvement, pas la date de l'operation.
+
+    `created_at` ne descend pas sous la seconde : deux ecritures rapprochees y
+    sont indiscernables. Le rowid, strictement croissant, les departage.
+    """
+    return (str(_champ(mv, "created_at") or ""), _champ(mv, "ordre_saisie") or 0)
+
+
+def _derniere_valorisation(movements, at_date):
+    """Instant de saisie du dernier solde declare, ou None.
+
+    C'est l'ordre de SAISIE qui compte, pas la date de l'operation. Un solde
+    declare aujourd'hui contient deja les frais preleves le mois dernier : on
+    ne les soustrait pas une seconde fois. Mais un frais enregistre APRES cette
+    declaration est une information nouvelle, meme s'il porte une date passee.
+    """
+    dernier = None
+    for mv in movements:
+        d = parse_date(mv["date"])
+        if d and d <= at_date and mv["type"] == "valorisation":
+            saisi = _saisi_a(mv)
+            if dernier is None or saisi > dernier:
+                dernier = saisi
+    return dernier
+
+
+def frais_autonomes(movements, at_date=None, depuis=None) -> float:
+    """Frais preleves en euros, qui ne reduisent aucune ligne.
+
+    Un frais en jetons nomme un ticker : il fait baisser la quantite, donc la
+    valeur, tout seul. Un frais en euros ne designe rien — il faut le porter
+    explicitement, sans quoi il n'a aucun effet.
+
+    `depuis` est un instant de SAISIE : voir `_derniere_valorisation`.
+    """
+    at_date = parse_date(at_date) or date.today()
+    total = 0.0
+    for mv in movements:
+        if mv["type"] != "frais" or (mv["ticker"] or "").strip():
+            continue
+        d = parse_date(mv["date"])
+        if not d or d > at_date:
+            continue
+        if depuis is not None and _saisi_a(mv) <= depuis:
+            continue
+        total += abs(float(mv["montant"] or 0))
+    return round(total, 2)
+
+
+def frais_de(mv) -> float:
+    """Frais portes par un mouvement. Zero si la colonne n'existe pas encore.
+
+    Une base creee avant l'ajout de la colonne renvoie des lignes qui ne la
+    portent pas : la migration la pose, mais un objet deja lu en memoire, non.
+    """
+    try:
+        return abs(float(mv["frais"] or 0))
+    except (KeyError, IndexError, TypeError, ValueError):
+        return 0.0
+
+
+def invested_amount(asset, movements, at_date=None) -> float:
+    """Capital net reellement investi (acquisition + versements - retraits).
+
+    `at_date` borne les mouvements pris en compte, comme le fait
+    `asset_value_at` pour la valeur. Sans cette borne, les deux fonctions ne
+    parlaient pas de la meme date : la valeur d'octobre etait comparee a un
+    capital investi qui incluait deja les versements de decembre, et la
+    plus-value d'une date passee sortait fausse.
+
+    Par defaut, aucune borne : le comportement d'origine, pour les appelants
+    qui veulent le total sur toute la vie du produit.
+    """
+    at_date = parse_date(at_date)
     total = float(asset["valeur_acquisition"] or 0)
     for mv in movements:
+        if at_date is not None:
+            d = parse_date(mv["date"])
+            if d is None or d > at_date:
+                continue
+        # Un frais d'acquisition fait partie du prix de revient : 1 000 EUR
+        # d'achat plus 5 EUR de courtage, c'est 1 005 EUR sortis de votre poche.
+        # Sur une cession, meme logique en sens inverse : vous avez recu 5 EUR
+        # de moins, donc recupere moins de capital.
         if mv["type"] in ("versement", "retrait"):
-            total += float(mv["montant"] or 0)
+            total += float(mv["montant"] or 0) + frais_de(mv)
+        # Un frais AUTONOME (gestion, droits de garde) est deja pris en compte
+        # par la baisse de valeur qu'il provoque. Compter aussi son montant ici
+        # l'annulerait purement et simplement.
     return round(total, 2)
 
 
@@ -281,7 +551,9 @@ def pru(movements):
         q, p = mv["quantite"], mv["prix_unitaire"]
         if q in (None, 0) or p is None:
             continue
-        cost += float(q) * float(p)
+        # Le courtage fait partie du prix paye : l'exclure donnerait un PRU
+        # plus bas que celui du releve de courtier.
+        cost += float(q) * float(p) + frais_de(mv)
         qty += float(q)
     if qty <= 0:
         return None
@@ -304,19 +576,29 @@ def pru_par_ligne(movements):
     """PRU, quantite et montant investi ligne par ligne (ticker)."""
     lignes = {}
     for mv in movements:
-        if mv["type"] not in ("versement", "retrait"):
+        # `frais` compris : des frais de reseau sont preleves EN crypto, ils
+        # font donc sortir des jetons. Les ignorer laissait la quantite detenue
+        # au-dessus du portefeuille reel.
+        #
+        # Mais SEULEMENT s'ils nomment une ligne. Des frais de gestion en euros
+        # ne designent aucun support : les faire entrer ici leur fabriquait une
+        # ligne « (sans ticker) », a zero part, dans la liste des positions.
+        if mv["type"] == "frais" and not (mv["ticker"] or "").strip():
+            continue
+        if mv["type"] not in ("versement", "retrait", "frais"):
             continue
         ticker = (mv["ticker"] or "").strip() or "(sans ticker)"
         lg = lignes.setdefault(ticker, {"ticker": ticker, "cost": 0.0, "qty": 0.0, "invest": 0.0})
         q = float(mv["quantite"] or 0)
         p = float(mv["prix_unitaire"] or 0)
-        lg["invest"] += float(mv["montant"] or 0)
+        lg["invest"] += float(mv["montant"] or 0) + frais_de(mv)
         if mv["type"] == "versement":
-            lg["cost"] += q * p
+            lg["cost"] += q * p + frais_de(mv)
             lg["qty"] += q
         else:
-            # Vente : le PRU ne bouge pas, le prix de revient total baisse au
-            # prorata des parts cédées (convention française).
+            # Vente ou frais preleves en nature : le PRU ne bouge pas, le prix
+            # de revient total baisse au prorata des parts sorties (convention
+            # francaise).
             sold = min(abs(q), lg["qty"]) if lg["qty"] > 0 else abs(q)
             if lg["qty"] > 0:
                 lg["cost"] -= lg["cost"] * sold / lg["qty"]
@@ -389,7 +671,12 @@ def asset_xirr(asset, movements, current_value, at_date=None):
         flows.append((acq, -float(asset["valeur_acquisition"])))
     for mv in movements:
         if mv["type"] in ("versement", "retrait"):
-            flows.append((parse_date(mv["date"]), -float(mv["montant"] or 0)))
+            flows.append((parse_date(mv["date"]),
+                          -float(mv["montant"] or 0) - frais_de(mv)))
+        elif mv["type"] == "frais":
+            # L'argent est sorti sans rien acheter : c'est un versement a fonds
+            # perdu du point de vue du rendement.
+            flows.append((parse_date(mv["date"]), -abs(float(mv["montant"] or 0))))
     if not flows:
         return None
     flows.append((at_date, float(current_value or 0)))

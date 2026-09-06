@@ -23,4 +23,8 @@ def meta():
         "categories_depenses": get_setting("categories_depenses"),
         "categories_revenus": get_setting("categories_revenus"),
         "categories_non_depense": get_setting("categories_non_depense"),
+        # Sert a distinguer « pas encore configure » de « rien ce mois-ci » :
+        # deux situations que le meme zero ne permet pas de separer.
+        "categories_charges_fixes": get_setting("categories_charges_fixes") or [],
+        "budgets": get_setting("budgets_categories", {}) or {},
     })

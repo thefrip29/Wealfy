@@ -11,12 +11,13 @@ transactions. Un symbole répété renseigne malgré tout sur la composition du
 portefeuille — c'est pour cela que le réglage est désactivé par défaut.
 """
 import json
+import re
 import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from . import finance
 from .db import execute, get_setting, new_id, query, rows_to_list, set_setting
@@ -28,6 +29,8 @@ TWELVE_DATA_BASE = "https://api.twelvedata.com"
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 FRANKFURTER_BASE = "https://api.frankfurter.app"
 INSEE_SDMX = "https://bdm.insee.fr/series/sdmx/data/SERIES_BDM"
+# Fournisseur alternatif, sans cle. API non officielle : voir YahooFinance.
+YAHOO_BASE = "https://query2.finance.yahoo.com"
 
 MARKET_ASSET_TYPES = {"PEA", "CTO", "AssuranceVie", "PER"}
 CRYPTO_ASSET_TYPES = {"Crypto"}
@@ -207,6 +210,185 @@ class CoinGecko(Provider):
         return found, errors
 
 
+class YahooFinance(Provider):
+    """Titres cotés, sans clé. Bonne couverture Euronext.
+
+    **API non officielle** : elle n'est couverte par aucun contrat et peut
+    changer sans préavis. C'est le prix d'une recherche par nom et par ISIN qui
+    fonctionne sans compte. Twelve Data reste le fournisseur par défaut.
+
+    La cotation passe par `/v8/finance/chart` et non `/v7/finance/quote` :
+    ce dernier réclame un cookie et un jeton `crumb` obtenus par une page HTML,
+    ce qui reviendrait à simuler un navigateur pour lire un prix.
+    """
+
+    name = "yahoo"
+
+    @staticmethod
+    def _chart(symbol, params=None):
+        payload = _get_json(f"{YAHOO_BASE}/v8/finance/chart/{urllib.parse.quote(symbol)}",
+                            params or {"range": "5d", "interval": "1d"})
+        chart = (payload or {}).get("chart") or {}
+        if chart.get("error"):
+            raise MarketError((chart["error"] or {}).get("description") or "Symbole inconnu")
+        results = chart.get("result") or []
+        if not results:
+            raise MarketError("Aucun cours renvoye pour ce symbole")
+        return results[0]
+
+    def _quote_one(self, item):
+        result = self._chart(item["symbol"])
+        meta = result.get("meta") or {}
+        price = meta.get("regularMarketPrice")
+        if price in (None, ""):
+            raise MarketError("Aucun cours renvoye pour ce symbole")
+        horodatage = meta.get("regularMarketTime")
+        jour = (datetime.fromtimestamp(horodatage, timezone.utc).date() if horodatage
+                else date.today())
+        return {
+            "price": float(price),
+            "currency": (meta.get("currency") or "EUR").upper(),
+            "date": jour.isoformat(),
+            "label": meta.get("longName") or meta.get("shortName"),
+            "exchange": meta.get("fullExchangeName") or meta.get("exchangeName"),
+        }
+
+    def quotes(self, items):
+        found, errors = {}, []
+        for item in items:
+            try:
+                found[item["cle"]] = self._quote_one(item)
+            except MarketError as exc:
+                errors.append({"cle": item["cle"], "symbole": item.get("symbol"),
+                               "erreur": str(exc)})
+        return found, errors
+
+    def fx(self, base, quote="EUR"):
+        if base == quote:
+            return 1.0
+        # Frankfurter (BCE) plutot qu'une paire Yahoo : source officielle, sans
+        # cle, et deja utilisee en repli par l'autre fournisseur.
+        try:
+            payload = _get_json(f"{FRANKFURTER_BASE}/latest", {"from": base, "to": quote})
+            rate = (payload.get("rates") or {}).get(quote)
+            return float(rate) if rate else None
+        except MarketError:
+            return None
+
+    def series(self, symbol, start, end):
+        start = finance.parse_date(start)
+        end = finance.parse_date(end)
+        if not start or not end:
+            return []
+        result = self._chart(symbol, {
+            # Bornes en secondes depuis l'epoque, ce que Yahoo attend.
+            "period1": int(datetime(start.year, start.month, start.day).timestamp()),
+            "period2": int(datetime(end.year, end.month, end.day).timestamp()) + 86400,
+            "interval": "1d",
+        })
+        horodatages = result.get("timestamp") or []
+        indicateurs = (result.get("indicators") or {}).get("quote") or [{}]
+        closes = (indicateurs[0] or {}).get("close") or []
+        out = []
+        for stamp, close in zip(horodatages, closes):
+            if close in (None, ""):
+                continue
+            out.append((datetime.fromtimestamp(stamp, timezone.utc).date(), float(close)))
+        return out
+
+    @staticmethod
+    def search(query, limit):
+        payload = _get_json(f"{YAHOO_BASE}/v1/finance/search", {
+            "q": query, "lang": "fr-FR", "region": "FR",
+            "quotesCount": SEARCH_FETCH, "newsCount": 0,
+        })
+        rows = []
+        for row in (payload or {}).get("quotes") or []:
+            if not row.get("symbol"):
+                continue
+            # Normalise dans la forme de Twelve Data : le regroupement et le
+            # classement des places sont ecrits une fois, pas deux.
+            rows.append({
+                "symbol": row.get("symbol"),
+                "instrument_name": row.get("longname") or row.get("shortname"),
+                "exchange": row.get("exchDisp") or row.get("exchange"),
+                "mic_code": row.get("exchange"),
+                "country": None,
+                "currency": None,
+                "instrument_type": row.get("typeDisp") or row.get("quoteType"),
+            })
+        return rows[:SEARCH_FETCH]
+
+
+ISIN_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
+
+# Une valeur cote sur vingt places. Sans regroupement, les vingt lignes
+# remplissaient la liste et les autres produits n'apparaissaient jamais : on
+# demande donc large au fournisseur, on regroupe, puis on coupe.
+SEARCH_FETCH = 120
+
+
+def _cle_regroupement(row):
+    """Deux cotations d'une meme valeur doivent tomber sur la meme cle.
+
+    Le nom seul ne suffit pas : « Amundi MSCI World Swap UCITS ETF EUR Acc »
+    revient identique sur six places, mais « SPX » designe aussi bien SpaceX a
+    Francfort qu'un tracker sans rapport a Munich. On regroupe donc sur le nom
+    normalise, jamais sur le symbole.
+    """
+    nom = (row.get("instrument_name") or row.get("symbol") or "").casefold()
+    return " ".join(nom.split())
+
+
+def _rang_place(row):
+    """Ordre de preference des places, pour un utilisateur francais.
+
+    Un detenteur de PEA doit voir « WLD · Euronext » avant « WRDUSA.USD · SIX ».
+    Le tri est stable : a rang egal, l'ordre du fournisseur est conserve.
+    """
+    exchange = (row.get("exchange") or "").casefold()
+    pays = (row.get("pays") or row.get("country") or "").casefold()
+    devise = (row.get("currency") or "").upper()
+    if "euronext" in exchange or pays == "france":
+        return 0
+    if devise == "EUR":
+        return 1
+    return 2
+
+
+def _resultats_titres(rows, isin, limit):
+    """Regroupe par valeur, classe les places, et ne garde que `limit` valeurs."""
+    groupes = {}
+    for row in rows:
+        cote = {
+            "kind": "titre",
+            "ticker": row.get("symbol"),
+            "symbol": row.get("symbol"),
+            "label": row.get("instrument_name"),
+            "code": row.get("symbol"),
+            "exchange": row.get("exchange"),
+            "mic": row.get("mic_code"),
+            "pays": row.get("country"),
+            "currency": (row.get("currency") or "EUR").upper(),
+            "type": row.get("instrument_type"),
+            # L'ISIN interroge est la seule source fiable ici : le fournisseur
+            # ne le renvoie pas. Sans lui, `securities.isin` restait toujours
+            # NULL, alors que la colonne existe depuis le debut.
+            "isin": isin,
+        }
+        groupes.setdefault(_cle_regroupement(row), []).append(cote)
+
+    out = []
+    for cotations in groupes.values():
+        cotations.sort(key=_rang_place)
+        principale = dict(cotations[0])
+        principale["autres_places"] = cotations[1:]
+        out.append(principale)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def search_instruments(query, kind="titre", api_key=None, limit=25):
     """Recherche un instrument chez le fournisseur. Reseau.
 
@@ -235,28 +417,20 @@ def search_instruments(query, kind="titre", api_key=None, limit=25):
             })
         return out
 
-    key = (api_key if api_key is not None else get_setting("market_api_key", "")) or ""
-    params = {"symbol": query, "outputsize": limit}
-    if key.strip():
-        params["apikey"] = key.strip()
-    payload = _get_json(f"{TWELVE_DATA_BASE}/symbol_search", params)
-    if isinstance(payload, dict) and payload.get("status") == "error":
-        raise MarketError(payload.get("message") or "Recherche indisponible")
-    out = []
-    for row in (payload.get("data") or [])[:limit]:
-        out.append({
-            "kind": "titre",
-            "ticker": row.get("symbol"),
-            "symbol": row.get("symbol"),
-            "label": row.get("instrument_name"),
-            "code": row.get("symbol"),
-            "exchange": row.get("exchange"),
-            "mic": row.get("mic_code"),
-            "pays": row.get("country"),
-            "currency": (row.get("currency") or "EUR").upper(),
-            "type": row.get("instrument_type"),
-        })
-    return out
+    if (get_setting("market_provider", "twelvedata") or "").lower() == "yahoo":
+        rows = YahooFinance.search(query, limit)
+    else:
+        key = (api_key if api_key is not None else get_setting("market_api_key", "")) or ""
+        params = {"symbol": query, "outputsize": SEARCH_FETCH}
+        if key.strip():
+            params["apikey"] = key.strip()
+        payload = _get_json(f"{TWELVE_DATA_BASE}/symbol_search", params)
+        if isinstance(payload, dict) and payload.get("status") == "error":
+            raise MarketError(payload.get("message") or "Recherche indisponible")
+        rows = payload.get("data") or []
+
+    isin = query.upper() if ISIN_RE.match(query.upper()) else None
+    return _resultats_titres(rows, isin, limit)
 
 
 def build_provider(name=None, api_key=None):
@@ -266,6 +440,8 @@ def build_provider(name=None, api_key=None):
     name = (name or get_setting("market_provider", "twelvedata") or "").lower()
     if name == "twelvedata":
         return TwelveData(api_key if api_key is not None else get_setting("market_api_key", ""))
+    if name == "yahoo":
+        return YahooFinance()
     if name == "coingecko":
         return CoinGecko()
     return OfflineProvider()
@@ -349,7 +525,7 @@ def upsert_security(ticker, **fields):
         fields.pop("kind", None)
     existing = query("SELECT id FROM securities WHERE ticker = ?", (ticker,), one=True)
     columns = ["symbol", "exchange", "currency", "isin", "label",
-               "benchmark_symbol", "benchmark_label", "kind"]
+               "benchmark_symbol", "benchmark_label", "kind", "taux_annuel"]
     if existing:
         sets, args = [], []
         for column in columns:
@@ -363,12 +539,14 @@ def upsert_security(ticker, **fields):
     sid = new_id()
     execute(
         "INSERT INTO securities(id, ticker, symbol, exchange, currency, isin, label, "
-        "benchmark_symbol, benchmark_label, kind) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "benchmark_symbol, benchmark_label, kind, taux_annuel) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (
             sid, ticker, fields.get("symbol") or ticker, fields.get("exchange"),
             (fields.get("currency") or "EUR").upper(), fields.get("isin"),
             fields.get("label"), fields.get("benchmark_symbol"),
             fields.get("benchmark_label"), fields.get("kind") or "titre",
+            fields.get("taux_annuel"),
         ),
     )
     return sid
@@ -395,6 +573,12 @@ def refresh_quotes(provider=None, crypto_provider=None):
         if asset_type not in MARKET_ASSET_TYPES and asset_type not in CRYPTO_ASSET_TYPES:
             continue
         sec = securities.get(ticker)
+        # Aucune requete ne part pour un support non cote : par construction,
+        # aucune place ne le cote. Il n'est pas non plus « non mappe » — il n'a
+        # simplement pas de symbole a mapper, et n'a pas a etre signale comme
+        # un oubli de configuration.
+        if sec and sec.get("kind") == NON_COTE:
+            continue
         if not sec or not sec.get("symbol"):
             non_mappes.append(ticker)
             continue
@@ -475,7 +659,46 @@ def test_symbol(symbol, exchange=None, provider=None):
 # Valorisation (calcul pur, sans réseau — testable hors ligne)
 # ==========================================================================
 
-def line_values(movements, securities, prices):
+NON_COTE = "non_cote"
+
+
+def _flux_ligne(movements, ticker):
+    """(date, montant signe) des versements et rachats portant ce ticker."""
+    return [
+        (mv["date"], float(mv["montant"] or 0))
+        for mv in movements
+        if mv["type"] in ("versement", "retrait", "frais")
+        # Un frais qui ne nomme aucune ligne (frais de gestion en euros) ne se
+        # rattache a aucun support : il ne doit pas peser sur leur valeur.
+        and not (mv["type"] == "frais" and not (mv["ticker"] or "").strip())
+        and ((mv["ticker"] or "").strip() or "(sans ticker)") == ticker
+    ]
+
+
+def _valeur_non_cotee(sec, flux, at_date=None):
+    """Valeur d'une ligne qu'aucune place ne cote.
+
+    Un fonds euro n'a ni ticker, ni cours : c'est l'actif general de l'assureur.
+    Aucun fournisseur ne le renverra jamais, donc on la calcule ici, en local et
+    sans reseau. Sans taux, la valeur nominale — comme pour un livret dont le
+    taux n'est pas renseigne, on prefere une valeur assumee a un rendement
+    invente.
+    """
+    if not flux:
+        return None
+    taux = sec.get("taux_annuel")
+    try:
+        taux = float(taux) if taux not in (None, "") else None
+    except (TypeError, ValueError):
+        taux = None
+    if taux is None:
+        borne = finance.parse_date(at_date) or date.today()
+        return round(sum(m for jour, m in flux
+                         if (finance.parse_date(jour) or date.min) <= borne), 2)
+    return finance.valeur_capitalisee(flux, taux, at_date)
+
+
+def line_values(movements, securities, prices, at_date=None):
     """Valeur de marché ligne par ligne, à partir des quantités détenues."""
     out = []
     for ligne in finance.pru_par_ligne(movements):
@@ -484,10 +707,31 @@ def line_values(movements, securities, prices):
         sec = securities.get(ticker) or {}
         price = quote["price"] if quote else None
         quantite = ligne["quantite"]
+
+        # Une ligne non cotee ne consulte jamais le cache de cours : elle ne
+        # peut pas y etre, et l'y chercher laisserait croire qu'elle le pourrait.
+        if sec.get("kind") == NON_COTE:
+            valeur = _valeur_non_cotee(sec, _flux_ligne(movements, ticker), at_date)
+            out.append({
+                **ligne,
+                "symbole": None,
+                "libelle": sec.get("label") or ticker,
+                "kind": NON_COTE,
+                "taux_annuel": sec.get("taux_annuel"),
+                "cours": None,
+                "cours_date": None,
+                "valeur": valeur,
+                "plus_value": (round(valeur - ligne["investi"], 2)
+                               if valeur is not None else None),
+                "ecart_pru_pct": None,
+            })
+            continue
+
         out.append({
             **ligne,
             "symbole": sec.get("symbol"),
             "libelle": sec.get("label"),
+            "kind": sec.get("kind") or "titre",
             "cours": price,
             "cours_date": quote["date"] if quote else None,
             "valeur": round(quantite * price, 2) if (price and quantite) else None,
@@ -503,7 +747,7 @@ def line_values(movements, securities, prices):
     return out
 
 
-def market_value(asset, movements, securities, prices):
+def market_value(asset, movements, securities, prices, at_date=None):
     """Valeur de marché d'un actif, ou None si elle ne peut pas être complète.
 
     Titres et cryptos suivent le même chemin : des positions (ticker + quantité)
@@ -514,11 +758,18 @@ def market_value(asset, movements, securities, prices):
     if asset_type not in MARKET_ASSET_TYPES and asset_type not in CRYPTO_ASSET_TYPES:
         return None
 
-    lignes = [l for l in line_values(movements, securities, prices)
-              if (l["quantite"] or 0) > 0]
+    # Une ligne non cotee n'a pas de quantite : son capital est la somme de ses
+    # versements. Elle entre donc dans le total sans passer par le filtre.
+    lignes = [l for l in line_values(movements, securities, prices, at_date)
+              if (l["quantite"] or 0) > 0 or l.get("kind") == NON_COTE]
     if lignes:
+        # Le `None` ne vaut que pour une ligne *censee* etre cotee et qui ne
+        # l'est pas : mieux vaut retomber sur la valeur saisie que d'afficher un
+        # total partiel comme s'il etait complet. Un fonds euro, lui, n'a jamais
+        # eu vocation a etre cote — le faire annuler toute l'assurance vie
+        # detruisait la valorisation de ses UC pourtant correctement cotees.
         if any(l["valeur"] is None for l in lignes):
-            return None  # une ligne non cotee => on ne fabrique pas un total faux
+            return None
         return round(sum(l["valeur"] for l in lignes), 2)
 
     # Repli pour les cryptos saisies avant l'arrivee des positions : un seul
@@ -533,17 +784,47 @@ def market_value(asset, movements, securities, prices):
     return None
 
 
-def rate_value(asset, movements, at_date=None):
-    """Livrets et dépôts à terme : capital + intérêts courus au taux saisi."""
-    meta = asset.get("metadata") or {}
-    taux = meta.get("taux_annuel")
+def taux_du_produit(asset):
+    """Taux annuel saisi sur l'actif, ou None s'il est absent ou illisible."""
+    taux = (asset.get("metadata") or {}).get("taux_annuel")
     if taux in (None, ""):
         return None
     try:
-        taux = float(taux)
+        return float(taux)
     except (TypeError, ValueError):
         return None
-    return finance.valeur_livret(asset, movements, taux, at_date)
+
+
+def date_credit_interets():
+    """Jour de capitalisation configure, au format 'MM-JJ'.
+
+    Lu ici et non dans `finance` : ce module-la est du calcul pur, sans acces a
+    la base. Le reglage lui est passe en argument, comme le taux.
+    """
+    return get_setting("date_credit_interets", finance.CREDIT_PAR_DEFAUT) \
+        or finance.CREDIT_PAR_DEFAUT
+
+
+def rate_value(asset, movements, at_date=None):
+    """Livrets et dépôts à terme : le capital, intérêts déjà crédités inclus.
+
+    Les intérêts de l'exercice en cours n'y sont pas — ils ne sont pas acquis,
+    et le relevé bancaire ne les montre pas non plus. Voir `rate_interests`.
+    """
+    taux = taux_du_produit(asset)
+    if taux is None:
+        return None
+    return finance.valeur_livret(asset, movements, taux, at_date,
+                                 date_credit_interets())
+
+
+def rate_interests(asset, movements, at_date=None):
+    """Interets qui tomberont a la prochaine echeance de capitalisation."""
+    taux = taux_du_produit(asset)
+    if taux is None:
+        return None
+    return finance.interets_prevus(asset, movements, taux, at_date,
+                                   date_credit_interets())
 
 
 def indexed_value(asset, at_date=None):

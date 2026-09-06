@@ -17,6 +17,7 @@ Comment c'est construit, et pourquoi ainsi.
 | Graphiques | Chart.js **vendu localement** (`app/static/vendor/`) | l'app fonctionne hors ligne, sans CDN |
 | TRI (XIRR) | bissection maison (`app/finance.py`) | évite d'imposer SciPy (~90 Mo) pour 30 lignes de code, testé contre des valeurs de référence |
 | Cours de marché | `urllib` (stdlib) | pas de `requests` à ajouter pour trois appels HTTP |
+| Fournisseurs de cours | Twelve Data (défaut) ou Yahoo Finance | l'un demande une clé et s'engage, l'autre est gratuit mais non officiel — le choix revient à l'utilisateur |
 | Serveur | waitress | serveur de production, multi-thread ; celui de Flask est prévu pour le développement |
 | Fenêtre | pywebview (WebView2) | le moteur d'Edge est déjà sur la machine : une fenêtre applicative pour ~1 Mo |
 | Exécutable | PyInstaller `--onefile --noconsole` | un seul fichier, aucune fenêtre console |
@@ -37,6 +38,7 @@ app/
   db.py                   connexion, settings, types d'actifs
   finance.py              calculs purs (amortissement, PRU, XIRR, livrets)
   market.py               cours de marché — SEUL module qui fait du réseau
+                          (supports non cotés : valorisation locale, sans réseau)
   importer.py             parsing des relevés, dédup, classification
   backup.py               sauvegardes CSV, rotation, restauration
   advisor.py              observations factuelles (plafonds, ratios, ecarts)

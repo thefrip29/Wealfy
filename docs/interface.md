@@ -187,7 +187,7 @@ contenu s'en va. C'est ce qui arrivait au filet sous le héros : `.hero` y
 figurait alors qu'il porte un `border-bottom`, et la ligne grise restait figée à
 l'écran le temps de la transition. Le héros s'anime désormais d'un seul tenant.
 
-### Deux niveaux d'animation selon la machine
+### Deux niveaux d'animation, au choix de l'utilisateur
 
 `data-anim` sur `<html>`, posé **avant le premier rendu** (la première
 apparition se joue dès le chargement, un réglage plus tardif arriverait après
@@ -207,20 +207,24 @@ jusqu'à dix blocs s'animent ensemble. En dessous de 60 images par seconde, un
 flou animé ne se lit plus comme un flou mais comme des saccades. Le mode économe
 garde donc les mêmes trajectoires et les mêmes courbes, sans le flou.
 
-Le mode est estimé d'après `hardwareConcurrency` et `deviceMemory`, puis
-**corrigé par une mesure réelle** : `App.mesurerFluidite()` échantillonne une
-trentaine d'images pendant la première apparition et rétrograde si la médiane
-dépasse 22 ms. Médiane et non moyenne — une seule image longue ne doit pas
-condamner la machine. La décision est mémorisée : elle vaut pour la machine, pas
-pour la session.
+**Il n'y a plus aucune détection automatique**, et c'est délibéré. Deux
+mécanismes décidaient à la place de l'utilisateur :
 
-Pour forcer un mode, dans la console :
+- une estimation d'après `hardwareConcurrency` et `deviceMemory`. Cette seconde
+  API n'existe pas dans WebKit : elle valait `undefined`, le repli donnait 4, et
+  le test était `<= 4`. **Tout Mac** basculait donc en mode économe, un M5 comme
+  le reste, sans aucun moyen d'en sortir ;
+- une mesure de fluidité sur les premières images, qui rétrogradait puis
+  **mémorisait** sa décision. Une machine momentanément occupée se retrouvait
+  durablement en mode dégradé, sans que rien ne le signale.
 
-```js
-localStorage.setItem('patrimoine.animations', 'economes')   // ou 'completes'
-```
+Le mode complet est le défaut partout, et le mode économe un choix assumé,
+depuis *Paramètres → Apparence*. Une machine qui peine, c'est à son propriétaire
+de le constater.
 
-`prefers-reduced-motion` force le mode économe et coupe en plus le fond animé.
+`prefers-reduced-motion` reste prioritaire : c'est une préférence système
+explicite, posée par quelqu'un que le mouvement gêne. Elle force le mode économe
+et coupe en plus le fond animé.
 
 Le détail qui compte : la découpe se fait au bord de `main`, alors que le
 panneau est en retrait de la marge interne. Une première version faisait
@@ -284,29 +288,339 @@ navigation suivante.
 `prefers-reduced-motion: reduce` désactive tout, fond animé compris.
 
 
+## Le premier lancement
+
+Sur une base vide, la synthèse n'a **aucun chiffre à montrer**. Elle en affichait
+quand même : un héros à 0 €, quatre indicateurs à « — », deux camemberts
+« aucun actif » et une répartition « aucune poche définie ». Et comme le masquage
+des montants est actif par défaut, ce zéro arrivait **flouté**. Les deux points
+d'entrée existaient bien, mais sur les onglets *Patrimoine* et *Dépenses* :
+invisibles depuis l'écran où l'application s'ouvre.
+
+Le panneau ne montre donc plus que deux boutons — *Déclarer mon patrimoine* et
+*Importer un relevé bancaire* — tant qu'il n'existe ni actif, ni passif, ni
+transaction. Le serveur tranche (`aucune_donnee` dans `/api/overview`, trois
+lectures à une ligne) plutôt que l'interface, qui ne voit que le mois affiché et
+croirait la base vide dès qu'on recule d'un mois.
+
+
 ## Les 4 onglets
 
-**Vue d'ensemble** — dépensé ce mois vs mois précédent, patrimoine net et sa
-courbe sur 12 mois, répartition cible vs réelle, camembert des catégories,
-détail des métriques.
+**Vue d'ensemble** — patrimoine net et sa courbe sur 12 mois, répartition du
+patrimoine, dépenses et revenus sur 6 mois, camembert des catégories,
+répartition cible vs réelle. **Cinq cartes, quatre graphiques** : « Dépenses —
+12 mois » et « Dépenses / revenus — 6 mois » traçaient la même grandeur deux
+fois, dans deux rangées différentes, sur deux échelles. Les barres donnent
+maintenant les trois flux du mois et le trait la moyenne des douze derniers : la
+tendance longue est un repère posé sur le détail court, plutôt qu'une carte à
+elle seule.
+
+### Le reste à vivre, enfin branché
+
+`services.metrics()` produit **vingt-deux grandeurs** ; l'interface en affichait
+**sept**. Parmi les absentes : `reste_a_vivre_mois`, `charges_fixes_mois`,
+`part_charges_fixes`, `taux_endettement`, `mensualites_mois`.
+
+La première avait sa propre section dans ce fichier et n'apparaissait sur aucun
+écran. Pire : la colonne « Charge fixe » du tableau des rôles n'a **pas d'autre
+raison d'être** que de l'alimenter. On cochait donc des catégories pour nourrir
+un chiffre que personne ne montrait.
+
+Une carte *Mon mois* les affiche, dans la rangée qui n'avait qu'une carte et
+laissait un vide. Le reste à vivre domine, le reste descend d'un cran. **Rien
+n'est calculé en plus** : tout arrivait déjà dans `/api/overview`.
+
+Deux états vides distincts, parce que **le même zéro recouvre deux situations**
+qui n'appellent pas la même phrase : aucune catégorie marquée charge fixe (le
+réglage n'a jamais été fait, on y emmène), ou aucun revenu sur le mois (le reste
+à vivre se compte SUR des revenus). Inviter à configurer ce qui l'est déjà
+ferait chercher un écran qu'on a sous les yeux — d'où `categories_charges_fixes`
+dans `/api/meta`, qui sépare les deux cas.
+
+### Des budgets de dépenses
+
+Le patrimoine avait ses cibles, avec l'écart affiché (`repartition_cible`). Les
+dépenses n'avaient **ni objectif global ni plafond par catégorie**.
+
+Le budget se saisit dans le **tableau des rôles**, une colonne à droite des
+trois cases : c'est la même question posée à la même ligne — ce que fait cette
+catégorie, et combien j'y mets. Une carte *Budgets* sur l'onglet Dépenses montre
+le consommé sur le prévu, **repliée tant qu'aucun budget n'est fixé**.
+
+Aucun calcul serveur : `month_flows` renvoyait déjà `par_categorie`. Le motif de
+barre est celui de la répartition cible — même question, même forme. Un
+dépassement change la **couleur de la barre** et pas seulement la pastille : il
+doit se voir sans lire le chiffre.
+
+### Clôturer un produit
+
+La colonne `assets.archived`, la route `PUT` et la pastille « archivé »
+existaient depuis toujours. **Aucun écran ne permettait de s'en servir** : la
+case « Voir archivés » montrait un ensemble impossible à remplir, elle a été
+retirée, et la capacité est restée morte.
+
+La fiche d'un actif porte maintenant **Clôturer** — le mot d'un livret fermé,
+pas celui d'un classeur. Un produit clôturé sort du patrimoine sans perdre son
+passé : supprimer l'actif effacerait ses mouvements, le clôturer ne fait que le
+retirer de la photo du jour.
+
+On les retrouve sous la liste, dans un bloc à part qui **dit qu'ils ne comptent
+pas dans les totaux** — sans quoi on chercherait une erreur d'addition. Ils ne
+sont chargés qu'à la demande ; `nb_archives`, déduit du cache de
+`services.portfolio()` sans lecture supplémentaire, suffit à savoir s'il faut
+proposer le lien.
+
+### Raccourcis clavier
+
+Il n'y en avait aucun : seuls Échap et le piège à tabulation existaient.
+
+| Touche | Effet |
+|---|---|
+| `←` `→` | Mois précédent / suivant |
+| `1` à `4` | Onglet |
+| `/` | Recherche des transactions |
+
+Trois refus, dans cet ordre : une modale ouverte (le clavier lui appartient), un
+champ de saisie qui a le focus (taper « 2 » dans un montant ne doit pas changer
+d'onglet), une touche de modification enfoncée (Ctrl+1 appartient au
+navigateur). Les flèches ne font rien sur *Historique* : on rendrait au clavier
+ce qu'on vient de retirer à la souris.
+
+La **recherche** ne portait que sur le libellé. Elle balaie aussi le montant —
+brut et formaté, pour que « 45,30 » comme « 45.3 » trouvent — la catégorie, et
+le libellé du produit ou du prêt rattaché.
+
+### Deux retouches visuelles
+
+**Le fond s'efface quand la page est courte.** Sur un panneau long, les masses ne
+se voient que dans les marges et le mouvement reste un décor ; sur l'accueil vide
+ou un patrimoine de trois lignes, elles occupaient presque toute la surface et le
+contenu flottait dessus. `App.doserFond` compare la hauteur du panneau à celle de
+la fenêtre et pose `data-fond` sur `<html>` ; `--lava-opacity` fait le reste.
+
+**Un filet de proportion par produit.** La part de chaque ligne ne se lisait
+qu'en chiffres, à comparer de tête. Le filet se rapporte au total de **sa
+famille** — l'en-tête de groupe donne déjà la part de la famille dans
+l'ensemble, et enchaîner deux échelles se lirait mal. Il disparaît quand la
+famille n'a qu'un produit : un filet plein à 100 % ne dit rien.
+
+### Le gain de l'année, et non le cumul d'une vie
+
+La dernière case de l'onglet *Patrimoine* donnait la **plus-value cumulée**
+depuis l'acquisition de chaque produit. Un chiffre qu'aucune période ne cadrait,
+et qui ne bouge presque plus une fois le patrimoine constitué : sur les données
+de test, il annonçait **+1 302 €** pendant que l'année en cours perdait
+**949 €**. Le total masquait l'année.
+
+Elle donne désormais le gain depuis le 1er janvier, **versements exclus**.
+
+Le calcul passe par la plus-value et non par la valeur, et c'est ce qui écarte
+les versements sans avoir à les recenser : un euro versé augmente la valeur ET
+le capital investi, donc laisse la plus-value inchangée ; un euro gagné
+n'augmente que la valeur. Le gain est donc l'écart entre la plus-value
+d'aujourd'hui et celle du 31 décembre précédent (`services.gain_annuel`).
+
+Un produit ouvert dans l'année n'existe pas dans la photo de référence : toute
+sa plus-value compte pour l'année, ce qui est exact.
+
+**Ce que ce chiffre ne dit pas :** une vente n'y apparaît pas. Elle diminue la
+valeur et le capital investi du même montant, donc laisse la plus-value
+inchangée. L'application ne suit que le latent.
+
+Au passage, `invested_amount` accepte enfin une date. `asset_value_at` bornait
+déjà ses mouvements, pas lui : la valeur d'octobre était donc comparée à un
+capital investi qui incluait déjà les versements de décembre, et **toute
+plus-value à une date passée sortait fausse**.
+
+### Le sélecteur de mois ne ment plus
+
+Il était **inerte** sur *Patrimoine* et sur *Historique* : en changer y jouait
+l'animation de carrousel sur un contenu identique, parce que les deux `load()`
+ignoraient `App.state.month`.
+
+*Patrimoine* prend désormais sa photo à la **date d'arrêt du mois affiché** —
+son dernier jour, ou aujourd'hui si le mois est en cours. C'est la règle que
+`/api/overview` appliquait déjà côté serveur, et `/api/assets` acceptait déjà le
+paramètre `date`. Reculer d'un mois montre le patrimoine tel qu'il était.
+
+*Historique* est multi-mois par nature : le sélecteur y est masqué. Un contrôle
+qui ne commande rien ne doit pas rester à l'écran.
 
 **Dépenses** — un bandeau en tête d'onglet rappelle le dernier relevé importé et
-porte le bouton **« + Ajouter un relevé »**. En dessous : transactions du mois,
+porte le bouton **« + Ajouter un relevé »**, qui ouvre une zone de dépôt :
+le fichier y est lâché ou choisi, puis analysé sans second clic (voir
+[donnees.md](donnees.md)). En dessous : transactions du mois,
 catégorie modifiable directement dans la liste, ajout manuel, tendance 6 mois.
 Un mois vide propose directement l'import plutôt qu'un tableau nu.
 
-**Patrimoine** — **un seul bouton « + Ajouter »**. Il ouvre un choix : quel
-produit voulez-vous ajouter ? Livret A, PEA, assurance vie, crypto, bien
-immobilier, prêt… Le type choisi, la saisie se limite au nom, au montant et à la
-date. En dessous : actifs groupés par famille, passifs avec capital restant dû.
+**Patrimoine** — **un seul bouton « + Ajouter »**, et trois portes derrière : un
+produit d'épargne ou de placement (la grille de déclaration, plusieurs à la fois
+si besoin), un prêt, ou autre chose. En dessous : actifs groupés par famille,
+passifs avec capital restant dû.
 
-**Historique** — archive mensuelle et journal des imports. Un import peut être
-annulé : ses transactions sont supprimées avec lui.
+### Le tableau des transactions
 
-**Paramètres** (icône engrenage) — trois sections : *Classement des dépenses*
-(catégories, virements internes, règles), *Objectifs et frais* (répartition
-cible, TER et courtage), *Cours de marché* (fournisseur, correspondances de
-symboles, types d'actifs personnalisés).
+La catégorie était un `<select>` **par ligne**, portant toutes les catégories, et
+`renderTable` se rejouait à chaque frappe dans la recherche : deux cents listes
+déroulantes vivantes pour un seul choix à faire, et un tableau qui ne
+ressemblait plus à un tableau. La catégorie redevient du texte ; la liste
+n'existe qu'au moment où on la déroule. La recherche est débouncée à 150 ms.
+
+Une colonne de cases à cocher et une **barre d'actions groupées**, qui
+n'apparaît qu'à partir de la première ligne cochée : classer ou supprimer d'un
+coup, en une requête (`POST /api/transactions/categorie` et
+`/api/transactions/suppression`). Reclasser trente lignes après un import se
+faisait sinon une par une, chacune déclenchant sa requête et son rechargement.
+« Tout sélectionner » ne coche que ce que le filtre laisse voir : cocher des
+lignes invisibles serait une action à l'aveugle.
+
+Le filtre de catégorie gagne **« À classer »** en tête. C'est le geste principal
+après un import, et il n'y avait aucun moyen d'isoler ces lignes.
+
+### Formulaires et modale
+
+**La validation se fait sur le champ.** C'était un toast : affiché en bas à
+droite, à l'opposé du regard, effacé au bout de 3,6 s, et sans dire lequel des
+huit champs était en cause. `App.invalide(form, nom, message)` marque le champ,
+y ramène le curseur et laisse le navigateur afficher le message à côté de lui.
+Le toast reste pour les erreurs venant du serveur.
+
+**Une saisie longue ne part plus sur un clic à côté.** Un clic hors cadre
+emportait un relevé de trois cents lignes collé dans la modale d'import, sans un
+mot. Il n'y a qu'une modale dans la page — en ouvrir une de confirmation
+détruirait justement le formulaire qu'on cherche à sauver : le geste est donc
+**redemandé**, un second Échap ou un second clic dans les quatre secondes. Le
+bouton *Annuler* et la croix ferment du premier coup, eux sont explicites.
+
+**La modale s'annonce.** `role="dialog"`, `aria-modal="true"` et
+`aria-labelledby` : sans eux un lecteur d'écran lisait un groupe anonyme et
+continuait sur la page derrière, pourtant inatteignable à la souris. La
+tabulation y est enfermée, et le focus revient d'où il venait à la fermeture.
+
+**Historique** — l'archive mensuelle, et rien d'autre. Le journal des imports
+est passé dans *Dépenses*, là où les imports se font ; son code y est passé
+aussi, alors qu'il vivait dans le module de l'Historique sans y être rendu. Un
+import peut être annulé : ses transactions sont supprimées avec lui.
+
+**Paramètres** (icône engrenage) — quatre sections dont le contenu correspond au
+titre : *Classement des dépenses* (catégories, rôles, règles),
+*Objectifs* (répartition cible, crédit des intérêts), *Cours de marché*,
+et *Général* (types d'actifs personnalisés, sauvegardes). « Types d'actifs
+personnalisés » était logé sous *Cours de marché*, avec lesquels il n'a rien à
+voir.
+
+### Un seul modèle d'enregistrement
+
+Deux coexistaient sans le dire. Catégories, cases à cocher, règles,
+correspondances de symboles et types personnalisés s'écrivaient **au clic** ;
+répartition cible, date de crédit, frais et cours attendaient un bouton
+**Enregistrer**. Rien ne distinguait les deux à l'écran, et une répartition
+retouchée puis abandonnée était perdue en silence.
+
+Tout s'enregistre maintenant à la modification, et la modale le dit en une
+ligne. **Une seule exception, annoncée sur place** : la section *Cours de
+marché* garde son bouton, parce que l'activer fait sortir des données de la
+machine. Un réglage à conséquence se confirme.
+
+Les champs à saisie libre (frais, poches) s'écrivent à la **sortie du champ** et
+non à la frappe : sinon « 1 » serait enregistré avant « 120 ».
+
+### Un seul mécanisme de détection
+
+« Règles de classification » et « Mots-clés de détection à l'import » cherchaient
+tous les deux un texte dans le libellé d'une opération. Le premier attribuait
+une catégorie, le second marquait un virement interne — or une règle sait
+attribuer une catégorie de virement. **Le second n'était qu'un cas particulier
+du premier**, avec son écran, son vocabulaire et ses mots invisibles dans le
+tableau des règles.
+
+Les motifs de virement sont devenus des règles ordinaires. On peut enfin les
+voir, en corriger un, en supprimer un. Ils portent la priorité 200 pour rester
+après les règles écrites à la main, comme avant. Voir
+[donnees.md](donnees.md) pour la conversion.
+
+L'origine annoncée dans la prévisualisation d'import suit : il n'y a plus de
+pastille « virement interne », ces lignes répondent « règle » comme les autres.
+
+### Ce qui attend une décision se voit
+
+Un marchand récurrent se traite en une fois (section suivante), mais il reste
+toujours des lignes seules — un commerçant local, vu une fois, qu'aucune liste
+de mots-clés ne devinera jamais. Sur le relevé témoin il en reste **24 sur
+192**, et vingt-quatre lignes noyées dans deux cents ne se voient pas.
+
+Trois choses les remontent :
+
+- un **compteur** en tête, dans la couleur d'alerte : « 24 ligne(s) à classer » ;
+- un **lisere** sur le bord gauche de chaque rangée concernée, avec un fond
+  légèrement teinté ;
+- un bouton **« Ne voir que celles-ci »**, qui masque tout le reste.
+
+Le lisere tombe dès qu'une catégorie est posée, et le compteur décroît : sous
+filtre, le tableau se vide à mesure du travail fait, ce qui dit où l'on en est
+sans avoir à compter.
+
+Une ligne « à classer » est une ligne d'origine `defaut` — ni règle, ni prêt,
+ni modèle au-dessus du seuil, ni mot-clé. Le modèle se tait plutôt que
+d'inventer : une ligne à classer se voit et se corrige, une ligne mal classée
+passe inaperçue et fausse les totaux.
+
+### Déposer un relevé
+
+Un seul geste au premier plan : **déposer le fichier**, qui s'analyse tout seul.
+Le collage reste possible derrière un bouton « Coller le texte » — c'est le
+recours, pas le chemin ordinaire. La notice « Ce qui est reconnu » a disparu :
+elle décrivait ce que la zone de dépôt dit déjà en une ligne.
+
+### Une décision par marchand, pas une par ligne
+
+La prévisualisation d'un relevé demandait de vérifier deux cents lignes une à
+une. Sur un relevé réel, **quatorze marchands couvrent 153 de ces 192 lignes** :
+répondre une fois par marchand, c'est la différence entre un import qu'on finit
+et un import qu'on abandonne.
+
+Un bandeau les remonte donc en tête, **avant** le tableau des transactions. Il
+n'affiche que ceux qui attendent une décision ; les autres — déjà classés par
+une règle, un mot-clé ou le modèle — se replient derrière une ligne « 11
+marchand(s) déjà classé(s) », consultable mais hors du chemin. Sans ce repli, le
+bandeau repousserait les transactions hors de l'écran, ce qui remplacerait un
+travail fastidieux par un autre.
+
+Répondre pour un marchand **crée une règle**. C'est ce qui fait que la question
+ne sera pas reposée au prochain relevé — et une règle passe devant le modèle,
+comme toute consigne explicite. Le menu propose les catégories existantes plus
+« ＋ Nouvelle catégorie… » : une catégorie inédite est ajoutée à la liste des
+réglages au passage, sans quoi le menu de chaque ligne ne la contiendrait pas et
+le choix serait perdu au premier changement.
+
+### Une pastille qui dit ce qu'elle vaut
+
+Une catégorie posée par une règle est une **consigne** ; une catégorie proposée
+par le modèle est une **hypothèse**. Les afficher pareil reviendrait à demander
+la même confiance aux deux.
+
+| Pastille | Ce qu'elle dit |
+|---|---|
+| `règle` | Votre consigne. Elle passe avant tout le reste. |
+| `prêt détecté` | Rapproché d'une échéance de prêt, sans règle. |
+| `modèle` *(pointillés)* | Une proposition. La confiance exacte est en infobulle. |
+| `mot-clé` | Reconnu par la taxonomie intégrée. |
+| `—` | Rien de sûr : à vous de trancher. |
+
+Les pointillés du modèle reprennent la couleur d'accent, sans en introduire une
+nouvelle : c'est le trait, pas la teinte, qui dit « provisoire ». Corriger une
+ligne à la main la fait passer en « vous » — et cette correction instruit le
+modèle pour le prochain import.
+
+### Le rôle d'une catégorie, en un tableau
+
+C'étaient **trois listes de cases à cocher empilées** — épargne, charges fixes,
+virements internes — portant chacune la même liste de catégories sous trois
+titres différents. Il fallait parcourir l'écran trois fois pour savoir ce qu'une
+catégorie faisait, et rien ne montrait qu'une même catégorie pouvait être cochée
+dans deux colonnes qui se contredisent.
+
+Une ligne par catégorie, trois colonnes. La contradiction se voit.
 
 
 ## Observations patrimoniales
@@ -335,8 +649,13 @@ large, avec des angles supplémentaires :
 | Graphique | Vues disponibles |
 |---|---|
 | Patrimoine net | *Total* (net, actifs, dettes) et **Par actif** — une courbe par produit |
-| Dépenses par catégorie | *Camembert* et *Tableau* : montant, part, nombre d'opérations, panier moyen |
-| Dépenses / revenus | *Barres* et *Tableau* : revenus, dépenses, solde, épargne et taux, mois par mois |
+| Répartition du patrimoine | *Camembert* et *Tableau* : montant et part par famille |
+| Dépenses et revenus | *Barres* et *Tableau* : revenus, dépenses, solde, épargne et taux, sur **douze** mois |
+| Dépenses par catégorie | *Camembert* et *Tableau* : montant, part, nombre d'opérations |
+
+Le tableau des flux porte douze mois quand les barres n'en montrent que six :
+c'est la période du trait de moyenne, et agrandir sert justement à voir ce que
+le graphique résume.
 
 La vue **Par actif** répond à une question que la courbe du net ne pose même
 pas : elle dit *combien*, celle-ci dit *d'où ça vient*. Chaque courbe démarre à
@@ -389,14 +708,52 @@ Il y a eu jusqu'à trois boutons côte à côte — « + Prêt », « + Actif d�
 différents : l'un pour déclarer l'existant, l'autre pour ajouter au fil de
 l'eau. La distinction n'existait que dans le code.
 
-Il n'en reste **un seul**. On choisit d'abord *quoi* ajouter dans une liste
-lisible, la saisie suit. La déclaration groupée (plusieurs montants d'un coup,
-pour la première mise en route) et le formulaire complet restent accessibles,
-comme deux entrées parmi les autres — au lieu d'occuper la barre en permanence.
+Il n'en reste **un seul**, et **trois portes derrière** : un produit d'épargne ou
+de placement, un prêt, ou autre chose.
+
+Le bouton unique a d'abord ouvert vingt cartes de produits. Le catalogue était
+alors rendu **deux fois**, en deux mises en page différentes : une carte par
+produit dans ce choix, une ligne par produit dans la déclaration groupée. Et
+**trois formulaires créaient un actif** — le court, la grille, le complet.
+
+Il n'en reste qu'un pour les produits courants : la grille de déclaration, où
+chaque produit porte directement son montant et son taux. Choisir un produit
+puis saisir son montant dans un second écran n'ajoutait qu'une étape à ce que la
+grille demande déjà sur une ligne — et elle accepte plusieurs produits d'un coup.
 
 Après avoir créé un PEA ou un portefeuille crypto, l'application ouvre
 directement sa fiche : un compte-titres vide n'a d'intérêt qu'une fois ses
-lignes renseignées.
+lignes renseignées. Seulement s'il n'y en a qu'un, sinon le choix serait
+arbitraire.
+
+### Une valeur se pose à une date, ou pas du tout
+
+Trois chemins fixaient la valeur d'un actif : le champ « Valeur aujourd'hui » de
+la fiche, le bouton **Valoriser**, et un mouvement de type « valorisation ».
+Seuls les deux derniers **datent** le point et alimentent la courbe de
+patrimoine ; le premier l'écrasait en silence.
+
+Le champ ne subsiste donc qu'à la **création**, où il est daté par « Depuis le ».
+En modification, la fiche décrit l'actif et ne le valorise plus — elle renvoie
+au bouton. Et « Valorisation » a quitté le menu du formulaire de mouvement :
+proposer les deux revenait à faire choisir entre deux mots pour un seul geste.
+Les valorisations déjà enregistrées restent listées dans l'historique.
+
+### Un bouton plein, le reste replié
+
+La fiche d'un compte-titres alignait **quatre boutons côte à côte** pour un même
+but — ajouter une ligne : « + Ajouter un support », « + Support non coté »,
+« Importer un relevé », « Saisir un symbole à la main ». Plus un cinquième par
+l'onglet *Historique* de la même fiche. Rien ne disait lequel prendre.
+
+Il en reste un plein. Les trois autres sont des cas particuliers et se replient
+sous « Autres façons d'ajouter une ligne ». Quand la liste est vide, même le
+bouton plein disparaît : l'appel à l'action est déjà dans le tableau, à la place
+des lignes absentes.
+
+Le rafraîchissement des cours se déclenchait lui aussi de trois endroits. Seul
+celui de la barre *Patrimoine* reste, là où les cours s'affichent avec la
+pastille qui dit s'ils sont à jour ; l'automatique au lancement ne bouge pas.
 
 ### La fiche d'un actif : deux onglets, plus cinq
 
@@ -425,3 +782,14 @@ Les tableaux de détail restent lisibles : tout flouter rendrait l'application
 inutilisable au quotidien, alors que le risque réel est le grand nombre qu'un
 regard de passage attrape en premier. C'est un cache-écran, **pas un
 chiffrement** : les valeurs restent dans la page.
+
+**Il ne floute que des montants.** La règle portait sur toute valeur de liste
+(`.m-value`) et atteignait ce qui n'en est pas un : « État : activé » et
+« Cours en cache : 128 » dans les réglages, « Ouvert le 12/03/2020 » sur une
+fiche, « Échéances payées : 24 / 240 » sur un prêt. La marque est maintenant
+posée par `App.metricList`, sur les seules valeurs qui portent un symbole
+monétaire — ce que `App.fmt.eur` produit, et rien d'autre. Un pourcentage ou une
+date restent lisibles.
+
+Au passage, ce même helper remplace un bloc « libellé / valeur » qui était
+réécrit à la main à sept endroits.

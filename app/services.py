@@ -33,11 +33,13 @@ def get_asset(asset_id):
 def get_movements(asset_id=None):
     if asset_id:
         rows = query(
-            "SELECT * FROM asset_movements WHERE asset_id = ? ORDER BY date, created_at",
+            "SELECT rowid AS ordre_saisie, * FROM asset_movements "
+            "WHERE asset_id = ? ORDER BY date, created_at",
             (asset_id,),
         )
     else:
-        rows = query("SELECT * FROM asset_movements ORDER BY date, created_at")
+        rows = query("SELECT rowid AS ordre_saisie, * FROM asset_movements "
+                     "ORDER BY date, created_at")
     return rows_to_list(rows)
 
 
@@ -133,7 +135,7 @@ def asset_detail(asset, movements, at_date=None, ctx=None):
     at_date = finance.parse_date(at_date) or date.today()
     is_today = at_date >= date.today()
     saisie = finance.asset_value_at(asset, movements, at_date, use_manual_current=is_today)
-    invested = finance.invested_amount(asset, movements)
+    invested = finance.invested_amount(asset, movements, at_date)
 
     # Valeur calculée, par ordre de préférence. Chaque source renvoie None si
     # elle ne peut pas produire un chiffre complet : on retombe alors sur la
@@ -141,13 +143,26 @@ def asset_detail(asset, movements, at_date=None, ctx=None):
     value, source = saisie, "saisie"
     if ctx:
         live, kind = market.market_value(
-            asset, movements, ctx["securities"], ctx["prices"]), "marche"
+            asset, movements, ctx["securities"], ctx["prices"], at_date), "marche"
         if live is None and asset["type"] in market.RATE_ASSET_TYPES:
             live, kind = market.rate_value(asset, movements, at_date), "taux"
         elif live is None and asset["type"] in market.INDEXED_ASSET_TYPES:
             live, kind = market.indexed_value(asset, at_date), "indice"
         if live is not None:
             value, source = live, kind
+            # Une valeur de marche est recalculee a chaque affichage depuis les
+            # cours du jour : elle ne garde AUCUNE trace d'un frais preleve il y
+            # a trois mois. Sur un portefeuille crypto, enregistrer 25 EUR de
+            # frais de plateforme ne changeait donc rien — ni la valeur, ni la
+            # plus-value.
+            #
+            # C'est le capital investi qui les porte : cet argent est bien sorti
+            # de votre poche pour detenir ce produit. La plus-value baisse
+            # d'autant, ce qui est le resultat attendu, et durablement.
+            #
+            # Sur une valeur reconstituee, au contraire, le flux du frais a deja
+            # fait baisser le solde : l'ajouter ici le compterait deux fois.
+            invested += finance.frais_autonomes(movements, at_date)
 
     detail = dict(asset)
     detail["famille"] = famille_of(asset["type"])
@@ -158,6 +173,15 @@ def asset_detail(asset, movements, at_date=None, ctx=None):
     detail["plus_value"] = round(value - invested, 2)
     detail["plus_value_pct"] = round((value - invested) / invested, 6) if invested else None
     detail["nb_mouvements"] = len(movements)
+
+    # Un livret n'a pas de plus-value : il a un taux et des interets a venir.
+    # La plus-value reste calculee ci-dessus pour les agregats, mais c'est ce
+    # bloc que la fiche affiche — un pourcentage de rendement partiel et non
+    # annualise ne veut rien dire sur un produit a taux.
+    if source == "taux":
+        detail["taux_annuel"] = market.taux_du_produit(asset)
+        detail["interets_prevus"] = market.rate_interests(asset, movements, at_date)
+        detail["date_credit"] = market.date_credit_interets()
     return detail
 
 
@@ -187,10 +211,48 @@ def portfolio(at_date=None, include_archived=False, ctx=None, cache=None):
     return {
         "date": finance.iso(at_date),
         "assets": assets,
+        # Permet a l'interface de proposer « N produit(s) cloture(s) » sans
+        # second appel. Le cache porte deja les deux listes : la difference
+        # suffit, aucune lecture de plus.
+        "nb_archives": len(cache["assets_archived"]) - len(cache["assets"]),
         "liabilities": liabilities,
         "total_actif": total_actif,
         "total_passif": total_passif,
         "patrimoine_net": round(total_actif - total_passif, 2),
+    }
+
+
+def gain_annuel(at_date=None, snap=None, cache=None):
+    """Plus-value acquise depuis le 1er janvier, versements exclus.
+
+    C'est l'ecart entre la plus-value latente d'aujourd'hui et celle du
+    31 decembre precedent.
+
+    Passer par la PLUS-VALUE et non par la valeur est ce qui ecarte les
+    versements de l'annee sans avoir a les recenser : un euro verse augmente la
+    valeur ET le capital investi, donc laisse la plus-value inchangee. Un euro
+    gagne n'augmente que la valeur.
+
+    Un produit ouvert dans l'annee n'existe pas dans la photo de reference —
+    `portfolio` ecarte les actifs acquis apres la date demandee. Toute sa
+    plus-value compte donc pour l'annee, ce qui est exact.
+
+    Attention a ce que ce chiffre NE dit PAS : une vente n'y apparait pas. Elle
+    diminue la valeur et le capital investi du meme montant, donc laisse la
+    plus-value inchangee. L'application ne suit que le latent.
+    """
+    at_date = finance.parse_date(at_date) or date.today()
+    cache = shared_cache(cache)
+    if snap is None:
+        snap = portfolio(at_date, cache=cache)
+    reference = date(at_date.year - 1, 12, 31)
+    avant = portfolio(reference, cache=cache)
+    ecart = (sum(a["plus_value"] for a in snap["assets"])
+             - sum(a["plus_value"] for a in avant["assets"]))
+    return {
+        "montant": round(ecart, 2),
+        "depuis": finance.iso(date(at_date.year, 1, 1)),
+        "annee": at_date.year,
     }
 
 
@@ -358,8 +420,14 @@ def month_flows(year, month, cache=None):
         "transferts_internes": transferts_internes,
         "solde": round(revenus - depenses - transferts, 2),
         "epargne": versements,
-        "taux_epargne": round(versements / revenus, 6) if revenus > 0 else None,
+        "taux_epargne": _taux(versements, revenus, decimales=6),
         "nb_transactions": len(txs),
+        # Le detail par sens. `nb_transactions` compte TOUT le mois, depenses
+        # comprises : affiche sous « Revenus du mois », il ne parlait de rien.
+        "nb_revenus": sum(1 for t in txs if t["amount"] > 0 and compte(t)),
+        "nb_depenses": sum(
+            1 for t in txs
+            if t["amount"] < 0 and compte(t) and t["category"] not in excluded),
         "par_categorie": sorted(
             ({"category": k, "montant": round(v, 2), "nb": nb_categorie[k]}
              for k, v in par_categorie.items()),
@@ -441,14 +509,31 @@ def mark_as_transfer(transaction_ids, categorie=None):
 
 
 def data_range():
-    """Bornes temporelles des données existantes."""
-    rows = [
+    """Bornes de l'archive mensuelle : le premier mois ou il s'est passe
+    quelque chose, jusqu'a aujourd'hui.
+
+    La borne basse suivait auparavant la plus ancienne date de TOUTES les
+    tables, date d'ouverture des comptes comprise. Un Livret A ouvert en 2003
+    faisait donc calculer 275 mois, dont 265 sans la moindre transaction ni le
+    moindre mouvement : 700 ms de calcul, et un tableau de 275 lignes que
+    personne ne lit. Les valeurs de ces mois-la n'etaient d'ailleurs pas de
+    l'histoire mais une reconstitution, faute d'enregistrement.
+
+    Une archive raconte ce qui s'est passe. On part donc du premier mouvement
+    d'argent reellement enregistre. Sans aucun, on retombe sur les dates
+    d'ouverture : mieux vaut une archive plate qu'une archive vide.
+    """
+    mouvements = [
         query("SELECT MIN(date) d FROM transactions", one=True),
         query("SELECT MIN(date) d FROM asset_movements", one=True),
-        query("SELECT MIN(date_acquisition) d FROM assets", one=True),
-        query("SELECT MIN(date_debut) d FROM liabilities", one=True),
     ]
-    dates = [finance.parse_date(r["d"]) for r in rows if r and r["d"]]
+    dates = [finance.parse_date(r["d"]) for r in mouvements if r and r["d"]]
+    if not dates:
+        ouvertures = [
+            query("SELECT MIN(date_acquisition) d FROM assets", one=True),
+            query("SELECT MIN(date_debut) d FROM liabilities", one=True),
+        ]
+        dates = [finance.parse_date(r["d"]) for r in ouvertures if r and r["d"]]
     start = min(dates) if dates else date.today()
     return start, date.today()
 
@@ -491,6 +576,38 @@ def monthly_archive(limit=None):
 
 # --- métriques transverses ------------------------------------------------
 
+# Un ratio dont le dénominateur n'est pas un revenu crédible n'est pas un
+# ratio : c'est du bruit affiché comme un fait. Le 1er du mois, le salaire n'est
+# pas encore tombé ; diviser les mensualités d'un prêt par les quelques centimes
+# d'intérêts déjà crédités donnait des milliers de pour cent.
+REVENU_MINIMAL = 50.0
+
+
+def _taux(numerateur, revenus, facteur=1.0, decimales=2):
+    """Le taux, ou None quand le revenu ne permet pas d'en calculer un.
+
+    Ne rien afficher est honnête ; afficher 1 500 000 % ne l'est pas.
+    """
+    if not revenus or revenus < REVENU_MINIMAL:
+        return None
+    return round(facteur * numerateur / revenus, decimales)
+
+
+def avg_income(months=3, reference=None):
+    """Revenu mensuel moyen des mois RÉVOLUS, hors mois en cours.
+
+    Le taux d'endettement et la part des charges fixes décrivent une situation
+    durable, pas le hasard d'un mois : ils se mesurent sur un revenu ordinaire.
+    """
+    reference = finance.parse_date(reference) or date.today()
+    total, counted = 0.0, 0
+    for i in range(1, months + 1):
+        d = finance.add_months(reference, -i)
+        total += month_flows(d.year, d.month)["revenus"]
+        counted += 1
+    return round(total / counted, 2) if counted else 0.0
+
+
 def avg_expenses(months=3, reference=None):
     reference = finance.parse_date(reference) or date.today()
     total, counted = 0.0, 0
@@ -521,6 +638,10 @@ def metrics(at_date=None):
         l["mensualite_avec_assurance"] for l in snap["liabilities"]
         if l["echeances_payees"] < l["echeances_totales"]), 2)
     revenus = flows["revenus"]
+    # Un mois à peine commencé n'a pas encore reçu son salaire. Les taux qui
+    # décrivent une situation durable se mesurent donc sur les mois révolus, et
+    # ne retombent sur le mois courant que faute d'historique.
+    revenu_ordinaire = avg_income(3, at_date) or revenus
 
     # Charges fixes : ce qui tombe tous les mois quoi qu'il arrive. Le reste à
     # vivre est ce dont on dispose réellement une fois ces charges et l'épargne
@@ -531,11 +652,8 @@ def metrics(at_date=None):
         -t["amount"] for t in transactions_between(debut, fin)
         if t["amount"] < 0 and t["category"] in fixes), 2)
 
-    frais = get_setting("frais_annuels", {}) or {}
-    frais_annee = frais.get(str(at_date.year), {})
-    frais_total = round(
-        float(frais_annee.get("ter", 0) or 0) + float(frais_annee.get("courtage", 0) or 0), 2
-    )
+    frais_annee = frais_par_produit(at_date.year, snap)
+    frais_total = round(sum(f["total"] for f in frais_annee), 2)
 
     return {
         "patrimoine_net": net,
@@ -554,17 +672,79 @@ def metrics(at_date=None):
         "revenus_mois": flows["revenus"],
         "depenses_mois": flows["depenses"],
         "mensualites_mois": mensualites,
-        "taux_endettement": round(100 * mensualites / revenus, 2) if revenus > 0 else None,
+        "taux_endettement": _taux(mensualites, revenu_ordinaire, 100),
         "charges_fixes_mois": charges_fixes,
         "reste_a_vivre_mois": round(revenus - charges_fixes - flows["epargne"], 2),
-        "part_charges_fixes": (
-            round(100 * charges_fixes / revenus, 2) if revenus > 0 else None),
+        "part_charges_fixes": _taux(charges_fixes, revenu_ordinaire, 100),
         "frais_annuels": frais_total,
+        # Le detail par produit, la ou il n'y avait qu'un total global.
         "frais_annuels_detail": frais_annee,
         "frais_pct_encours": (
             round(100 * frais_total / snap["total_actif"], 4) if snap["total_actif"] else None
         ),
     }
+
+
+def frais_par_produit(annee, snap=None, cache=None):
+    """Ce que chaque produit a coute dans l'annee.
+
+    Il n'y avait qu'un reglage global — deux montants tapes a la main pour tout
+    le patrimoine, `frais_annuels`. Rien ne rattachait un courtage au PEA qui
+    l'avait paye, ni un frais de reseau au portefeuille crypto, et le total
+    melangeait des couts sans rapport.
+
+    Deux sources, et elles ne se comptent pas pareil :
+
+    - les frais **payes**, lus sur les mouvements. Ceux portes par une
+      transaction (`frais_de`) et ceux qui font mouvement a eux seuls (type
+      `frais`). Ce sont des faits.
+    - le **TER** d'un support, qui n'est jamais preleve : il est integre au
+      cours et ne sort d'aucun compte. Aucun mouvement ne peut le porter, donc
+      il reste une ESTIMATION — taux saisi sur la fiche, applique a la valeur
+      du produit. Il est rendu a part pour ne pas etre confondu avec le reste.
+    """
+    cache = shared_cache(cache)
+    if snap is None:
+        snap = portfolio(date(annee, 12, 31), cache=cache)
+    grouped = cache["movements"]
+    out = []
+
+    # L'ancien reglage global, s'il porte encore quelque chose. On ne sait pas a
+    # quel produit ces montants appartenaient — c'est precisement le defaut
+    # qu'on corrige — donc on ne leur en invente pas un. Ils sont comptes a
+    # part, sous leur nom, plutot que de disparaitre en silence.
+    ancien = (get_setting("frais_annuels", {}) or {}).get(str(annee), {}) or {}
+    hors = round(float(ancien.get("ter", 0) or 0)
+                 + float(ancien.get("courtage", 0) or 0), 2)
+    if hors:
+        out.append({
+            "asset_id": None, "label": "Non rattaches (ancien reglage)",
+            "payes": hors, "ter_estime": 0.0, "total": hors,
+        })
+    for asset in snap["assets"]:
+        payes = 0.0
+        for mv in grouped.get(asset["id"], []):
+            d = finance.parse_date(mv["date"])
+            if not d or d.year != annee:
+                continue
+            payes += finance.frais_de(mv)
+            if mv["type"] == "frais":
+                payes += abs(float(mv["montant"] or 0))
+        taux = (asset.get("metadata") or {}).get("ter_annuel")
+        try:
+            ter = round(float(taux) / 100 * float(asset["valeur"] or 0), 2) if taux else 0.0
+        except (TypeError, ValueError):
+            ter = 0.0
+        if not payes and not ter:
+            continue
+        out.append({
+            "asset_id": asset["id"],
+            "label": asset["label"],
+            "payes": round(payes, 2),
+            "ter_estime": ter,
+            "total": round(payes + ter, 2),
+        })
+    return sorted(out, key=lambda f: -f["total"])
 
 
 def net_worth_series(months=12, reference=None):
@@ -654,7 +834,7 @@ def market_asset_detail(asset_id, at_date=None, ctx=None):
     value = detail["valeur"]
     tri = finance.asset_xirr(asset, movements, value, at_date)
     lignes = (
-        market.line_values(movements, ctx["securities"], ctx["prices"])
+        market.line_values(movements, ctx["securities"], ctx["prices"], at_date)
         if ctx else finance.pru_par_ligne(movements)
     )
     return {

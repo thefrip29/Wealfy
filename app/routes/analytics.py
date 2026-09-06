@@ -28,6 +28,15 @@ def overview():
     }
     return jsonify({
         "as_of": finance.iso(as_of),
+        # Base entierement vide : la synthese n'a alors aucun chiffre a
+        # montrer, et un ecran de zeros n'indique pas par ou commencer.
+        # Trois lectures a une ligne, moins couteuses que les COUNT(*)
+        # complets dont on n'a pas besoin ici.
+        "aucune_donnee": not (
+            query("SELECT 1 FROM transactions LIMIT 1")
+            or query("SELECT 1 FROM assets LIMIT 1")
+            or query("SELECT 1 FROM liabilities LIMIT 1")
+        ),
         # Observations factuelles, calculees sur ce qui vient d'etre mesure.
         "alertes": advisor.alertes(snap, metrics, repartition, etat_marche,
                                    at_date=as_of),
@@ -40,9 +49,34 @@ def overview():
         ),
         "metrics": metrics,
         "repartition": repartition,
+        # Repartition reelle par famille d'actifs, a ne pas confondre avec
+        # `repartition` ci-dessus, qui compare des poches a une cible choisie.
+        # Celle-ci ne decrit que ce qui est detenu, sans jugement.
+        "patrimoine_par_famille": _par_famille(snap),
         "patrimoine_serie": services.net_worth_series(12, as_of),
-        "depenses_serie": services.expense_series(6, as_of),
+        # Douze mois et non six : la courbe de depenses a besoin d'une annee
+        # pleine pour montrer une saison. L'histogramme n'en affiche que les
+        # six derniers, cote interface.
+        "depenses_serie": services.expense_series(12, as_of),
     })
+
+
+def _par_famille(snap):
+    """Somme des actifs par famille, la plus grosse d'abord.
+
+    Les valeurs nulles ou negatives sont ecartees : une part de camembert ne
+    peut pas etre negative, et une famille a zero n'apprend rien.
+    """
+    totaux = {}
+    for asset in snap["assets"]:
+        valeur = asset.get("valeur") or 0
+        if valeur <= 0:
+            continue
+        totaux[asset["famille"]] = totaux.get(asset["famille"], 0) + valeur
+    return [
+        {"famille": famille, "montant": round(montant, 2)}
+        for famille, montant in sorted(totaux.items(), key=lambda kv: -kv[1])
+    ]
 
 
 @bp.get("/api/history")

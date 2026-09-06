@@ -357,13 +357,20 @@ code { font-family: var(--font-mono); font-size: var(--fs-xs); }
   transition: background var(--t) var(--ease);
 }
 .month-picker:focus-within { background: color-mix(in srgb, var(--text-on-brand) 16%, transparent); }
+/* `display: flex` ci-dessus l'emporterait sur le `display: none` que le
+   navigateur attache a l'attribut `hidden` : sans cette regle, masquer le
+   selecteur sur l'onglet Historique n'aurait aucun effet. */
+.month-picker[hidden] { display: none; }
+/* En lecture seule : le mois se choisit dans le calendrier maison, jamais au
+   clavier. Le champ ne sert plus qu'a afficher « aout 2026 » et a ouvrir la
+   fenetre. */
 .month-picker input {
   background: none; border: 0; padding: 3px 4px; width: 122px;
-  color: var(--text-on-brand); text-align: center;
+  color: var(--text-on-brand); text-align: center; cursor: pointer;
   font-family: var(--font-mono); font-size: var(--fs-xs);
+  text-transform: capitalize;
 }
 .month-picker input:focus { outline: none; }
-.month-picker input::-webkit-calendar-picker-indicator { filter: invert(1); opacity: .55; cursor: pointer; }
 
 .icon-btn {
   background: transparent; border: 1px solid transparent; color: var(--muted);
@@ -381,8 +388,18 @@ code { font-family: var(--font-mono); font-size: var(--fs-xs); }
   background: color-mix(in srgb, var(--text-on-brand) 14%, transparent);
   color: var(--text-on-brand);
 }
-#open-settings { transition: transform var(--t-slow) var(--ease); }
+/* Les trois boutons de droite repondent au survol, avec la meme duree et la
+   meme courbe : seul l'engrenage bougeait, et son voisin immobile donnait
+   l'impression d'etre desactive. Le geste differe parce que l'objet differe —
+   un engrenage tourne, une lune s'incline, un oeil s'ouvre. */
+#toggle-privacy, #toggle-theme, #open-settings {
+  transition: transform var(--t-slow) var(--ease),
+              color var(--t-fast) var(--ease),
+              background var(--t-fast) var(--ease);
+}
 #open-settings:hover { transform: rotate(45deg); }
+#toggle-theme:hover { transform: rotate(-18deg); }
+#toggle-privacy:hover { transform: scale(1.15); }
 
 /* ---------- navigation, dans la barre ---------- */
 .tabs { position: relative; display: flex; align-items: center; gap: 2px; height: 100%; }
@@ -649,15 +666,20 @@ main[data-slide="prev"] .panel-leaving.go .leaving-item { animation-name: carous
    cache-écran, pas un chiffrement.
    ========================================================================== */
 
+/* `.m-value.montant` et non `.m-value` : la règle portait sur toute valeur de
+   liste et floutait ce qui n'est pas un montant — « État : activé » dans les
+   réglages, « Ouvert le 12/03/2020 » sur une fiche, « Échéances payées :
+   24 / 240 » sur un prêt. La marque est posée par `App.metricList`, sur les
+   seules valeurs qui portent un symbole monétaire. */
 body.privacy .hero-value,
 body.privacy .hero-stat .s-value,
 body.privacy .kpi .value,
-body.privacy .metric-row .m-value {
+body.privacy .metric-row .m-value.montant {
   filter: blur(10px);
   user-select: none;
   pointer-events: none;
 }
-.hero-value, .hero-stat .s-value, .kpi .value, .metric-row .m-value {
+.hero-value, .hero-stat .s-value, .kpi .value, .metric-row .m-value.montant {
   transition: filter var(--t) var(--ease);
 }
 #toggle-privacy[aria-pressed="true"] { color: var(--bronze-400); }
@@ -719,6 +741,16 @@ body.privacy .metric-row .m-value {
   .alerte-action { grid-column: 2; }
 }
 
+/* Budget depasse : la barre change de couleur, pas seulement la pastille —
+   on doit le voir sans lire le chiffre. */
+.rep-real.depasse { background: var(--perte); }
+.budget-cell input { text-align: right; font-family: var(--font-mono); }
+
+/* Fond animé atténué quand le contenu ne remplit pas l'écran : sinon les
+   masses dominent et la page flotte dessus. Posé par `App.doserFond`. */
+.lava { transition: opacity var(--t-slow) var(--ease); }
+[data-fond="court"] .lava { opacity: .45; }
+
 /* ==========================================================================
    Contrôles
    ========================================================================== */
@@ -757,7 +789,7 @@ body.privacy .metric-row .m-value {
   border-radius: 50%; animation: spin 700ms linear infinite;
 }
 
-input[type=text], input[type=number], input[type=date], input[type=month],
+input[type=text], input[type=number],
 input[type=search], input[type=password], select, textarea {
   background: var(--bg-surface); border: 1px solid var(--border-strong);
   color: var(--text);
@@ -769,8 +801,76 @@ input:hover, select:hover, textarea:hover { border-color: var(--accent); }
 input:focus, select:focus, textarea:focus {
   outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
 }
-input[type=number], input[type=date], input[type=month] { font-family: var(--font-mono); }
+input[type=number], .date-saisie { font-family: var(--font-mono); }
 textarea { font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.6; resize: vertical; }
+
+/* ---------- champ de date et calendrier ----------
+   Le champ natif suivait le format regional du systeme : voir le commentaire
+   en tete de `App.dateField`. Ce qui suit habille son remplacant. */
+.date-field { position: relative; display: block; }
+.date-saisie { padding-right: 32px; }
+.date-saisie.invalide { border-color: var(--red); }
+.date-saisie.invalide:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 22%, transparent); }
+.date-cal {
+  position: absolute; right: 1px; top: 1px; bottom: 1px; width: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: 0; border-radius: 0 var(--radius-s) var(--radius-s) 0;
+  color: var(--muted); cursor: pointer;
+  transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.date-cal:hover { color: var(--accent); background: var(--accent-soft); }
+
+/* Entre la modale (100) et les toasts (200) : le calendrier est attache au
+   `<body>`, donc frere de `.modal-backdrop`. A 90 il passait DESSOUS, et le
+   choix d'une date etait invisible depuis la fiche d'un actif. Les toasts,
+   eux, doivent rester au-dessus de tout. */
+.calendrier {
+  position: fixed; z-index: 150; width: 252px; padding: var(--space-2);
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius-s); box-shadow: var(--shadow-2);
+  animation: cal-entree var(--t-fast) var(--ease);
+}
+.calendrier.sortant { opacity: 0; transition: opacity var(--t-fast) var(--ease); }
+@keyframes cal-entree { from { opacity: 0; transform: translateY(-4px); } }
+
+.cal-tete { display: flex; align-items: center; gap: var(--space-1); margin-bottom: var(--space-2); }
+.cal-nav, .cal-titre, .cal-lien {
+  background: none; border: 0; color: var(--text); cursor: pointer;
+  border-radius: var(--radius-s); font-size: var(--fs-sm);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.cal-nav { width: 26px; height: 26px; font-size: var(--fs-md); line-height: 1; }
+.cal-titre { flex: 1; padding: 4px 6px; font-weight: 500; text-transform: capitalize; }
+.cal-titre:disabled { cursor: default; }
+.cal-nav:hover, .cal-titre:not(:disabled):hover, .cal-lien:hover {
+  background: var(--accent-soft); color: var(--accent);
+}
+
+.cal-semaine, .cal-jours { display: grid; grid-template-columns: repeat(7, 1fr); }
+.cal-mois { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
+.cal-semaine span {
+  text-align: center; padding: 2px 0;
+  color: var(--muted); font-size: var(--fs-micro);
+}
+/* Chiffres tabulaires : sans eux, les colonnes du calendrier ondulent selon
+   la largeur des chiffres du jour. */
+.cal-case {
+  background: none; border: 0; border-radius: var(--radius-s);
+  color: var(--text); cursor: pointer;
+  padding: 5px 0; font-family: var(--font-mono); font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.cal-mois .cal-case { padding: 7px 0; text-transform: capitalize; }
+.cal-case:hover { background: var(--accent-soft); color: var(--accent); }
+.cal-case.hors { color: var(--muted); opacity: .55; }
+.cal-case.aujourdhui { box-shadow: inset 0 0 0 1px var(--line); }
+.cal-case.choisi {
+  background: var(--action-surface); color: var(--on-action-surface); font-weight: 500;
+}
+.cal-case:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.cal-pied { margin-top: var(--space-2); text-align: center; }
+.cal-lien { padding: 4px 10px; font-size: var(--fs-xs); }
 select[multiple] { padding: 4px; }
 .actions input[type=search] { width: 200px; }
 .actions select { width: auto; }
@@ -801,6 +901,10 @@ input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
 .table tbody tr:last-child td { border-bottom: 0; }
 .table tbody tr:hover { background: var(--card-2); }
 .table .right, th.right { text-align: right; }
+.table .center, th.center { text-align: center; }
+/* Une case a cocher dans un tableau ne doit pas s'etirer sur la colonne :
+   la regle globale des champs leur donne `width: 100%`. */
+.table .center input[type=checkbox] { width: auto; }
 .table .empty { color: var(--muted); text-align: center; padding: var(--space-6); }
 .table select { padding: 4px 8px; font-size: var(--fs-sm); }
 
@@ -1007,7 +1111,7 @@ input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
 .group-body > .group-inner { overflow: hidden; }
 
 .asset-row {
-  display: grid; grid-template-columns: 1fr 150px 140px 120px 88px;
+  display: grid; grid-template-columns: 1fr 150px 140px 88px;
   gap: var(--space-3); align-items: center;
   padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5);
   border-top: 1px solid var(--line-soft);
@@ -1016,6 +1120,42 @@ input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
 .asset-row:hover { background: var(--card-2); }
 .asset-row .a-name { font-weight: var(--weight-medium); }
 .asset-row .a-meta { font-size: var(--fs-micro); color: var(--muted); margin-top: 2px; }
+
+/* Reste à vivre : le chiffre qui domine sa carte, un cran sous le héros. */
+.reste { padding-bottom: var(--space-4); margin-bottom: var(--space-2); }
+.reste-label {
+  font-size: var(--fs-xs); color: var(--muted);
+  text-transform: uppercase; letter-spacing: .06em;
+}
+.reste-value {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 30px; font-weight: var(--weight-medium);
+  margin-top: 2px; transition: filter var(--t) var(--ease);
+}
+body.privacy .reste-value { filter: blur(10px); user-select: none; }
+
+/* Part d'un produit DANS SA FAMILLE. L'en-tete de groupe donne déjà la part
+   de la famille dans l'ensemble : enchaîner deux échelles se lirait mal.
+
+   Le filet se pose sous la ligne et non derrière le texte — un fond teinté
+   gênerait la lecture des montants, qui sont le sujet de l'écran. */
+.part-bar {
+  grid-column: 1 / -1; height: 2px; margin-top: 6px;
+  background: var(--line-soft); border-radius: 2px; overflow: hidden;
+}
+.part-bar > span {
+  display: block; height: 100%; background: var(--accent);
+  border-radius: 2px; transition: width var(--t) var(--ease);
+}
+
+/* Produits clotures : pose sous la liste, visiblement a part, parce qu'ils
+   ne comptent pas dans les totaux affiches au-dessus. */
+.archives { border-top: 1px solid var(--line); margin-top: var(--space-4); }
+.archives-tete {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-3); padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5);
+}
+.archives-liste .asset-row { opacity: .65; }
 
 /* ==========================================================================
    Listes de métriques
@@ -1071,6 +1211,9 @@ input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
 
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-4); }
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* `display: flex` l'emporterait sur le `display: none` attache a l'attribut
+   `hidden` : sans cette regle, masquer un champ n'aurait aucun effet. */
+.field[hidden] { display: none; }
 .field label { font-size: var(--fs-xs); color: var(--text-2); font-weight: var(--weight-medium); }
 .field.full { grid-column: 1 / -1; }
 .field .hint { margin-top: 1px; }
@@ -1167,11 +1310,70 @@ input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
 }
 
 /* ==========================================================================
+   Dépôt de fichier
+
+   Le trait discontinu dit « posez quelque chose ici » sans avoir à l'écrire.
+   Il devient continu au survol d'un fichier : c'est le seul moment où la zone
+   attend vraiment un geste.
+   ========================================================================== */
+
+.depot {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-s);
+  background: var(--bg-surface);
+  padding: var(--space-5) var(--space-4);
+  text-align: center; cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease),
+              background var(--t-fast) var(--ease);
+}
+.depot:hover { border-color: var(--accent); }
+.depot.survol {
+  border-style: solid; border-color: var(--accent);
+  background: var(--action-subtle);
+}
+.depot.occupe { pointer-events: none; opacity: .7; }
+.depot-titre { font-size: var(--fs-sm); color: var(--text); }
+.depot-sub { font-size: var(--fs-xs); color: var(--muted); margin-top: 4px; }
+.depot-etat:not(:empty) { margin-top: var(--space-3); }
+
+/* ==========================================================================
+   Tableau des transactions : selection et categorie
+   ========================================================================== */
+
+/* La categorie redevient du texte. C'etait un `<select>` par ligne, portant
+   toutes les categories et reconstruit a chaque frappe dans la recherche : le
+   tableau ne ressemblait plus a un tableau. La liste n'existe plus qu'au
+   moment ou on la deroule. */
+.cat-cell {
+  background: none; border: 1px solid transparent; color: var(--text);
+  font: inherit; text-align: left; cursor: pointer;
+  padding: 3px 6px; margin: -3px -6px; border-radius: var(--radius-sm);
+  width: calc(100% + 12px);
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.cat-cell:hover { background: var(--card-2); border-color: var(--line); }
+
+.bulk-bar {
+  display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+  margin-bottom: var(--space-3); padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--accent); border-radius: var(--radius-s);
+  background: var(--action-subtle); font-size: var(--fs-sm);
+}
+.bulk-bar[hidden] { display: none; }
+.bulk-bar select { width: auto; }
+
+/* ==========================================================================
    États vides
    ========================================================================== */
 
 .empty-cta { text-align: center; padding: var(--space-7) var(--space-4); }
 .empty-cta p { color: var(--muted); margin: 0 0 var(--space-4); }
+
+/* Accueil d'une base vide : le panneau ne montre que lui. */
+#tab-overview.vide > *:not(#ov-vide) { display: none; }
+#ov-vide:empty { display: none; }
+.accueil h2 { margin: 0 0 var(--space-2); font-size: var(--fs-lg); }
+.accueil .actions { justify-content: center; }
 
 /* ==========================================================================
    Notifications
@@ -1211,4 +1413,59 @@ input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
   .hero-value { font-size: 30px; }
   .asset-row { grid-template-columns: 1fr 120px; row-gap: 6px; padding-left: var(--space-3); }
   .modal-backdrop { padding: var(--space-4) var(--space-2); }
+}
+
+/* ==========================================================================
+   Marchands regroupés à l'import
+   ========================================================================== */
+
+/* Le bandeau porte la bordure ; les rangées qu'il contient n'en portent
+   aucune, pour rester libres de leurs transitions. */
+.marchands {
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--card-2);
+}
+.marchands-tete {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--space-3); flex-wrap: wrap;
+}
+.marchands .table-wrap { margin-top: var(--space-3); }
+.marchands select { width: 100%; }
+.marchands .pill { margin-top: 4px; }
+
+/* --- ce qui attend une décision -------------------------------------------
+
+   Vingt-quatre lignes noyées dans deux cents ne se voient pas. Un lisere sur
+   le bord gauche suffit à les retrouver d'un coup d'œil ; il disparaît des
+   qu'une catégorie est posée, si bien que le tableau se vide à mesure du
+   travail fait. */
+.table tbody tr.a-classer > td:first-child {
+  box-shadow: inset 3px 0 0 var(--alerte);
+}
+.table tbody tr.a-classer > td { background: var(--alerte-bg); }
+.table tbody tr[hidden] { display: none; }
+
+.recap {
+  display: flex; align-items: center; gap: var(--space-3);
+  flex-wrap: wrap; margin-bottom: var(--space-3);
+}
+.recap .hint { margin-right: auto; }
+.a-classer-compte { color: var(--alerte); }
+
+/* Le collage remplace le dépôt : l'un ou l'autre, jamais les deux. */
+.depot[hidden] { display: none; }
+
+/* Une catégorie qu'on invente : le champ n'apparaît qu'une fois demandé. */
+.cat-neuve { width: 100%; margin-top: var(--space-2); }
+.cat-neuve[hidden] { display: none; }
+
+/* Une proposition du modèle, par opposition à une consigne : même couleur
+   d'accent, mais en pointillés — provisoire, et corrigeable. */
+.pill.appris {
+  color: var(--info);
+  border: 1px dashed color-mix(in srgb, var(--info) 55%, transparent);
+  background: transparent;
 }

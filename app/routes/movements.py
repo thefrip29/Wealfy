@@ -16,28 +16,36 @@ def list_movements(aid):
 
 @bp.post("/api/assets/<aid>/movements")
 def create_movement(aid):
-    if not services.get_asset(aid):
+    asset = services.get_asset(aid)
+    if not asset:
         return fail("Actif introuvable.", 404)
     data = body()
     mtype = (data.get("type") or "versement").strip()
-    if mtype not in ("versement", "retrait", "valorisation"):
+    if mtype not in ("versement", "retrait", "valorisation", "frais"):
         return fail("Type de mouvement inconnu.")
     montant = as_float(data.get("montant"))
     if montant is None:
         return fail("Montant invalide.")
     if mtype == "versement":
         montant = abs(montant)
-    elif mtype == "retrait":
+    elif mtype in ("retrait", "frais"):
+        # Un frais autonome sort du produit, comme un retrait : c'est la baisse
+        # de valeur qu'il provoque qui le fait apparaitre dans les comptes.
         montant = -abs(montant)
+    # Frais PORTES par ce mouvement — le courtage d'un achat, les frais de
+    # reseau d'un envoi. Ils n'entrent pas dans `montant` : cet argent n'est pas
+    # alle dans le produit.
+    frais = abs(as_float(data.get("frais"), 0.0) or 0.0)
     mid = new_id()
     execute(
         "INSERT INTO asset_movements(id, asset_id, date, montant, type, quantite, "
-        "prix_unitaire, ticker, note) VALUES (?,?,?,?,?,?,?,?,?)",
+        "prix_unitaire, ticker, frais, note) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (
             mid, aid, as_date(data.get("date"), date.today().isoformat()),
             round(montant, 2), mtype,
             as_float(data.get("quantite"), None), as_float(data.get("prix_unitaire"), None),
             (data.get("ticker") or "").strip() or None,
+            round(frais, 2),
             (data.get("note") or "").strip() or None,
         ),
     )

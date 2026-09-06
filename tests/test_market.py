@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -498,6 +499,116 @@ class TestLivretInterest(unittest.TestCase):
     def test_before_acquisition_is_zero(self):
         self.assertEqual(finance.valeur_livret(self._asset(), [], 3.0, "2023-06-01"), 0.0)
 
+    # --- la quinzaine en cours ne paie qu'une fois revolue ------------------
+
+    def test_le_jour_de_la_saisie_ne_rapporte_rien(self):
+        """Le bug signale : 8 000 EUR devenaient 8 008 EUR le jour meme.
+
+        Au taux du Livret A, cette quinzaine offerte d'avance valait +0,1 %, et
+        faisait apparaitre une plus-value sur un livret tout juste declare.
+        """
+        actif = {"date_acquisition": "2026-08-28", "valeur_acquisition": 8000,
+                 "valeur_actuelle": None}
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-08-28"), 8000.0)
+
+    def test_la_quinzaine_paie_le_jour_ou_elle_s_acheve(self):
+        """Credit cale sur la fin de quinzaine : rien le 30, huit euros le 31."""
+        actif = {"date_acquisition": "2026-08-28", "valeur_acquisition": 8000,
+                 "valeur_actuelle": None}
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-08-30", "08-31"), 8000.0)
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-08-31", "08-31"), 8008.0)
+
+    def test_le_15_cloture_aussi_une_quinzaine(self):
+        """Le mois compte deux quinzaines : le 15 en ferme une, comme le 30 ou le 31."""
+        actif = {"date_acquisition": "2026-09-01", "valeur_acquisition": 8000,
+                 "valeur_actuelle": None}
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-09-14", "09-15"), 8000.0)
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-09-15", "09-15"), 8008.0)
+
+    # --- le capital, et non le capital plus les interets courus -------------
+
+    def test_le_capital_exclut_les_interets_non_credites(self):
+        """Ce que montre le releve bancaire : les interets tombent au 31/12."""
+        actif = {"date_acquisition": "2026-01-01", "valeur_acquisition": 10000,
+                 "valeur_actuelle": None}
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-09-30"), 10000.0)
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-12-30"), 10000.0)
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-12-31"), 10240.0)
+
+    def test_interets_prevus_a_la_prochaine_echeance(self):
+        actif = {"date_acquisition": "2026-01-01", "valeur_acquisition": 10000,
+                 "valeur_actuelle": None}
+        self.assertEqual(finance.interets_prevus(actif, [], 2.4, "2026-09-30"), 240.0)
+        # Une fois credites, la projection repart sur l'annee suivante.
+        self.assertEqual(finance.interets_prevus(actif, [], 2.4, "2026-12-31"), 0.0)
+        self.assertEqual(finance.interets_prevus(actif, [], 2.4, "2027-01-01"), 245.76)
+
+    def test_sans_taux_aucun_interet_prevu(self):
+        actif = {"date_acquisition": "2026-01-01", "valeur_acquisition": 10000,
+                 "valeur_actuelle": None}
+        self.assertEqual(finance.interets_prevus(actif, [], None, "2026-09-30"), 0.0)
+
+    # --- une valorisation dit combien, pas depuis quand ---------------------
+
+    def test_valoriser_en_cours_d_annee_n_efface_pas_les_interets_courus(self):
+        """Cas signale : 1798 EUR a 2,7 %, recale fin aout sur le meme montant.
+
+        Le solde d'un livret ne contient jamais les interets de l'annee : ils
+        tombent a l'echeance. Repartir de la date de valorisation les effacait,
+        et la projection passait de 48,55 EUR a 18,20 EUR.
+        """
+        actif = {"date_acquisition": "2018-08-24", "valeur_acquisition": 1798,
+                 "valeur_actuelle": 1798}
+        recale = [{"date": "2026-08-29", "type": "valorisation", "montant": 1798}]
+        self.assertEqual(finance.interets_prevus(actif, recale, 2.7, "2026-08-29"), 48.55)
+        # Soit exactement le calcul de tete : le solde multiplie par le taux.
+        self.assertAlmostEqual(1798 * 0.027, 48.55, places=2)
+
+    def test_valoriser_plusieurs_fois_ne_change_rien(self):
+        actif = {"date_acquisition": "2018-08-24", "valeur_acquisition": 1798,
+                 "valeur_actuelle": 1798}
+        une = [{"date": "2026-01-01", "type": "valorisation", "montant": 1798}]
+        trois = une + [
+            {"date": "2026-08-28", "type": "valorisation", "montant": 1798},
+            {"date": "2026-08-29", "type": "valorisation", "montant": 1798},
+        ]
+        self.assertEqual(finance.interets_prevus(actif, une, 2.7, "2026-08-29"),
+                         finance.interets_prevus(actif, trois, 2.7, "2026-08-29"))
+
+    def test_un_livret_ouvert_en_cours_d_annee_ne_touche_qu_un_prorata(self):
+        """L'ouverture reste une borne : on ne remonte pas avant elle."""
+        actif = {"date_acquisition": "2026-08-29", "valeur_acquisition": 1798,
+                 "valeur_actuelle": 1798}
+        prevus = finance.interets_prevus(actif, [], 2.7, "2026-08-29")
+        self.assertLess(prevus, 1798 * 0.027)
+        self.assertEqual(prevus, 18.20)
+
+    def test_une_valorisation_ancienne_capitalise_les_annees_suivantes(self):
+        """On ne remonte pas non plus apres une valorisation plus ancienne."""
+        actif = {"date_acquisition": "2018-01-01", "valeur_acquisition": 1000,
+                 "valeur_actuelle": None}
+        vieille = [{"date": "2024-05-01", "type": "valorisation", "montant": 1798}]
+        # Deux echeances passees depuis : les interets se composent.
+        self.assertGreater(finance.valeur_livret(actif, vieille, 2.7, "2026-08-29"), 1850.0)
+
+    # --- date de credit configurable ---------------------------------------
+
+    def test_la_date_de_credit_se_deplace(self):
+        actif = {"date_acquisition": "2026-01-01", "valeur_acquisition": 10000,
+                 "valeur_actuelle": None}
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-06-29", "06-30"), 10000.0)
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-06-30", "06-30"), 10120.0)
+        # Et plus rien au 31 decembre, qui n'est plus l'echeance.
+        self.assertEqual(finance.valeur_livret(actif, [], 2.4, "2026-12-31", "06-30"), 10120.0)
+
+    def test_une_date_de_credit_illisible_retombe_sur_le_31_decembre(self):
+        """Un reglage corrompu ne doit pas faire disparaitre les interets."""
+        actif = {"date_acquisition": "2026-01-01", "valeur_acquisition": 10000,
+                 "valeur_actuelle": None}
+        for valeur in ("n'importe quoi", "", None, "13-45"):
+            self.assertEqual(
+                finance.valeur_livret(actif, [], 2.4, "2026-12-31", valeur), 10240.0)
+
 
 class TestLivretThroughApi(MarketTestCase):
     def test_rate_asset_uses_computed_interest(self):
@@ -531,6 +642,131 @@ class TestLivretThroughApi(MarketTestCase):
         detail = self.get(f"/api/assets/{bien['id']}?date=2025-01-01")
         self.assertEqual(detail["asset"]["valeur_source"], "indice")
         self.assertAlmostEqual(detail["asset"]["valeur"], 110408.0, delta=200.0)
+
+    def test_la_valeur_saisie_recale_le_livret(self):
+        """« Valeur aujourd'hui » etait lettre morte sur un produit a taux.
+
+        Elle n'ecrivait que `assets.valeur_actuelle`, que le calcul d'interets
+        ignore : il ne se recale que sur un mouvement de valorisation. Saisir
+        8 000 EUR laissait donc afficher un tout autre chiffre.
+        """
+        livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A", "date_acquisition": "2020-01-01",
+            "valeur_acquisition": 5000, "metadata": {"taux_annuel": 2.4},
+        })
+        self.client.put(f"/api/assets/{livret['id']}", json={"valeur_actuelle": 8000})
+        detail = self.get(f"/api/assets/{livret['id']}")
+        self.assertEqual(detail["asset"]["valeur_source"], "taux")
+        self.assertEqual(detail["asset"]["valeur"], 8000.0)
+
+    def test_un_livret_ancien_ne_fabrique_pas_d_interets_passes(self):
+        """Le cas qui produisait une perte de 1 813 EUR sur l'annee.
+
+        Un Livret A ouvert en 2003, declare aujourd'hui avec son solde du jour.
+        L'application datait ce solde a l'ouverture et faisait courir les
+        interets sur vingt-deux ans : le livret « valait » alors 5 798 EUR au
+        31 decembre precedent, contre 3 985 EUR le lendemain. Le retour au reel
+        se lisait comme une perte, alors qu'un livret ne perd jamais.
+        """
+        an = date.today().year
+        livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A", "date_acquisition": "2003-10-02",
+            "valeur_acquisition": 3985.01, "valeur_actuelle": 3985.01,
+            "metadata": {"taux_annuel": 1.7},
+        })
+        veille = self.get(f"/api/assets/{livret['id']}?date={an - 1}-12-31")
+        self.assertEqual(veille["asset"]["valeur"], 3985.01)
+        # Et donc aucune perte fabriquee sur l'annee.
+        self.assertEqual(self.get("/api/assets")["gain_annuel"]["montant"], 0.0)
+
+    def test_un_depot_reel_garde_ses_interets(self):
+        """L'inverse doit rester vrai : sans solde du jour declare, la valeur
+        d'acquisition est bien un depot a cette date, et ses interets sont dus.
+        """
+        livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A", "date_acquisition": "2024-01-01",
+            "valeur_acquisition": 10000, "metadata": {"taux_annuel": 3.0},
+        })
+        detail = self.get(f"/api/assets/{livret['id']}?date=2024-12-31")
+        self.assertAlmostEqual(detail["asset"]["valeur"], 10300.0, delta=1.0)
+
+    def test_les_interets_courent_apres_le_solde_declare(self):
+        """Le passe est plat, l'avenir non : une fois le solde connu, les
+        interets reprennent normalement."""
+        an = date.today().year
+        livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A", "date_acquisition": "2003-10-02",
+            "valeur_acquisition": 3985.01, "valeur_actuelle": 3985.01,
+            "metadata": {"taux_annuel": 1.7},
+        })
+        detail = self.get(f"/api/assets/{livret['id']}")
+        self.assertGreater(detail["asset"]["interets_prevus"], 0)
+        futur = self.get(f"/api/assets/{livret['id']}?date={an + 2}-12-31")
+        self.assertGreater(futur["asset"]["valeur"], 3985.01)
+
+    def test_enregistrer_la_fiche_sans_changer_le_montant_ne_valorise_pas(self):
+        """Corriger un libelle empilait une valorisation a chaque sauvegarde."""
+        livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A", "date_acquisition": "2020-01-01",
+            "valeur_acquisition": 5000, "valeur_actuelle": 8000,
+            "metadata": {"taux_annuel": 2.4},
+        })
+        for _ in range(3):
+            self.client.put(f"/api/assets/{livret['id']}", json={
+                "label": "Livret A renomme", "valeur_actuelle": 8000,
+            })
+        mouvements = self.get(f"/api/assets/{livret['id']}")["movements"]
+        # Une seule, celle posee a la creation pour dater le solde declare.
+        # Ce qui est verifie ici, c'est qu'enregistrer la fiche n'en empile pas.
+        valos = [m for m in mouvements if m["type"] == "valorisation"]
+        self.assertEqual(len(valos), 1)
+        self.assertEqual(valos[0]["note"], "Solde declare a la creation")
+
+    def test_deux_corrections_le_meme_jour_ne_laissent_qu_une_valorisation(self):
+        livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A", "date_acquisition": "2020-01-01",
+            "valeur_acquisition": 5000, "metadata": {"taux_annuel": 2.4},
+        })
+        for montant in (8000, 8500, 9000):
+            self.client.put(f"/api/assets/{livret['id']}", json={"valeur_actuelle": montant})
+        detail = self.get(f"/api/assets/{livret['id']}")
+        valos = [m for m in detail["movements"] if m["type"] == "valorisation"]
+        self.assertEqual(len(valos), 1)
+        self.assertEqual(valos[0]["montant"], 9000.0)
+        self.assertEqual(detail["asset"]["valeur"], 9000.0)
+
+    def test_un_livret_declare_aujourd_hui_n_a_aucune_plus_value(self):
+        """`docs/donnees.md` le promet : la plus-value demarre a zero."""
+        livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A",
+            "date_acquisition": date.today().isoformat(),
+            "valeur_acquisition": 8000, "valeur_actuelle": 8000,
+            "metadata": {"taux_annuel": 2.4},
+        })
+        asset = self.get(f"/api/assets/{livret['id']}")["asset"]
+        self.assertEqual(asset["valeur"], 8000.0)
+        self.assertEqual(asset["plus_value"], 0.0)
+
+    def test_la_fiche_expose_taux_interets_et_date_de_credit(self):
+        livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A", "date_acquisition": "2026-01-01",
+            "valeur_acquisition": 10000, "metadata": {"taux_annuel": 2.4},
+        })
+        asset = self.get(f"/api/assets/{livret['id']}?date=2026-09-30")["asset"]
+        self.assertEqual(asset["taux_annuel"], 2.4)
+        self.assertEqual(asset["interets_prevus"], 240.0)
+        self.assertEqual(asset["date_credit"], "12-31")
+
+    def test_le_reglage_de_date_de_credit_est_pris_en_compte(self):
+        self.client.put("/api/settings", json={"date_credit_interets": "06-30"})
+        livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A", "date_acquisition": "2026-01-01",
+            "valeur_acquisition": 10000, "metadata": {"taux_annuel": 2.4},
+        })
+        avant = self.get(f"/api/assets/{livret['id']}?date=2026-06-29")["asset"]
+        apres = self.get(f"/api/assets/{livret['id']}?date=2026-06-30")["asset"]
+        self.assertEqual(avant["valeur"], 10000.0)
+        self.assertEqual(apres["valeur"], 10120.0)
 
     def test_without_rate_falls_back_to_manual(self):
         self.enable_market()
@@ -616,6 +852,291 @@ class TestBenchmark(MarketTestCase):
         self.assertAlmostEqual(ligne["perf_indice"], 10.0, places=1)
         self.assertAlmostEqual(ligne["ecart"], 15.0, places=1)
         self.assertEqual(ligne["serie_ligne"][0]["valeur"], 100.0)
+
+
+class TestRechercheInstruments(unittest.TestCase):
+    """Regroupement et classement des resultats, hors reseau."""
+
+    @staticmethod
+    def _ligne(symbol, nom, exchange, pays="Germany", devise="EUR"):
+        return {
+            "symbol": symbol, "instrument_name": nom, "exchange": exchange,
+            "mic_code": f"X{exchange[:3].upper()}", "country": pays,
+            "currency": devise, "instrument_type": "Common Stock",
+        }
+
+    def test_une_valeur_sur_vingt_places_donne_une_entree(self):
+        rows = [self._ligne(f"SPX{i}", "Space Exploration Technologies Corp. Class A",
+                            f"Place{i}") for i in range(20)]
+        out = market._resultats_titres(rows, None, 25)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(len(out[0]["autres_places"]), 19)
+
+    def test_le_regroupement_ignore_la_casse_et_les_espaces(self):
+        rows = [self._ligne("A", "Amundi  MSCI World", "XETR"),
+                self._ligne("B", "amundi msci world", "SIX")]
+        self.assertEqual(len(market._resultats_titres(rows, None, 25)), 1)
+
+    def test_euronext_passe_devant(self):
+        """Un detenteur de PEA doit voir la ligne francaise en premier."""
+        rows = [
+            self._ligne("WRDUSA.USD", "Amundi MSCI World", "SIX", "Switzerland", "CHF"),
+            self._ligne("LYYA", "Amundi MSCI World", "XETR", "Germany", "EUR"),
+            self._ligne("WLD", "Amundi MSCI World", "Euronext", "France", "EUR"),
+        ]
+        out = market._resultats_titres(rows, None, 25)
+        self.assertEqual(out[0]["symbol"], "WLD")
+        # A rang egal, l'ordre du fournisseur est conserve : EUR avant CHF.
+        self.assertEqual([c["symbol"] for c in out[0]["autres_places"]],
+                         ["LYYA", "WRDUSA.USD"])
+
+    def test_des_valeurs_distinctes_restent_distinctes(self):
+        rows = [self._ligne("WLD", "Amundi MSCI World", "Euronext"),
+                self._ligne("ESE", "BNP S&P 500", "Euronext")]
+        self.assertEqual(len(market._resultats_titres(rows, None, 25)), 2)
+
+    def test_la_limite_compte_des_valeurs_et_non_des_cotations(self):
+        rows = []
+        for v in range(5):
+            rows += [self._ligne(f"S{v}-{i}", f"Valeur {v}", f"Place{i}")
+                     for i in range(10)]
+        self.assertEqual(len(market._resultats_titres(rows, None, 3)), 3)
+
+    def test_l_isin_interroge_est_attache_aux_resultats(self):
+        """Le fournisseur ne renvoie pas l'ISIN : la requete est la seule source."""
+        out = market._resultats_titres(
+            [self._ligne("SPCX", "Space Exploration Technologies Corp.", "NASDAQ")],
+            "US84615Q1031", 25)
+        self.assertEqual(out[0]["isin"], "US84615Q1031")
+
+    def test_une_recherche_par_nom_n_invente_pas_d_isin(self):
+        out = market._resultats_titres(
+            [self._ligne("WLD", "Amundi MSCI World", "Euronext")], None, 25)
+        self.assertIsNone(out[0]["isin"])
+
+    def test_reconnaissance_d_un_isin(self):
+        for code in ("US84615Q1031", "FR0010315770", "IE00B4L5Y983"):
+            self.assertTrue(market.ISIN_RE.match(code), code)
+        for code in ("CW8", "MSCI WORLD", "US84615Q103"):
+            self.assertFalse(market.ISIN_RE.match(code), code)
+
+
+class TestYahooFinance(unittest.TestCase):
+    """Fournisseur alternatif. Le reseau est remplace par une reponse en dur."""
+
+    @staticmethod
+    def _sans_reseau(payload):
+        return unittest.mock.patch.object(market, "_get_json", return_value=payload)
+
+    def test_la_recherche_est_normalisee_dans_la_forme_de_twelve_data(self):
+        """Une seule fonction regroupe et classe, quel que soit le fournisseur."""
+        payload = {"quotes": [{
+            "symbol": "SPCX", "shortname": "Space Exploration Technologies",
+            "longname": "Space Exploration Technologies Corp.",
+            "quoteType": "EQUITY", "exchange": "NMS", "exchDisp": "NASDAQ",
+            "typeDisp": "Titres",
+        }]}
+        with self._sans_reseau(payload):
+            rows = market.YahooFinance.search("US84615Q1031", 25)
+        self.assertEqual(rows[0]["symbol"], "SPCX")
+        self.assertEqual(rows[0]["instrument_name"],
+                         "Space Exploration Technologies Corp.")
+        self.assertEqual(rows[0]["exchange"], "NASDAQ")
+        self.assertEqual(rows[0]["instrument_type"], "Titres")
+
+    def test_une_ligne_sans_symbole_est_ecartee(self):
+        with self._sans_reseau({"quotes": [{"shortname": "sans symbole"}]}):
+            self.assertEqual(market.YahooFinance.search("x", 25), [])
+
+    def test_le_cours_vient_du_graphique_et_non_de_quote(self):
+        """`/v7/finance/quote` reclame un cookie et un crumb : on l'evite."""
+        payload = {"chart": {"result": [{"meta": {
+            "regularMarketPrice": 123.45, "currency": "USD",
+            "regularMarketTime": 1_755_000_000, "fullExchangeName": "NasdaqGS",
+            "longName": "Space Exploration Technologies Corp.",
+        }}]}}
+        with self._sans_reseau(payload) as faux:
+            found, errors = market.YahooFinance().quotes(
+                [{"cle": "US84615Q1031", "symbol": "SPCX"}])
+        self.assertEqual(errors, [])
+        self.assertEqual(found["US84615Q1031"]["price"], 123.45)
+        self.assertEqual(found["US84615Q1031"]["currency"], "USD")
+        self.assertIn("/v8/finance/chart/SPCX", faux.call_args[0][0])
+
+    def test_une_erreur_yahoo_devient_une_erreur_de_ligne(self):
+        payload = {"chart": {"result": None,
+                             "error": {"description": "No data found"}}}
+        with self._sans_reseau(payload):
+            found, errors = market.YahooFinance().quotes(
+                [{"cle": "INCONNU", "symbol": "ZZZZ"}])
+        self.assertEqual(found, {})
+        self.assertEqual(errors[0]["erreur"], "No data found")
+
+    def test_la_serie_ignore_les_seances_sans_cloture(self):
+        payload = {"chart": {"result": [{
+            "timestamp": [1_704_067_200, 1_704_153_600, 1_704_240_000],
+            "indicators": {"quote": [{"close": [100.0, None, 110.0]}]},
+        }]}}
+        with self._sans_reseau(payload):
+            serie = market.YahooFinance().series("WLD.PA", "2024-01-01", "2024-01-03")
+        self.assertEqual([v for _, v in serie], [100.0, 110.0])
+
+
+class TestSupportNonCote(MarketTestCase):
+    """Fonds euro : valorise en local, et qui ne casse plus son enveloppe."""
+
+    def _assurance_vie(self):
+        return self.post("/api/assets", {
+            "type": "AssuranceVie", "label": "AV Linxea",
+            "date_acquisition": "2024-01-02", "valeur_acquisition": 0,
+        })
+
+    def _ajoute_fonds_euro(self, aid, montant=10000, taux=2.5, date_versement="2024-01-01"):
+        return self.post(f"/api/assets/{aid}/positions", {
+            "kind": "non_cote", "ticker": "Fonds euro", "label": "Fonds euro",
+            "montant": montant, "taux_annuel": taux, "date": date_versement,
+        })
+
+    def test_saisissable_sans_quantite_ni_prix(self):
+        av = self._assurance_vie()
+        self._ajoute_fonds_euro(av["id"])
+        lignes = self.get(f"/api/assets/{av['id']}/positions")["lignes"]
+        self.assertEqual(len(lignes), 1)
+        self.assertEqual(lignes[0]["kind"], "non_cote")
+
+    def test_saisissable_cours_desactives(self):
+        """Aucun reseau en jeu : le reglage ne doit rien bloquer."""
+        av = self._assurance_vie()
+        res = self.client.post(f"/api/assets/{av['id']}/positions", json={
+            "kind": "non_cote", "ticker": "Fonds euro", "label": "Fonds euro",
+            "montant": 5000,
+        })
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+
+    def test_valorisation_au_taux_saisi(self):
+        av = self._assurance_vie()
+        self._ajoute_fonds_euro(av["id"], 10000, 2.5, "2024-01-01")
+        res = self.client.get(f"/api/assets/{av['id']}/positions?date=2024-12-31")
+        ligne = res.get_json()["lignes"][0]
+        self.assertAlmostEqual(ligne["valeur"], 10250.68, places=2)
+
+    def test_sans_taux_la_valeur_reste_nominale(self):
+        av = self._assurance_vie()
+        self.post(f"/api/assets/{av['id']}/positions", {
+            "kind": "non_cote", "ticker": "Fonds euro", "label": "Fonds euro",
+            "montant": 8000, "date": "2024-01-01",
+        })
+        res = self.client.get(f"/api/assets/{av['id']}/positions?date=2026-12-31")
+        self.assertEqual(res.get_json()["lignes"][0]["valeur"], 8000.0)
+
+    def test_une_enveloppe_mixte_garde_sa_valeur_de_marche(self):
+        """Le point qui bloquait : un fonds euro annulait toute l'assurance vie."""
+        self.enable_market()
+        av = self._assurance_vie()
+        self.post(f"/api/assets/{av['id']}/movements", {
+            "date": "2024-01-05", "montant": 1000, "type": "versement",
+            "ticker": "IE00B4L5Y983", "quantite": 10, "prix_unitaire": 100,
+        })
+        self.post("/api/securities", {
+            "ticker": "IE00B4L5Y983", "symbol": "CW8", "currency": "EUR",
+        })
+        self._ajoute_fonds_euro(av["id"], 10000, 0)
+        with self.app.app_context():
+            market.refresh_quotes(FakeProvider({"CW8": 120.0}))
+
+        positions = self.get(f"/api/assets/{av['id']}/positions")
+        self.assertTrue(positions["complet"])
+        self.assertEqual(positions["valeur_totale"], 11200.0)   # 10 x 120 + 10 000
+
+        asset = next(a for a in self.get("/api/assets")["assets"] if a["id"] == av["id"])
+        self.assertEqual(asset["valeur_source"], "marche")
+
+    def test_aucun_appel_reseau_pour_un_support_non_cote(self):
+        self.enable_market()
+        av = self._assurance_vie()
+        self._ajoute_fonds_euro(av["id"])
+        spy = FakeProvider({})
+        with self.app.app_context():
+            market.refresh_quotes(spy)
+        self.assertEqual(spy.calls, 0)
+
+    def test_n_est_pas_signale_comme_symbole_a_mapper(self):
+        self.enable_market()
+        av = self._assurance_vie()
+        self._ajoute_fonds_euro(av["id"])
+        self.assertNotIn("Fonds euro", self.get("/api/market/status")["tickers_non_mappes"])
+
+    def test_le_taux_survit_a_un_nouveau_versement(self):
+        av = self._assurance_vie()
+        self._ajoute_fonds_euro(av["id"], 10000, 2.5, "2024-01-01")
+        self.post(f"/api/assets/{av['id']}/positions", {
+            "kind": "non_cote", "ticker": "Fonds euro", "montant": 500,
+            "date": "2024-06-01",
+        })
+        with self.app.app_context():
+            self.assertEqual(
+                market.securities_by_ticker()["Fonds euro"]["taux_annuel"], 2.5)
+
+
+class TestCorrespondanceEditable(MarketTestCase):
+    def test_corriger_une_place_n_efface_ni_le_nom_ni_l_isin(self):
+        """L'ecran des parametres n'envoie que ce qu'il affiche."""
+        self.post("/api/securities", {
+            "ticker": "US84615Q1031", "symbol": "SPCX", "label": "SpaceX",
+            "isin": "US84615Q1031", "currency": "USD",
+        })
+        self.post("/api/securities", {"ticker": "US84615Q1031", "exchange": "NASDAQ"})
+        with self.app.app_context():
+            sec = market.securities_by_ticker()["US84615Q1031"]
+        self.assertEqual(sec["label"], "SpaceX")
+        self.assertEqual(sec["isin"], "US84615Q1031")
+        self.assertEqual(sec["exchange"], "NASDAQ")
+
+    def test_le_nom_affiche_est_modifiable(self):
+        self.post("/api/securities", {
+            "ticker": "US84615Q1031", "symbol": "SPCX",
+            "label": "Space Exploration Technologies Corp. Class A",
+        })
+        self.post("/api/securities", {"ticker": "US84615Q1031", "label": "SpaceX"})
+        with self.app.app_context():
+            self.assertEqual(
+                market.securities_by_ticker()["US84615Q1031"]["label"], "SpaceX")
+
+
+class TestValeurCapitalisee(unittest.TestCase):
+    """Interets credites au 31 decembre, prorata temporis."""
+
+    def test_une_annee_pleine(self):
+        # 2024 compte 366 jours, comptes sur une base 365.
+        self.assertAlmostEqual(
+            finance.valeur_capitalisee([("2024-01-01", 10000)], 2.5, "2024-12-31"),
+            10250.68, places=2)
+
+    def test_les_interets_se_capitalisent(self):
+        deux_ans = finance.valeur_capitalisee([("2024-01-01", 10000)], 2.5, "2025-12-31")
+        self.assertGreater(deux_ans, 10500.0)   # plus que deux fois 250 : ils composent
+        self.assertAlmostEqual(deux_ans, 10506.95, places=2)
+
+    def test_un_versement_de_juillet_ne_rapporte_pas_une_annee_pleine(self):
+        self.assertAlmostEqual(
+            finance.valeur_capitalisee([("2024-07-01", 10000)], 2.5, "2024-12-31"),
+            10126.03, places=2)
+
+    def test_un_rachat_diminue_le_capital(self):
+        avec = finance.valeur_capitalisee(
+            [("2024-01-01", 10000), ("2025-01-01", -2000)], 2.5, "2025-12-31")
+        self.assertAlmostEqual(avec, 8456.95, places=2)
+
+    def test_sans_taux_la_somme_des_flux(self):
+        self.assertEqual(
+            finance.valeur_capitalisee([("2024-01-01", 10000)], 0, "2030-12-31"), 10000.0)
+
+    def test_aucun_flux(self):
+        self.assertIsNone(finance.valeur_capitalisee([], 2.5))
+
+    def test_avant_le_premier_versement(self):
+        self.assertEqual(
+            finance.valeur_capitalisee([("2024-06-01", 10000)], 2.5, "2024-01-01"), 0.0)
 
 
 if __name__ == "__main__":
