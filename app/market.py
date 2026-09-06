@@ -472,6 +472,19 @@ def taux_affichage(code):
     )
     for row in rows:
         return {"code": code, "taux": float(row["price"]), "date": row["date"]}
+
+    # A defaut, l'INVERSE du taux deja en cache. La conversion des titres cotes
+    # en devise etrangere releve `FX:{code}EUR` depuis toujours : le chiffre est
+    # donc la, a l'envers, et attendre un rafraichissement pour le meme
+    # renseignement rendait la lecture en dollars indisponible sans raison.
+    rows = query(
+        "SELECT price, date FROM quotes WHERE symbol = ? ORDER BY date DESC LIMIT 1",
+        (f"FX:{code}EUR",),
+    )
+    for row in rows:
+        inverse = float(row["price"])
+        if inverse > 0:
+            return {"code": code, "taux": round(1 / inverse, 6), "date": row["date"]}
     return {"code": code, "taux": None, "date": None}
 
 

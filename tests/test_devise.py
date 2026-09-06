@@ -73,6 +73,28 @@ class TestTauxDAffichage(ApiTestCase):
         self.assertAlmostEqual(usd["taux"], 1.0901, places=4)
         self.assertTrue(usd["date"])
 
+    def test_repli_sur_le_taux_inverse_deja_en_cache(self):
+        """Le cache contient dejà USD -> EUR, relevé depuis toujours pour
+        convertir les titres cotés en dollars.
+
+        Attendre un rafraîchissement pour le même renseignement rendait la
+        lecture en dollars indisponible sans aucune raison : le chiffre était
+        là, simplement à l'envers.
+        """
+        with self.app.app_context():
+            market.store_quote("FX:USDEUR", "faux", "2026-08-31", 0.86084, "EUR")
+            taux = market.taux_affichage("USD")
+        self.assertAlmostEqual(taux["taux"], 1 / 0.86084, places=5)
+        self.assertEqual(taux["date"], "2026-08-31")
+
+    def test_le_taux_direct_prime_sur_l_inverse(self):
+        """Un taux relevé dans le bon sens est plus juste qu'un inverse."""
+        with self.app.app_context():
+            market.store_quote("FX:USDEUR", "faux", "2026-08-31", 0.86084, "EUR")
+            market.store_quote("FX:EURUSD", "faux", "2026-09-05", 1.0901, "USD")
+            taux = market.taux_affichage("USD")
+        self.assertAlmostEqual(taux["taux"], 1.0901, places=4)
+
     def test_aucune_sortie_reseau_sans_cours_a_demander(self):
         """Le garde-fou : un portefeuille sans rien à coter ne doit déclencher
         aucun appel, taux de change compris."""
