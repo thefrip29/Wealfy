@@ -33,6 +33,11 @@ INSEE_SDMX = "https://bdm.insee.fr/series/sdmx/data/SERIES_BDM"
 YAHOO_BASE = "https://query2.finance.yahoo.com"
 
 MARKET_ASSET_TYPES = {"PEA", "CTO", "AssuranceVie", "PER"}
+
+# Les devises dans lesquelles le patrimoine peut être RELU à l'écran. Les
+# données restent en euros de bout en bout — seule la présentation change, et
+# la conversion se fait au dernier moment, côté navigateur.
+DEVISES_AFFICHAGE = ("USD",)
 CRYPTO_ASSET_TYPES = {"Crypto"}
 RATE_ASSET_TYPES = {"Livret", "LDDS", "LEP", "LivretJeune", "PEL", "CEL", "DepotTerme"}
 INDEXED_ASSET_TYPES = {"Immobilier", "SCPI"}
@@ -451,6 +456,25 @@ def build_provider(name=None, api_key=None):
 # Cache
 # ==========================================================================
 
+def taux_affichage(code):
+    """Le taux euro -> `code` en cache, avec sa date. Aucun appel réseau.
+
+    `None` en `taux` veut dire « pas encore relevé » : l'euro reste alors la
+    seule devise proposée, et l'interface le dit plutôt que de convertir avec
+    un taux inventé.
+    """
+    code = (code or "EUR").upper()
+    if code == "EUR":
+        return {"code": "EUR", "taux": 1.0, "date": None}
+    rows = query(
+        "SELECT price, date FROM quotes WHERE symbol = ? ORDER BY date DESC LIMIT 1",
+        (f"FX:EUR{code}",),
+    )
+    for row in rows:
+        return {"code": code, "taux": float(row["price"]), "date": row["date"]}
+    return {"code": code, "taux": None, "date": None}
+
+
 def store_quote(symbol, source, quote_date, price, currency="EUR"):
     execute(
         "INSERT INTO quotes(symbol, source, date, price, currency, fetched_at) "
@@ -625,6 +649,25 @@ def refresh_quotes(provider=None, crypto_provider=None):
     for cle, quote in found.items():
         store_quote(cle, provider.name, quote.get("date") or date.today(),
                     quote.get("price_eur", quote["price"]), "EUR")
+
+    # --- taux d'affichage, de l'euro vers les devises proposées à l'écran
+    #
+    # Relevé ICI et nulle part ailleurs. `POST /api/market/refresh` est la
+    # seule route de toute l'application qui sorte sur le réseau, et cette
+    # propriété vaut mieux qu'un taux de change toujours frais : la lecture du
+    # patrimoine en dollars se contente du dernier taux connu, avec sa date
+    # affichée à côté.
+    # La garde `items or coin_items` n'est pas un detail : sans elle, un
+    # portefeuille fait de seuls supports non cotes declencherait un appel
+    # reseau pour rien, alors qu'il n'a aucun cours a demander.
+    if items or coin_items:
+        for code in DEVISES_AFFICHAGE:
+            try:
+                taux = provider.fx("EUR", code)
+            except Exception:                   # pragma: no cover - reseau
+                taux = None
+            if taux:
+                store_quote(f"FX:EUR{code}", provider.name, date.today(), taux, code)
 
     for ticker in non_mappes:
         errors.append({"cle": ticker,

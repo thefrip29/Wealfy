@@ -278,6 +278,10 @@
         <h3>Mon patrimoine</h3>
       </div>
       <div class="actions">
+        <!-- Relire le patrimoine en dollars. Masque tant qu'aucun taux n'a ete
+             releve : convertir avec un taux invente serait pire que ne pas
+             convertir du tout. -->
+        <div class="segmente" id="we-devise" hidden></div>
         <button class="btn primary big" id="we-add">+ Ajouter</button>
       </div>
     </div>

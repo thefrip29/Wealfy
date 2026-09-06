@@ -1436,6 +1436,34 @@ body.privacy .reste-value { filter: blur(10px); user-select: none; }
 .marchands select { width: 100%; }
 .marchands .pill { margin-top: 4px; }
 
+/* --- selecteur segmente : EUR / USD ---------------------------------------
+
+   Deux crans colles, dont un seul est actif. La forme dit qu'il s'agit d'un
+   choix exclusif, la ou deux boutons separes auraient suggere deux actions. */
+.segmente {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  overflow: hidden;
+  background: var(--card-2);
+}
+.segmente[hidden] { display: none; }
+.segmente-cran {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.segmente-cran:hover { color: var(--text); }
+.segmente-cran.actif {
+  background: var(--action-surface);
+  color: var(--on-action-surface);
+}
+
 /* Un abonnement qui ne se prélève plus : la rangée s'efface sans disparaître.
    C'est justement celle qu'on veut retrouver, pour vérifier la résiliation. */
 .table tbody tr.eteint > td { opacity: .55; }

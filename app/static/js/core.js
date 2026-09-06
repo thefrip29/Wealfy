@@ -51,6 +51,34 @@ const eurFmt0 = new Intl.NumberFormat('fr-FR', {
 });
 const numFmt = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 });
 
+/* ---------- devise d'affichage ----------
+
+   Les donnees restent en euros de bout en bout : la base, l'API, les calculs.
+   Seule la LECTURE change, et la conversion se fait au tout dernier moment,
+   ici. Rien n'est jamais enregistre en dollars, si bien qu'un taux qui bouge
+   ne reecrit pas l'histoire.
+
+   Le taux vient du cache des cours, pose par le rafraichissement. Sans lui,
+   `taux` vaut null et l'interface propose l'euro seul plutot que de convertir
+   avec un chiffre invente. */
+App.devise = { code: 'EUR', taux: 1, date: null };
+App.CLE_DEVISE = 'patrimoine.devise';
+
+const formatsDevise = {};
+function formatDevise(code, compact) {
+  const cle = `${code}|${compact ? 0 : 2}`;
+  if (!formatsDevise[cle]) {
+    formatsDevise[cle] = new Intl.NumberFormat('fr-FR', {
+      style: 'currency', currency: code, maximumFractionDigits: compact ? 0 : 2,
+      // « $ » plutot que « $US » : le francais desambigue les dollars, mais une
+      // seule devise etrangere est proposee et le symbole suit le nombre comme
+      // l'euro le fait partout ailleurs.
+      currencyDisplay: 'narrowSymbol',
+    });
+  }
+  return formatsDevise[cle];
+}
+
 App.fmt = {
   eur(v, compact) {
     if (v === null || v === undefined || Number.isNaN(v)) return '—';
@@ -59,6 +87,18 @@ App.fmt = {
   num(v, digits) {
     if (v === null || v === undefined || Number.isNaN(v)) return '—';
     return new Intl.NumberFormat('fr-FR', { maximumFractionDigits: digits ?? 2 }).format(v);
+  },
+  /* Un montant relu dans la devise d'affichage. Identique a `eur` tant que
+     celle-ci est l'euro, ce qui est le cas partout sauf dans Patrimoine. */
+  montant(v, compact) {
+    if (v === null || v === undefined || Number.isNaN(v)) return '—';
+    const d = App.devise;
+    if (d.code === 'EUR' || !d.taux) return App.fmt.eur(v, compact);
+    return formatDevise(d.code, compact).format(v * d.taux);
+  },
+  montantSigne(v) {
+    if (v === null || v === undefined) return '—';
+    return (v > 0 ? '+' : '') + App.fmt.montant(v);
   },
   pct(v, digits) {
     if (v === null || v === undefined || Number.isNaN(v)) return '—';
@@ -282,12 +322,15 @@ App.field = function (label, input, opts = {}) {
    dans les réglages, « Ouvert le 12/03/2020 » sur une fiche, ou « Échéances
    payées : 24 / 240 » sur un prêt. Rien de tout cela n'est un montant.
 
-   La marque est déduite du symbole monétaire, que seul `App.fmt.eur` produit.
-   Un pourcentage ou une date n'en portent pas, et ne sont donc pas masqués. */
+   La marque est déduite du symbole monétaire, que seuls `App.fmt.eur` et
+   `App.fmt.montant` produisent. Un pourcentage ou une date n'en portent pas,
+   et ne sont donc pas masqués. Les deux symboles comptent : lu en dollars, le
+   patrimoine doit se masquer comme il se masque en euros. */
 App.metricList = function (rows) {
   const list = App.h('div', { class: 'metric-list' });
   for (const [label, valeur] of rows) {
-    const monetaire = typeof valeur === 'string' && valeur.includes('€');
+    const monetaire = typeof valeur === 'string'
+      && (valeur.includes('€') || valeur.includes('$'));
     list.append(App.h('div', { class: 'metric-row' },
       App.h('span', { class: 'm-label' }, label),
       App.h('span', { class: `m-value${monetaire ? ' montant' : ''}` }, valeur)));

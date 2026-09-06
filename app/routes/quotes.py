@@ -39,6 +39,20 @@ def market_status():
     })
 
 
+@bp.get("/api/fx")
+def fx_display_rates():
+    """Les taux de change en cache, pour relire le patrimoine dans une autre
+    devise.
+
+    Lecture pure : ces taux sont poses par `POST /api/market/refresh`, la seule
+    route qui sorte sur le reseau. Un taux absent n'est pas une erreur, c'est
+    un « pas encore releve » que l'interface sait dire.
+    """
+    return jsonify({
+        "devises": [market.taux_affichage(c) for c in market.DEVISES_AFFICHAGE],
+    })
+
+
 @bp.post("/api/market/refresh")
 def market_refresh():
     if not get_setting("market_enabled", False):

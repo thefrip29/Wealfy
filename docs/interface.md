@@ -737,6 +737,35 @@ catégories considérées comme fixes se cochent dans *Paramètres → Classemen
 dépenses*, sur le même modèle que les virements internes.
 
 
+## Relire le patrimoine en dollars
+
+Un sélecteur à deux crans, **EUR / USD**, en tête de l'onglet Patrimoine.
+
+**Les données restent en euros de bout en bout** : la base, l'API, les calculs,
+et les trois autres onglets. Seule la LECTURE de celui-ci change, et la
+conversion se fait au tout dernier moment, à l'affichage. Un taux qui bouge ne
+réécrit donc jamais l'histoire — c'est la propriété que garde
+`test_devise.py`, et elle compte plus que la fonctionnalité elle-même.
+
+**Tout bascule ensemble**, livrets et immobilier compris. Ne convertir que les
+actions et les cryptos aurait donné un « patrimoine net » mélangeant des euros
+et des dollars, c'est-à-dire un total qui ne veut rien dire.
+
+**Le taux vient du rafraîchissement des cours**, et de nulle part ailleurs.
+`POST /api/market/refresh` est la seule route de toute l'application qui sorte
+sur le réseau, et cette propriété vaut mieux qu'un taux toujours frais : la
+lecture en dollars se contente du dernier taux connu, dont la date s'affiche en
+infobulle du sélecteur. Tant qu'aucun taux n'a été relevé, le sélecteur reste
+**masqué** — convertir avec un taux inventé serait pire que ne pas convertir.
+
+Le choix est mémorisé dans le navigateur (`localStorage`), comme le thème, le
+mois affiché et le masquage des valeurs. Basculer ne redemande rien au serveur :
+l'onglet se redessine à partir de ce qu'il a déjà en mémoire.
+
+Le masquage des valeurs suit : `App.metricList` reconnaît un montant à son
+symbole monétaire, et les deux comptent désormais. Un pourcentage ou une date
+n'en portent pas, et restent lisibles.
+
 ## Une seule façon d'ajouter quelque chose
 
 Il y a eu jusqu'à trois boutons côte à côte — « + Prêt », « + Actif détaillé »,

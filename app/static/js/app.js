@@ -1,8 +1,33 @@
 /* Amorçage : navigation par onglets, sélecteur de mois, rafraîchissements. */
 App.currentTab = 'overview';
 
+/* Les taux de change disponibles, et le choix memorise.
+
+   Lecture purement locale : ces taux ont ete poses par le rafraichissement des
+   cours, la seule route qui sorte sur le reseau. Un taux absent n'est pas une
+   panne, c'est un « pas encore releve » — l'euro reste alors seul propose. */
+App.chargerDevises = async function () {
+  try {
+    const res = await App.api.get('/api/fx');
+    App.state.devises = (res.devises || []).filter((d) => d.taux);
+  } catch (e) {
+    App.state.devises = [];
+  }
+  let choisie = null;
+  try { choisie = localStorage.getItem(App.CLE_DEVISE); } catch (e) { /* ignore */ }
+  const dispo = (App.state.devises || []).find((d) => d.code === choisie);
+  App.devise = dispo || { code: 'EUR', taux: 1, date: null };
+};
+
+App.choisirDevise = function (code) {
+  const d = (App.state.devises || []).find((x) => x.code === code);
+  App.devise = d || { code: 'EUR', taux: 1, date: null };
+  try { localStorage.setItem(App.CLE_DEVISE, App.devise.code); } catch (e) { /* ignore */ }
+};
+
 App.loadMeta = async function () {
   App.state.meta = await App.api.get('/api/meta');
+  await App.chargerDevises();
 };
 
 /* Donnees de reference, lues UNE fois par navigation.
