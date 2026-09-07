@@ -15,7 +15,7 @@ pywebview[gtk]>=6.2 ; sys_platform == "linux"
 # Lecture des releves bancaires au format PDF. Pur Python, sans dependance
 # native : pdfplumber aurait tire pdfminer.six et Pillow au demarrage, alors
 # que Pillow ne sert aujourd'hui qu'a construire l'icone.
-pypdf>=5
+pypdf>=6.16.2
 
 # Dessin de l'icone applicative, a la construction uniquement.
 pillow>=10
