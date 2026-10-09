@@ -83,15 +83,17 @@ App.tabs.overview = {
 
     const lignes = [
       ['Revenus', App.fmt.eur(m.revenus_mois)],
+      // Les deux ratios se rapportent au revenu moyen des trois mois révolus,
+      // pas aux revenus du mois affichés juste au-dessus : le dire.
       ['Charges fixes', App.fmt.eur(fixes)
         + (m.part_charges_fixes === null ? ''
-          : ` · ${App.fmt.pct(m.part_charges_fixes, 0)} des revenus`)],
+          : ` · ${App.fmt.pct(m.part_charges_fixes, 0)} du revenu moyen`)],
       ['Épargne', App.fmt.eur(m.epargne_mois)],
     ];
     if (m.mensualites_mois) {
       lignes.push(['Mensualités de prêt', App.fmt.eur(m.mensualites_mois)
         + (m.taux_endettement === null ? ''
-          : ` · ${App.fmt.pct(m.taux_endettement, 0)} des revenus`)]);
+          : ` · ${App.fmt.pct(m.taux_endettement, 0)} du revenu moyen`)]);
     }
     host.append(App.metricList(lignes));
   },
@@ -467,7 +469,10 @@ App.tabs.overview = {
       App.tabs.overview.kpi("Couverture d'urgence",
         m.mois_couverture_urgence === null ? '—' : `${App.fmt.num(m.mois_couverture_urgence, 1)} mois`,
         `${App.fmt.eur(m.solde_livrets, true)} de livrets`,
-        m.mois_couverture_urgence !== null && m.mois_couverture_urgence < 3 ? 'bad' : 'good'),
+        // Le même seuil que l'observation : la cible fixée dans les réglages.
+        m.mois_couverture_urgence !== null
+          && m.mois_couverture_urgence < (App.state.meta.mois_precaution_cible || 4)
+          ? 'bad' : 'good'),
     );
   },
 

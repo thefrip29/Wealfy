@@ -184,11 +184,11 @@ def _endettement(metrics, cfg):
 def _concentration(snapshot, metrics, cfg):
     """Poids d'une seule ligne dans les actifs financiers."""
     out = []
-    crypto_pct = metrics.get("crypto_pct_patrimoine")
+    crypto_pct = metrics.get("crypto_pct_actifs")
     if crypto_pct is not None and crypto_pct > cfg["seuil_crypto"]:
         out.append(_alerte(
             "info", "Poids de la crypto au-dessus de votre seuil",
-            f"{_num(crypto_pct)} % du patrimoine net "
+            f"{_num(crypto_pct)} % de vos actifs "
             f"({_eur(metrics.get('crypto_montant'))}), pour un seuil fixé à "
             f"{_num(cfg['seuil_crypto'])} %.",
             None, "settings"))

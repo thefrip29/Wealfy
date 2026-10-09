@@ -27,4 +27,7 @@ def meta():
         # deux situations que le meme zero ne permet pas de separer.
         "categories_charges_fixes": get_setting("categories_charges_fixes") or [],
         "budgets": get_setting("budgets_categories", {}) or {},
+        # Le seuil sous lequel l'epargne de precaution est signalee. L'indicateur
+        # de la synthese et l'observation le lisent au meme endroit.
+        "mois_precaution_cible": float(get_setting("mois_precaution_cible", 4) or 4),
     })

@@ -85,8 +85,9 @@ def shared_cache(cache=None):
         cache = {}
     if "assets" in cache:
         return cache
-    cache["assets"] = get_assets(False)
-    cache["assets_archived"] = get_assets(True)
+    # Tous les actifs, clos compris : un produit clos compte encore dans
+    # l'histoire, jusqu'a sa date de cloture (`present_le`).
+    cache["assets_all"] = get_assets(True)
     cache["movements"] = movements_by_asset()
     cache["liabilities"] = get_liabilities()
     cache["securities"] = market.securities_by_ticker()
@@ -97,6 +98,22 @@ def shared_cache(cache=None):
         for l in cache["liabilities"]
     }
     return cache
+
+
+def present_le(asset, at_date):
+    """Le produit existe-t-il a cette date ?
+
+    Ouvert a sa date d'acquisition, il compte jusqu'a la veille de sa cloture.
+    Retirer un produit clos de TOUTES les dates reecrivait le passe : la courbe,
+    l'archive et le gain de l'annee changeaient le jour ou on le fermait.
+    """
+    acq = finance.parse_date(asset["date_acquisition"])
+    if acq and acq > at_date:
+        return False
+    if asset.get("archived"):
+        fin = finance.parse_date(asset.get("date_cloture"))
+        return fin is not None and at_date < fin
+    return True
 
 
 # --- valorisation ---------------------------------------------------------
@@ -194,9 +211,12 @@ def portfolio(at_date=None, include_archived=False, ctx=None, cache=None):
     # (et réutilisable par l'appelant, cf. monthly_archive).
     ctx = ctx if ctx is not None else market_context(at_date, cache)
     assets = []
-    for asset in cache["assets_archived" if include_archived else "assets"]:
-        acq = finance.parse_date(asset["date_acquisition"])
-        if acq and acq > at_date:
+    for asset in cache["assets_all"]:
+        if include_archived and asset["archived"]:
+            acq = finance.parse_date(asset["date_acquisition"])
+            if acq and acq > at_date:
+                continue
+        elif not present_le(asset, at_date):
             continue
         assets.append(asset_detail(asset, grouped.get(asset["id"], []), at_date, ctx))
 
@@ -214,7 +234,7 @@ def portfolio(at_date=None, include_archived=False, ctx=None, cache=None):
         # Permet a l'interface de proposer « N produit(s) cloture(s) » sans
         # second appel. Le cache porte deja les deux listes : la difference
         # suffit, aucune lecture de plus.
-        "nb_archives": len(cache["assets_archived"]) - len(cache["assets"]),
+        "nb_archives": sum(1 for a in cache["assets_all"] if a["archived"]),
         "liabilities": liabilities,
         "total_actif": total_actif,
         "total_passif": total_passif,
@@ -247,8 +267,12 @@ def gain_annuel(at_date=None, snap=None, cache=None):
         snap = portfolio(at_date, cache=cache)
     reference = date(at_date.year - 1, 12, 31)
     avant = portfolio(reference, cache=cache)
+    # Seuls les produits encore detenus comptent des deux cotes. Un produit
+    # clos dans l'annee emportait sinon sa plus-value du 31 decembre comme une
+    # perte : clore n'est ni gagner ni perdre, c'est sortir.
+    presents = {a["id"] for a in snap["assets"]}
     ecart = (sum(a["plus_value"] for a in snap["assets"])
-             - sum(a["plus_value"] for a in avant["assets"]))
+             - sum(a["plus_value"] for a in avant["assets"] if a["id"] in presents))
     return {
         "montant": round(ecart, 2),
         "depuis": finance.iso(date(at_date.year, 1, 1)),
@@ -341,14 +365,41 @@ def flows_cache(cache=None):
         par_mois[(t["date"] or "")[:7]].append(t)
     cache["tx_par_mois"] = par_mois
 
-    versements = defaultdict(float)
-    for r in query(
-            "SELECT m.montant, m.date, a.type FROM asset_movements m "
-            "JOIN assets a ON a.id = m.asset_id WHERE m.type = 'versement'"):
-        if r["type"] != "CompteCourant":
-            versements[(r["date"] or "")[:7]] += float(r["montant"] or 0)
-    cache["versements_par_mois"] = versements
+    cache["versements"] = _versements()
     return cache
+
+
+def _versements(debut=None, fin=None):
+    """Versements sur les actifs (hors compte courant), dates et montants."""
+    sql = ("SELECT m.montant, m.date, a.type FROM asset_movements m "
+           "JOIN assets a ON a.id = m.asset_id WHERE m.type = 'versement'")
+    args = []
+    if debut is not None:
+        sql += " AND m.date >= ? AND m.date <= ?"
+        args = [finance.iso(debut), finance.iso(fin)]
+    return [
+        (finance.parse_date(r["date"]), round(float(r["montant"] or 0), 2))
+        for r in query(sql, args)
+        if r["type"] != "CompteCourant" and r["date"]
+    ]
+
+
+def _deja_verse(t, versements, utilises, tolerance):
+    """Ce virement d'epargne est-il le meme argent qu'un versement saisi ?
+
+    Le virement vers le livret figure sur le releve, et le versement est saisi
+    sur le livret : meme montant, a quelques jours pres. Les additionner
+    comptait deux fois le meme euro. Chaque versement n'en couvre qu'un.
+    """
+    d = finance.parse_date(t["date"])
+    montant = round(-t["amount"], 2)
+    for i, (dv, mv) in enumerate(versements):
+        if i in utilises or mv != montant or d is None:
+            continue
+        if abs((dv - d).days) <= tolerance:
+            utilises.add(i)
+            return True
+    return False
 
 
 def month_flows(year, month, cache=None):
@@ -390,23 +441,21 @@ def month_flows(year, month, cache=None):
             revenus_par_categorie[t["category"]] += t["amount"]
 
     # Épargne du mois : versements réels sur les actifs (hors compte courant),
-    # plus les virements d'épargne saisis en transaction et non rattachés à un
-    # actif (évite le double comptage).
+    # plus les virements d'épargne du relevé qui ne correspondent à aucun
+    # d'eux — ni par rattachement, ni par montant et date.
+    tolerance = int(get_setting("transfert_jours_tolerance", 4) or 4)
+    marge = timedelta(days=tolerance)
     if cache is not None:
-        versements = cache["versements_par_mois"].get(cle, 0.0)
+        proches = [v for v in cache["versements"]
+                   if start - marge <= v[0] <= end + marge]
     else:
-        versements = 0.0
-        for r in query(
-            "SELECT m.montant, a.type FROM asset_movements m "
-            "JOIN assets a ON a.id = m.asset_id "
-            "WHERE m.type = 'versement' AND m.date >= ? AND m.date <= ?",
-            (finance.iso(start), finance.iso(end)),
-        ):
-            if r["type"] != "CompteCourant":
-                versements += float(r["montant"] or 0)
+        proches = _versements(start - marge, end + marge)
+    versements = sum(m for d, m in proches if start <= d <= end)
+    utilises = set()
     versements += sum(
         -t["amount"] for t in txs
         if t["amount"] < 0 and t["category"] in excluded and not t["asset_id"]
+        and not _deja_verse(t, proches, utilises, tolerance)
     )
     versements = round(versements, 2)
 
@@ -665,7 +714,10 @@ def metrics(at_date=None):
             round(livrets / moyenne_depenses, 2) if moyenne_depenses > 0 else None
         ),
         "crypto_montant": crypto,
-        "crypto_pct_patrimoine": round(100 * crypto / net, 2) if net else None,
+        # Sur les actifs et non sur le net : avec un pret, le net peut etre
+        # minuscule ou negatif, et la part devenait 300 % ou moins de zero.
+        "crypto_pct_actifs": (
+            round(100 * crypto / snap["total_actif"], 2) if snap["total_actif"] > 0 else None),
         "immobilier_montant": immo,
         "taux_epargne_mois": flows["taux_epargne"],
         "epargne_mois": flows["epargne"],
@@ -673,6 +725,9 @@ def metrics(at_date=None):
         "depenses_mois": flows["depenses"],
         "mensualites_mois": mensualites,
         "taux_endettement": _taux(mensualites, revenu_ordinaire, 100),
+        # La base des deux ratios en pourcentage : ils se rapportent au revenu
+        # moyen des trois derniers mois revolus, pas a celui du mois affiche.
+        "revenu_moyen_3m": revenu_ordinaire,
         "charges_fixes_mois": charges_fixes,
         "reste_a_vivre_mois": round(revenus - charges_fixes - flows["epargne"], 2),
         "part_charges_fixes": _taux(charges_fixes, revenu_ordinaire, 100),
@@ -782,13 +837,13 @@ def assets_series(months=12, reference=None):
         as_of = min(last_day, date.today())
         mois.append(f"{d.year:04d}-{d.month:02d}")
         presents = {a["id"]: a for a in portfolio(as_of, cache=cache)["assets"]}
-        for asset in cache["assets"]:
+        for asset in cache["assets_all"]:
             trouve = presents.get(asset["id"])
             valeurs.setdefault(asset["id"], []).append(
                 trouve["valeur"] if trouve else None)
 
     series = []
-    for asset in cache["assets"]:
+    for asset in cache["assets_all"]:
         suite = valeurs.get(asset["id"], [])
         if not any(v for v in suite):
             continue                      # jamais rien à montrer sur la période
@@ -846,18 +901,24 @@ def market_asset_detail(asset_id, at_date=None, ctx=None):
         "valeur": value,
         "valeur_source": detail["valeur_source"],
         "valeur_saisie": detail["valeur_saisie"],
-        "investi": finance.invested_amount(asset, movements),
+        # Le meme capital investi que la liste : frais autonomes compris, et
+        # borne a la date affichee.
+        "investi": detail["investi"],
     }
 
 
-def real_estate_detail(asset_id, at_date=None):
+def real_estate_detail(asset_id, at_date=None, ctx=None):
     """Prêt lié, loyers, charges et rendement locatif net d'un bien."""
     asset = get_asset(asset_id)
     if not asset:
         return None
     at_date = finance.parse_date(at_date) or date.today()
     movements = get_movements(asset_id)
-    valeur = finance.asset_value_at(asset, movements, at_date)
+    # La valeur de la liste, réévaluation par indice comprise. La fiche
+    # calculait sur la valeur saisie : deux prix pour un même bien, et un
+    # rendement rapporté à celui qui n'était pas affiché.
+    ctx = ctx if ctx is not None else market_context(at_date)
+    valeur = asset_detail(asset, movements, at_date, ctx)["valeur"]
 
     liabs = []
     for liab in rows_to_list(

@@ -24,7 +24,7 @@ REGLAGES = {
 
 METRICS_NEUTRES = {
     "mois_couverture_urgence": 6, "solde_livrets": 12000,
-    "depenses_moyennes_3m": 2000, "crypto_pct_patrimoine": 0,
+    "depenses_moyennes_3m": 2000, "crypto_pct_actifs": 0,
     "crypto_montant": 0, "taux_endettement": 0, "mensualites_mois": 0,
     "revenus_mois": 3000,
 }
@@ -202,7 +202,7 @@ class TestConcentration(unittest.TestCase):
         self.assertNotIn("concentre", titres(a))
 
     def test_crypto_au_dessus_du_seuil(self):
-        metrics = {**METRICS_NEUTRES, "crypto_pct_patrimoine": 18,
+        metrics = {**METRICS_NEUTRES, "crypto_pct_actifs": 18,
                    "crypto_montant": 9000}
         a = [x for x in advisor.alertes(snapshot(), metrics, reglages=REGLAGES)
              if "crypto" in x["titre"].lower()]
@@ -267,7 +267,7 @@ class TestDivers(unittest.TestCase):
     def test_patrimoine_vide_ne_produit_aucune_alerte(self):
         """Au premier lancement, l'ecran doit rester silencieux."""
         vide = {"mois_couverture_urgence": None, "solde_livrets": 0,
-                "depenses_moyennes_3m": 0, "crypto_pct_patrimoine": None,
+                "depenses_moyennes_3m": 0, "crypto_pct_actifs": None,
                 "taux_endettement": None, "revenus_mois": 0}
         self.assertEqual(advisor.alertes(snapshot(), vide, reglages=REGLAGES), [])
 

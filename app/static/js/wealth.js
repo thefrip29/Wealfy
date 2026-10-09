@@ -458,7 +458,8 @@ App.tabs.wealth = {
         App.fmt.montantSigne(Math.round(
           (positions.valeur_totale - positions.investi_total) * 100) / 100)]);
     }
-    if (marche.pru != null) rows.push(['PRU moyen', App.fmt.montant(marche.pru)]);
+    // Pas de PRU au niveau du compte : il mélangerait le prix de parts qui
+    // n'ont rien de commun. Chaque ligne porte le sien.
     if (marche.tri_pct != null) {
       rows.push(['TRI annualisé', App.fmt.pct(marche.tri_pct, 2)]);
     }

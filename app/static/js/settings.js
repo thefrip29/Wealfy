@@ -19,6 +19,8 @@ App.settings = {
         App.settings.panelRules(rules, settings))],
       ['Objectifs', App.h('div', {},
         App.settings.panelRepartition(settings),
+        App.h('div', { class: 'section-title' }, 'Épargne de précaution'),
+        App.settings.panelPrecaution(settings),
         App.h('div', { class: 'section-title' }, 'Crédit des intérêts'),
         App.settings.panelTaux(settings))],
       ['Cours de marché', App.settings.panelMarket(settings, market)],
@@ -70,7 +72,7 @@ App.settings = {
 
   /* Reglages dont dependent les listes de reference de l'application. */
   CLES_META: ['categories_depenses', 'categories_revenus', 'types_actifs_custom',
-    'budgets_categories'],
+    'budgets_categories', 'mois_precaution_cible'],
 
   /* Reglages qui ne changent RIEN de ce qui est affiche a l'instant : ils
      n'agissent que sur de futurs imports ou de futurs appels reseau. */
@@ -225,8 +227,6 @@ App.settings = {
           ' : un virement LCL → Revolut apparaît deux fois, en débit sur un relevé '
           + 'et en crédit sur l’autre. Ces catégories ne comptent ni comme dépense, '
           + 'ni comme revenu, ni comme épargne.')),
-      tableRoles(),
-
       tableRoles());
   },
 
@@ -401,7 +401,27 @@ App.settings = {
         }, '+ Poche')));
   },
 
-  /* ---------- frais annuels ---------- */
+  /* ---------- épargne de précaution ----------
+     Le seuil vivait en deux endroits : 3 mois en dur sous l'indicateur de la
+     synthèse, 4 mois dans l'observation. Un seul réglage, lu par les deux. */
+  panelPrecaution(settings) {
+    const moisIn = App.input('mois', {
+      type: 'number', min: 1, max: 24, step: '1',
+      value: settings.mois_precaution_cible ?? 4,
+    });
+    moisIn.addEventListener('change', () => {
+      const v = Math.min(24, Math.max(1, parseInt(moisIn.value, 10) || 4));
+      moisIn.value = v;
+      App.settings.save({ mois_precaution_cible: v }, 'Cible enregistrée');
+    });
+    return App.h('div', {},
+      App.h('p', { class: 'hint' },
+        'Le nombre de mois de dépenses que vos livrets doivent couvrir. '
+        + 'En dessous, la couverture d’urgence passe en alerte.'),
+      App.h('div', { class: 'form-grid', style: 'margin-top:12px' },
+        App.field('Mois de dépenses', moisIn)));
+  },
+
   /* Date de capitalisation des livrets et depots a terme. */
   panelTaux(settings) {
     const courant = String(settings.date_credit_interets || '12-31');

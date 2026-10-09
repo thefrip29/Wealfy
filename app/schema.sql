@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS assets (
     valeur_actuelle     REAL,
     metadata            TEXT NOT NULL DEFAULT '{}',
     archived            INTEGER NOT NULL DEFAULT 0,
+    -- Jour ou le produit cesse de compter. Avant, il reste dans l'histoire.
+    date_cloture        TEXT,
     created_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
