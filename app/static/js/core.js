@@ -347,6 +347,32 @@ App.metricList = function (rows) {
 
 /* Explication repliée : présente pour qui la cherche, silencieuse sinon.
    Réservée au pédagogique — un avertissement reste toujours visible. */
+/* Menu d'actions d'une ligne de tableau : un bouton « ⋯ », une liste à la
+   demande. `actions` : [[libellé, fonction], ...] ; les `null` sont ignorés.
+   Un clic ailleurs ou Échap le referme. */
+App.menuLigne = function (actions) {
+  const menu = App.h('details', { class: 'menu-ligne' },
+    App.h('summary', { title: 'Actions', 'aria-label': 'Actions' }, '\u22ef'));
+  const liste = App.h('div', { class: 'menu-liste', role: 'menu' });
+  for (const a of actions.filter(Boolean)) {
+    liste.append(App.h('button', {
+      role: 'menuitem',
+      onclick: () => { menu.open = false; a[1](); },
+    }, a[0]));
+  }
+  menu.append(liste);
+  return menu;
+};
+document.addEventListener('click', (e) => {
+  for (const m of document.querySelectorAll('details.menu-ligne[open]')) {
+    if (!m.contains(e.target)) m.open = false;
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  for (const m of document.querySelectorAll('details.menu-ligne[open]')) m.open = false;
+});
+
 App.note = function (summary, ...children) {
   return App.h('details', { class: 'note' },
     App.h('summary', {}, summary), ...children);
@@ -785,19 +811,6 @@ App.setTheme = function (choix, memoriser = true) {
     try { localStorage.setItem(App.CLE_THEME, choix); } catch (e) { /* ignore */ }
   }
   App.readPalette();
-
-  const btn = App.el('#toggle-theme');
-  if (btn) {
-    const etats = {
-      systeme: ['&#9681;', 'Thème : système'],      // cercle mi-plein
-      clair: ['&#9788;', 'Thème : clair'],          // soleil
-      sombre: ['&#9789;', 'Thème : sombre'],        // lune
-    };
-    const [icone, titre] = etats[choix] || etats.systeme;
-    btn.innerHTML = icone;
-    btn.title = `${titre} (cliquer pour changer)`;
-    btn.dataset.choix = choix;
-  }
 };
 
 /* Suit l'OS en direct, mais seulement tant que le choix est « système ». Sans

@@ -1000,6 +1000,18 @@ def market_asset_detail(asset_id, at_date=None, ctx=None):
     detail = asset_detail(asset, movements, at_date, ctx)
     value = detail["valeur"]
     tri = finance.asset_xirr(asset, movements, value, at_date)
+    # Annualiser moins d'un an de detention extrapole un hasard : 19 % gagnes
+    # en deux mois deviennent 327 % par an. Le TRI ne se donne qu'a partir
+    # d'un an ; avant, la plus-value en pourcentage dit deja ce qui s'est passe.
+    dates = [finance.parse_date(m["date"]) for m in movements
+             if m["type"] in ("versement", "retrait")]
+    acq = finance.parse_date(asset["date_acquisition"])
+    if acq and float(asset["valeur_acquisition"] or 0) > 0:
+        dates.append(acq)
+    premier = min((d for d in dates if d), default=None)
+    moins_d_un_an = premier is not None and (at_date - premier).days < 365
+    if moins_d_un_an:
+        tri = None
     lignes = (
         market.line_values(movements, ctx["securities"], ctx["prices"], at_date)
         if ctx else finance.pru_par_ligne(movements)
@@ -1010,6 +1022,7 @@ def market_asset_detail(asset_id, at_date=None, ctx=None):
         "lignes": lignes,
         "tri": tri,
         "tri_pct": round(tri * 100, 2) if tri is not None else None,
+        "tri_moins_d_un_an": moins_d_un_an,
         "valeur": value,
         "valeur_source": detail["valeur_source"],
         "valeur_saisie": detail["valeur_saisie"],

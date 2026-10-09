@@ -320,5 +320,31 @@ class TestAbonnementsObserves(unittest.TestCase):
         self.assertEqual(self.regle([self.abo(actif=False, jours_depuis=500)]), [])
 
 
+class TestTriAnnualise(ApiTestCase):
+
+    def test_pas_de_tri_sous_un_an(self):
+        """19 % en deux mois ne font pas 327 % par an."""
+        debut = finance.add_months(date.today(), -2).isoformat()
+        pea = self.post("/api/assets", {"type": "PEA", "label": "PEA",
+                                        "date_acquisition": debut, "valeur_acquisition": 0})
+        self.post(f"/api/assets/{pea['id']}/movements",
+                  {"type": "versement", "montant": 1000, "date": debut})
+        self.post(f"/api/assets/{pea['id']}/valorisation", {"valeur": 1190})
+        marche = self.get(f"/api/assets/{pea['id']}")["marche"]
+        self.assertIsNone(marche["tri_pct"])
+        self.assertTrue(marche["tri_moins_d_un_an"])
+
+    def test_tri_au_dela_d_un_an(self):
+        pea = self.post("/api/assets", {"type": "PEA", "label": "PEA",
+                                        "date_acquisition": "2020-01-01",
+                                        "valeur_acquisition": 0})
+        self.post(f"/api/assets/{pea['id']}/movements",
+                  {"type": "versement", "montant": 1000, "date": "2020-01-01"})
+        self.post(f"/api/assets/{pea['id']}/valorisation", {"valeur": 1500})
+        marche = self.get(f"/api/assets/{pea['id']}")["marche"]
+        self.assertIsNotNone(marche["tri_pct"])
+        self.assertFalse(marche["tri_moins_d_un_an"])
+
+
 if __name__ == "__main__":
     unittest.main()

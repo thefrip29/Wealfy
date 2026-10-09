@@ -12,28 +12,32 @@ App.settings = {
     // Quatre sections dont le contenu correspond au titre. « Types d'actifs
     // personnalisés » était logé sous « Cours de marché », avec lesquels il n'a
     // rien à voir ; il rejoint les sauvegardes dans « Général ».
+    // Trois sections. Chacune porte les mots qui y mènent depuis ailleurs :
+    // la pastille « cours désactivés » ouvre sur « cours ».
     const sections = [
       ['Classement des dépenses', App.h('div', {},
         App.settings.panelCategories(settings),
         App.h('div', { class: 'section-title' }, 'Règles de classification'),
-        App.settings.panelRules(rules, settings))],
+        App.settings.panelRules(rules, settings)), ['classement', 'categorie']],
       ['Objectifs', App.h('div', {},
         App.settings.panelRepartition(settings),
         App.h('div', { class: 'section-title' }, 'Épargne de précaution'),
         App.settings.panelPrecaution(settings),
         App.h('div', { class: 'section-title' }, 'Crédit des intérêts'),
-        App.settings.panelTaux(settings))],
-      ['Cours de marché', App.settings.panelMarket(settings, market)],
-      ['Général', App.h('div', {},
+        App.settings.panelTaux(settings)), ['objectif', 'precaution', 'repartition']],
+      ['Données et apparence', App.h('div', {},
         App.h('div', { class: 'section-title' }, 'Apparence'),
         App.settings.panelApparence(),
-        App.h('div', { class: 'section-title' }, 'Types d’actifs personnalisés'),
-        App.settings.panelAssetTypes(settings),
+        App.h('div', { class: 'section-title' }, 'Cours de marché'),
+        App.settings.panelMarket(settings, market),
         App.h('div', { class: 'section-title' }, 'Sauvegardes'),
-        App.settings.panelBackups(settings))],
+        App.settings.panelBackups(settings),
+        App.h('div', { class: 'section-title' }, 'Types d’actifs personnalisés'),
+        App.settings.panelAssetTypes(settings)), ['cours', 'sauvegarde', 'apparence', 'type']],
     ];
-    const trouve = sections.findIndex(
-      ([label]) => focus && label.toLowerCase().includes(focus.toLowerCase()));
+    const cherche = (focus || '').toLowerCase();
+    const trouve = sections.findIndex(([label, , alias]) => cherche
+      && (label.toLowerCase().includes(cherche) || alias.some((a) => cherche.includes(a))));
     const startIndex = trouve >= 0 ? trouve : 0;
 
     const nav = App.h('div', { class: 'tabs-inline' });
@@ -59,7 +63,8 @@ App.settings = {
       // reste qu'un, et l'exception est annoncée là où elle se trouve.
       body: App.h('div', {},
         App.h('p', { class: 'hint', style: 'margin-bottom:12px' },
-          'Vos modifications sont enregistrées au fur et à mesure.'),
+          'Vos modifications sont enregistrées au fur et à mesure. ',
+          App.settings.temoin = App.h('span', { class: 'temoin', 'aria-live': 'polite' })),
         nav, stack),
       onClose: async () => {
         if (!App.settings.aRafraichir) return;
@@ -85,17 +90,31 @@ App.settings = {
 
      Le rafraichissement est donc reporte a la fermeture des reglages : une
      seule fois, au moment ou l'on revient a la page. */
-  async save(patch, message = 'Paramètres enregistrés') {
+  /* Un toast par case cochée, c'était un toast toutes les deux secondes, en
+     bas à droite, loin du regard. Un témoin discret à côté de la phrase qui
+     annonce l'enregistrement suffit ; les erreurs restent des toasts. */
+  async save(patch, message = 'Enregistré') {
     try {
       await App.api.put('/api/settings', patch);
       Object.assign(App.state.settings, patch);
-      App.toast(message, 'success');
+      App.settings.signaler(message);
       const cles = Object.keys(patch);
       if (cles.some((c) => App.settings.CLES_META.includes(c))) await App.loadMeta();
       if (!cles.every((c) => App.settings.CLES_SANS_RENDU.includes(c))) {
         App.settings.aRafraichir = true;
       }
     } catch (e) { App.toast(e.message, 'error'); }
+  },
+
+  signaler(message) {
+    const t = App.settings.temoin;
+    if (!t || !t.isConnected) return;
+    t.textContent = `\u2713 ${message}`;
+    t.classList.remove('visible');
+    void t.offsetWidth;          // relance la transition
+    t.classList.add('visible');
+    clearTimeout(App.settings.temoinDelai);
+    App.settings.temoinDelai = setTimeout(() => t.classList.remove('visible'), 1800);
   },
 
   /* ---------- catégories ---------- */
@@ -252,7 +271,7 @@ App.settings = {
               await App.api.del(`/api/rules/${r.id}`);
               rules.splice(rules.indexOf(r), 1);
               render();
-              App.toast('Règle supprimée', 'success');
+              App.settings.signaler('Règle supprimée');
             },
           }, '×'))));
       }
@@ -263,22 +282,21 @@ App.settings = {
     const cible = App.select('cible_type',
       [['categorie_depense', 'Dépense'], ['type_revenu', 'Revenu']], 'categorie_depense');
     const valeur = App.select('valeur', App.categoriesAll(), 'Salaire');
-    const priorite = App.input('priorite', { type: 'number', value: 100 });
 
     const add = async () => {
       if (!pattern.value.trim()) return App.toast('Motif requis', 'error');
       try {
         const res = await App.api.post('/api/rules', {
           pattern: pattern.value.trim(), cible_type: cible.value,
-          valeur: valeur.value, priorite: priorite.value,
+          valeur: valeur.value,
         });
         rules.push({
           id: res.id, pattern: pattern.value.trim(), cible_type: cible.value,
-          valeur: valeur.value, priorite: parseInt(priorite.value, 10) || 100,
+          valeur: valeur.value, priorite: 100,
         });
         pattern.value = '';
         render();
-        App.toast('Règle ajoutée', 'success');
+        App.settings.signaler('Règle ajoutée');
       } catch (e) { App.toast(e.message, 'error'); }
     };
 
@@ -293,18 +311,14 @@ App.settings = {
     return App.h('div', {},
       App.h('p', { class: 'hint' },
         'Le motif est cherché dans le libellé, sans tenir compte de la casse ni des '
-        + 'accents. La règle de plus petite priorité gagne. Le remboursement de prêt, '
-        + 'lui, est détecté par le montant et la date, sans règle.'),
+        + 'accents. Le remboursement de prêt, lui, est détecté par le montant et '
+        + 'la date, sans règle. Le plus simple reste de classer une ligne dans la '
+        + 'liste : l’application propose alors d’en faire une règle.'),
       App.note('Classer un virement entre vos comptes',
         App.h('p', {},
           'C’est une règle comme une autre : donnez le motif qui revient dans le '
           + 'libellé — « revolut », « virement interne » — et choisissez une '
           + 'catégorie marquée « virement interne » dans le tableau des rôles.'),
-        App.h('p', {},
-          'Il y avait ici un second écran, une liste de mots-clés séparée, qui '
-          + 'faisait exactement cela avec son propre vocabulaire. Vos mots-clés '
-          + 'sont devenus des règles ordinaires, visibles et modifiables dans le '
-          + 'tableau ci-dessous.'),
         App.h('p', {},
           'Après un import, l’application propose de son côté les paires '
           + 'débit/crédit qu’elle repère entre deux relevés : ce rapprochement '
@@ -319,8 +333,7 @@ App.settings = {
       App.h('div', { class: 'form-grid' },
         App.field('Motif', pattern),
         App.field('Cible', cible),
-        App.field('Valeur attribuée', valeur),
-        App.field('Priorité', priorite, { hint: 'plus petit = prioritaire' })),
+        App.field('Valeur attribuée', valeur)),
       App.h('div', { class: 'actions', style: 'margin-top:12px' },
         App.h('button', { class: 'btn primary', onclick: add }, 'Ajouter la règle'),
         App.h('button', { class: 'btn', onclick: applyNow },
@@ -348,18 +361,35 @@ App.settings = {
     const render = () => {
       App.clear(host);
       buckets.forEach((b, i) => {
-        const typesSel = App.h('select', { multiple: true, size: 4 });
+        // Des cases plutôt qu'une liste à sélection multiple : le Ctrl+clic
+        // était un geste caché, et un clic sans lui effaçait tout le choix.
+        const typesSel = App.h('div', { class: 'cases-types' });
+        // Sans type coché, le serveur compte le type qui porte le nom de la
+        // poche, s'il existe. Sinon la poche reste à 0 % sans rien dire :
+        // « Livret A » ne désigne aucun type, « Livret » oui. On le dit ici.
+        const avertir = App.h('p', { class: 'hint', style: 'grid-column:1/-1' });
+        const verifier = () => {
+          const coches = (b.types || []).length;
+          avertir.textContent = coches ? ''
+            : (allTypes.includes(b.label)
+              ? `Aucun type coché : seul le type « ${b.label} » est compté.`
+              : 'Aucun type coché : cette poche restera à 0 %. Cochez les types qu’elle regroupe.');
+          avertir.classList.toggle('alerte-txt', !coches && !allTypes.includes(b.label));
+        };
         for (const t of allTypes) {
-          const opt = App.h('option', { value: t }, t);
-          if ((b.types || []).includes(t)) opt.selected = true;
-          typesSel.append(opt);
+          const cb = App.h('input', { type: 'checkbox', value: t });
+          cb.checked = (b.types || []).includes(t);
+          cb.addEventListener('change', () => {
+            b.types = Array.from(typesSel.querySelectorAll('input:checked'))
+              .map((c) => c.value);
+            verifier();
+            enregistrer();
+          });
+          typesSel.append(App.h('label', { class: 'checkline' }, cb, t));
         }
-        typesSel.addEventListener('change', () => {
-          b.types = Array.from(typesSel.selectedOptions).map((o) => o.value);
-          enregistrer();
-        });
+        verifier();
         const labelIn = App.input('l', { value: b.label || '' });
-        labelIn.addEventListener('input', () => { b.label = labelIn.value; });
+        labelIn.addEventListener('input', () => { b.label = labelIn.value; verifier(); });
         labelIn.addEventListener('change', enregistrer);
         const pctIn = App.input('p', { type: 'number', step: '0.1', value: b.pct ?? 0 });
         pctIn.addEventListener('input', () => {
@@ -370,12 +400,13 @@ App.settings = {
         host.append(App.h('div', { class: 'form-grid', style: 'margin-bottom:10px' },
           App.field('Poche', labelIn),
           App.field('Cible (%)', pctIn),
-          App.field("Types d'actifs inclus", typesSel, { hint: 'Ctrl+clic pour en choisir plusieurs' }),
+          App.field("Types d'actifs inclus", typesSel),
           App.h('div', { class: 'field' }, App.h('label', {}, ' '),
             App.h('button', {
               class: 'btn danger',
               onclick: () => { buckets.splice(i, 1); render(); updateTotal(); enregistrer(); },
-            }, 'Retirer'))));
+            }, 'Retirer')),
+          avertir));
       });
     };
     const updateTotal = () => {
@@ -616,18 +647,11 @@ App.settings = {
       placeholder: cleEnPlace ? 'clé enregistrée — laisser vide pour la garder'
         : 'clé API Twelve Data',
     });
-    const autoIn = App.h('input', { type: 'checkbox' });
-    autoIn.checked = settings.market_auto_refresh !== false;
-    const ttlIn = App.input('ttl', {
-      type: 'number', min: 1, value: settings.market_cache_ttl_hours ?? 24,
-    });
 
     const save = () => {
       const reglages = {
         market_enabled: enabled.checked,
         market_provider: providerSel.value,
-        market_auto_refresh: autoIn.checked,
-        market_cache_ttl_hours: parseInt(ttlIn.value, 10) || 24,
       };
       /* Champ vide alors qu'une clé existe : on ne l'envoie PAS. Sans cette
          garde, le simple fait d'enregistrer un autre réglage effacerait la clé,
@@ -703,7 +727,7 @@ App.settings = {
         };
         for (const input of [label, symbol, exchange, currency, bench]) {
           input.addEventListener('change', async () => {
-            try { await persist(); App.toast('Correspondance enregistrée', 'success'); }
+            try { await persist(); App.settings.signaler('Correspondance enregistrée'); }
             catch (e) { App.toast(e.message, 'error'); }
           });
         }
@@ -754,9 +778,7 @@ App.settings = {
             ? 'gratuite sur twelvedata.com — une clé est déjà enregistrée, '
               + 'laissez le champ vide pour la conserver'
             : 'gratuite sur twelvedata.com',
-        }),
-        App.field('Rafraîchir au lancement', autoIn),
-        App.field('Durée de vie du cache (heures)', ttlIn)),
+        })),
       // Seule section qui garde un bouton, et c'est délibéré : le reste des
       // réglages s'enregistre à la modification, mais activer les cours fait
       // sortir des données de la machine. Un réglage à conséquence se confirme.
@@ -768,10 +790,13 @@ App.settings = {
         App.h('button', { class: 'btn primary', onclick: save }, 'Enregistrer'),
         cleEnPlace ? App.h('button', { class: 'btn', onclick: oublierCle },
           'Oublier la clé') : null),
-      App.h('p', { class: 'hint', style: 'margin-top:8px' },
-        'Cette section est la seule à demander une validation : elle décide '
-        + 'de ce qui sort de votre machine.'),
 
+      App.h('div', { class: 'section-title' }, 'État'),
+      statusLine,
+
+      // Rarement utile : la recherche depuis la fiche d'un actif remplit la
+      // table toute seule. Disponible pour corriger, replié sinon.
+      App.note('Avancé : symboles et correspondances',
       App.h('div', { class: 'section-title' }, 'Vérifier la couverture d’un symbole'),
       App.h('p', { class: 'hint' },
         'À faire avant de vous fier aux valorisations : les offres gratuites couvrent '
@@ -784,12 +809,9 @@ App.settings = {
       App.h('div', { style: 'margin-top:10px' }, testOut),
 
       App.h('div', { class: 'section-title' }, 'Correspondance de vos lignes'),
-      App.note('À quoi sert cet écran',
-        'Vos mouvements portent souvent un ISIN, que le fournisseur n’accepte pas tel '
-        + 'quel. Depuis la fiche d’un actif, choisir un support par la recherche '
-        + 'remplit cette table toute seule. Cet écran sert à corriger, ou à saisir '
-        + 'un symbole que la recherche ne trouve pas. L’indice de référence sert à '
-        + 'la comparaison de performance.'),
+      App.h('p', { class: 'hint' },
+        'Pour corriger un symbole, ou en saisir un que la recherche ne trouve '
+        + 'pas. L’indice de référence sert à la comparaison de performance.'),
       App.h('div', { class: 'table-wrap scroll-y', style: 'margin-top:10px' },
         App.h('table', { class: 'table' },
           App.h('thead', {}, App.h('tr', {},
@@ -797,10 +819,8 @@ App.settings = {
             App.h('th', {}, 'Symbole fournisseur'),
             App.h('th', {}, 'Place'), App.h('th', {}, 'Devise'),
             App.h('th', {}, 'Indice de réf.'), App.h('th', { class: 'right' }, 'État'))),
-          tbody)),
+          tbody))),
 
-      App.h('div', { class: 'section-title' }, 'État'),
-      statusLine,
       App.h('p', { class: 'hint', style: 'margin-top:12px' },
         'Livrets et dépôts à terme n’utilisent pas d’API : renseignez leur taux annuel '
         + 'dans la fiche de l’actif, les intérêts sont calculés par quinzaines. '
@@ -823,13 +843,37 @@ App.settings = {
     cb.checked = App.animationsEconomes() || reduit;
     cb.addEventListener('change', () => {
       App.setAnimations(cb.checked);
-      App.toast(cb.checked ? 'Animations allégées' : 'Animations complètes', 'success');
+      App.settings.signaler(cb.checked ? 'Animations allégées' : 'Animations complètes');
     });
 
     // Une case a cocher seule dans une `form-grid` flottait au milieu d'une
     // cellule dimensionnee pour un champ de saisie. `checkline` est le motif
     // deja utilise ailleurs pour une case suivie de son libelle.
+    // Le thème quitte la barre du haut : un bouton à trois états cachait son
+    // état sous une icône. Ici les trois crans se lisent d'un coup.
+    const theme = App.h('div', { class: 'segmente' });
+    const peindreTheme = () => {
+      App.clear(theme);
+      for (const [code, libelle] of [['systeme', 'Système'], ['clair', 'Clair'], ['sombre', 'Sombre']]) {
+        const actif = App.themeChoisi() === code;
+        theme.append(App.h('button', {
+          class: `segmente-cran${actif ? ' actif' : ''}`,
+          'aria-pressed': actif ? 'true' : 'false',
+          onclick: () => {
+            App.setTheme(code);
+            // Les graphiques lisent leurs couleurs au rendu : on les refait,
+            // et rien d'autre.
+            App.redessinerGraphiques();
+            peindreTheme();
+          },
+        }, libelle));
+      }
+    };
+    peindreTheme();
+
     return App.h('div', {},
+      App.h('div', { class: 'field', style: 'margin-bottom:12px' },
+        App.h('label', {}, 'Thème'), theme),
       App.h('label', { class: 'checkline' }, cb, 'Animations économes'),
       App.h('p', { class: 'hint', style: 'margin-top:6px' },
         reduit
@@ -841,12 +885,7 @@ App.settings = {
           'Les trajectoires et les durées ne bougent pas. Seuls disparaissent le '
           + 'flou d’amorce et le mouvement du fond : ce sont les deux seuls postes '
           + 'qui coûtent une re-rastérisation à chaque image. Le reste est traité '
-          + 'par le compositeur et ne pèse quasiment rien.'),
-        App.h('p', {},
-          'Le mode complet est le défaut partout. Une version précédente estimait '
-          + 'la puissance de la machine avec `navigator.deviceMemory`, que WebKit '
-          + 'n’implémente pas : tout Mac basculait en économe sans moyen d’en '
-          + 'sortir. C’est à vous de décider.')));
+          + 'par le compositeur et ne pèse quasiment rien.')));
   },
 
   /* ---------- types d'actifs personnalisés ---------- */

@@ -553,20 +553,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     () => App.tabs.overview.toggleChart(b.dataset.zoom)));
   App.el('#toggle-privacy').addEventListener('click',
     () => App.setPrivacy(!App.privacyOn()));
-  App.el('#toggle-theme').addEventListener('click', () => {
-    // Cycle système -> clair -> sombre -> système. Passer par « système »
-    // à chaque tour est ce qui permet de revenir au suivi automatique ;
-    // l'ancien bouton à deux positions l'interdisait définitivement.
-    const suivant = App.THEMES[(App.THEMES.indexOf(App.themeChoisi()) + 1) % App.THEMES.length];
-    App.setTheme(suivant);
-    // Les graphiques lisent leurs couleurs au rendu : on les refait, et rien
-    // d'autre. Recharger l'onglet entier rejouait toute l'apparition et
-    // redemandait au serveur des séries qu'on avait déjà en mémoire.
-    App.redessinerGraphiques();
-  });
 
   App.el('#ex-add').addEventListener('click', () => App.tabs.expenses.openForm(null));
   App.el('#ex-import').addEventListener('click', () => App.tabs.expenses.openImport());
+  App.el('#ex-last-import').addEventListener('click', () => App.tabs.expenses.openJournal());
   // Recherche debouncee : `renderTable` reconstruit toutes les lignes, et le
   // faire a chaque frappe rendait la saisie pateuse sur un mois charge.
   let rechercheDelai;

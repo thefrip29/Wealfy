@@ -23,68 +23,40 @@ App.tabs.overview = {
     App.tabs.overview.renderFlux(data.depenses_serie);
     App.tabs.overview.renderCategories(data.mois);
     App.tabs.overview.renderRepartition(data.repartition, data.metrics);
-    App.tabs.overview.renderMois(data);
   },
 
-  /* Ce que le mois laisse une fois les charges fixes et l'épargne mises de
-     côté : le reste à vivre.
+  /* Le reste à vivre, en cinquième case de la rangée d'indicateurs.
 
-     `services.metrics()` produit vingt-deux grandeurs ; l'interface en
-     affichait sept. Celle-ci a sa propre section dans `docs/interface.md` et
-     n'apparaissait sur aucun écran — alors que la colonne « Charge fixe » du
-     tableau des rôles n'a pas d'autre raison d'être que de l'alimenter. On
-     cochait donc des catégories pour nourrir un chiffre que personne ne
-     montrait.
+     Il avait sa carte, « Mon mois », qui répétait les revenus et l'épargne
+     déjà affichés juste au-dessus. Il rejoint la rangée ; son détail
+     (charges fixes, mensualités et leurs ratios) se déplie dans la case.
 
-     Rien n'est calculé ici : tout arrive déjà dans `/api/overview`. */
-  renderMois(data) {
-    const host = App.el('#ov-mois');
-    const label = App.el('#ov-mois-label');
-    App.clear(host);
-    if (label) label.textContent = App.fmt.month(data.mois.mois);
-
+     Deux situations que le même zéro ne sépare pas : le réglage n'a jamais
+     été fait, ou il l'est mais le mois n'a pas de revenu. Elles n'appellent
+     pas la même phrase. */
+  kpiResteAVivre(data) {
     const m = data.metrics;
-    const fixes = m.charges_fixes_mois || 0;
+    const kpi = App.tabs.overview.kpi;
     const configurees = ((App.state.meta || {}).categories_charges_fixes || []).length;
-
-    // Deux situations que le même zéro ne sépare pas, et qui n'appellent pas la
-    // même phrase : le réglage n'a jamais été fait, ou il l'est mais ce mois-ci
-    // ne porte rien. Inviter à configurer ce qui l'est déjà ferait chercher un
-    // écran qu'on a sous les yeux.
     if (!configurees) {
-      host.append(
-        App.h('p', { class: 'muted' },
-          'Marquez vos catégories de charges fixes — loyer, assurances, '
-          + 'abonnements — pour connaître ce qui vous reste une fois le '
-          + 'récurrent et l’épargne mis de côté.'),
-        App.h('div', { class: 'actions', style: 'margin-top:12px' },
-          App.h('button', {
-            class: 'btn',
-            onclick: () => App.settings.open('classement'),
-          }, 'Choisir mes charges fixes')));
-      return;
+      const k = kpi('Reste à vivre', '—');
+      k.append(App.h('button', {
+        class: 'btn small', style: 'margin-top:8px',
+        onclick: () => App.settings.open('classement'),
+      }, 'Choisir mes charges fixes'));
+      return k;
     }
+    // Sans revenu, le reste à vivre serait un négatif sans objet : il se
+    // compte SUR des revenus.
+    if (!m.revenus_mois) return kpi('Reste à vivre', '—', 'aucun revenu ce mois-ci');
 
-    // Sans revenu sur le mois, le reste à vivre serait un négatif sans objet :
-    // il se compte SUR des revenus.
-    if (!m.revenus_mois) {
-      host.append(App.h('p', { class: 'muted' },
-        `Aucun revenu enregistré en ${App.fmt.month(data.mois.mois)}. `
-        + 'Le reste à vivre se compte sur les revenus du mois.'));
-      return;
-    }
-
-    // Un chiffre domine, le reste descend d'un cran.
-    host.append(App.h('div', { class: 'reste' },
-      App.h('div', { class: 'reste-label' }, 'Reste à vivre'),
-      App.h('div', { class: 'reste-value' }, App.fmt.eur(m.reste_a_vivre_mois)),
-      App.h('div', { class: 'hero-meta' },
-        App.h('span', {}, 'une fois les charges fixes et l’épargne mises de côté'))));
-
+    const fixes = m.charges_fixes_mois || 0;
+    const k = kpi('Reste à vivre', App.fmt.eur(m.reste_a_vivre_mois),
+      'après charges fixes et épargne');
+    // Les deux ratios se rapportent au revenu moyen des trois mois révolus,
+    // pas aux revenus du mois : le dire.
     const lignes = [
-      ['Revenus', App.fmt.eur(m.revenus_mois)],
-      // Les deux ratios se rapportent au revenu moyen des trois mois révolus,
-      // pas aux revenus du mois affichés juste au-dessus : le dire.
+      ['Revenus du mois', App.fmt.eur(m.revenus_mois)],
       ['Charges fixes', App.fmt.eur(fixes)
         + (m.part_charges_fixes === null ? ''
           : ` · ${App.fmt.pct(m.part_charges_fixes, 0)} du revenu moyen`)],
@@ -95,7 +67,11 @@ App.tabs.overview = {
         + (m.taux_endettement === null ? ''
           : ` · ${App.fmt.pct(m.taux_endettement, 0)} du revenu moyen`)]);
     }
-    host.append(App.metricList(lignes));
+    if (m.revenu_moyen_3m) {
+      lignes.push(['Revenu moyen (3 mois)', App.fmt.eur(m.revenu_moyen_3m)]);
+    }
+    k.append(App.note('Détail', App.metricList(lignes)));
+    return k;
   },
 
   /* Accueil d'une base vide.
@@ -478,8 +454,9 @@ App.tabs.overview = {
       deltaClass = data.variation_depenses > 0 ? 'up' : 'down';
     }
 
-    // Le patrimoine net est déjà en héros : ces quatre cases le complètent
-    // au lieu de le répéter.
+    // Le patrimoine net est déjà en héros : ces cases le complètent au lieu
+    // de le répéter. Le reste à vivre y a rejoint les autres indicateurs du
+    // mois, au lieu d'occuper une carte qui répétait revenus et épargne.
     host.append(
       App.tabs.overview.kpi('Dépensé ce mois', App.fmt.eur(cur.depenses), deltaText, deltaClass),
       // `nb_transactions` comptait TOUT le mois, dépenses comprises : sous
@@ -492,6 +469,7 @@ App.tabs.overview = {
         cur.taux_epargne === null ? '—' : App.fmt.ratio(cur.taux_epargne),
         `${App.fmt.eur(cur.epargne)} épargnés sur ${App.fmt.eur(cur.revenus)} de revenus`,
         cur.taux_epargne !== null && cur.taux_epargne >= 0.2 ? 'good' : ''),
+      App.tabs.overview.kpiResteAVivre(data),
       App.tabs.overview.kpi("Couverture d'urgence",
         m.mois_couverture_urgence === null ? '—' : `${App.fmt.num(m.mois_couverture_urgence, 1)} mois`,
         `${App.fmt.eur(m.solde_livrets, true)} de livrets`,
@@ -565,14 +543,6 @@ App.tabs.overview = {
       },
       options: {
         cutout: '62%',
-        // Du graphique à la liste : une part mène aux transactions qui la
-        // composent, sur le même mois.
-        onClick: (_e, elements) => {
-          if (elements.length) App.voirCategorie(cats[elements[0].index].category);
-        },
-        onHover: (e, elements) => {
-          e.native.target.style.cursor = elements.length ? 'pointer' : '';
-        },
         plugins: {
           legend: { position: 'right' },
           tooltip: {
@@ -609,6 +579,14 @@ App.tabs.overview = {
       },
       options: {
         cutout: '62%',
+        // Du graphique à la liste : une part mène aux transactions qui la
+        // composent, sur le même mois.
+        onClick: (_e, elements) => {
+          if (elements.length) App.voirCategorie(cats[elements[0].index].category);
+        },
+        onHover: (e, elements) => {
+          e.native.target.style.cursor = elements.length ? 'pointer' : '';
+        },
         plugins: {
           legend: { position: 'right' },
           tooltip: {

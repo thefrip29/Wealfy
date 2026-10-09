@@ -29,8 +29,10 @@ App.tabs.expenses = {
       App.tabs.expenses.filtreAPoser = null;
     }
     App.tabs.expenses.renderTable();
-    App.tabs.expenses.renderImports(imports);
+    App.tabs.expenses.imports = imports;
   },
+
+  imports: [],
 
   renderLastImport(imports) {
     const host = App.el('#ex-last-import');
@@ -40,8 +42,8 @@ App.tabs.expenses = {
       return;
     }
     const last = imports[0];
-    host.textContent = `Dernier : ${last.source}, ${last.nombre_lignes} ligne(s) `
-      + `jusqu’au ${App.fmt.date(last.periode_fin)} · ${imports.length} import(s) au total`;
+    host.textContent = `Dernier relevé : ${last.source}, jusqu’au `
+      + `${App.fmt.date(last.periode_fin)} · journal des ${imports.length} import(s)`;
   },
 
   renderKpis(f) {
@@ -379,7 +381,7 @@ App.tabs.expenses = {
       toutCocher.checked = false;
       App.tabs.expenses.renderBulk();
       const vide = App.tabs.expenses.cache.transactions.length === 0;
-      tbody.append(App.h('tr', {}, App.h('td', { colspan: 7 },
+      tbody.append(App.h('tr', {}, App.h('td', { colspan: 6 },
         App.h('div', { class: 'empty-cta' },
           App.h('p', {}, vide
             ? `Aucune transaction en ${App.fmt.month(App.state.month)}.`
@@ -416,12 +418,13 @@ App.tabs.expenses = {
       tbody.append(App.h('tr', {},
         App.h('td', { class: 'center' }, coche),
         App.h('td', { class: 'nowrap' }, App.fmt.date(t.date)),
-        App.h('td', {}, App.h('div', { class: 'ell', title: t.description }, t.description)),
+        // Le rattachement à un produit ou un prêt avait sa colonne, vide la
+        // plupart du temps. Il passe sous le libellé, quand il existe.
+        App.h('td', {},
+          App.h('div', { class: 'ell', title: t.description }, t.description),
+          link ? App.h('div', { class: 'a-meta' }, `→ ${link}`) : null),
         App.tabs.expenses.celluleCategorie(t),
         App.h('td', { class: `right num ${t.amount < 0 ? 'neg' : 'pos'}` }, App.fmt.eur(t.amount)),
-        App.h('td', {}, link
-          ? App.h('span', { class: 'pill accent' }, link)
-          : App.h('span', { class: 'muted' }, '—')),
         App.h('td', { class: 'right' },
           App.h('button', {
             class: 'icon-btn', title: 'Modifier',
@@ -446,8 +449,27 @@ App.tabs.expenses = {
      Il s'affichait dans cet onglet mais son code vivait dans
      `App.tabs.history`, qui ne le rendait pas : c'est `expenses.load()`
      qui appelait la fonction de l'autre module. Le code rejoint l'ecran. */
-  renderImports(imports) {
-    const tbody = App.el('#hi-imports tbody');
+  /* Le journal des imports, dans une modale. Il était replié en bas du
+     tableau des transactions, sous deux cents lignes. */
+  openJournal() {
+    const tbody = App.h('tbody', {});
+    App.tabs.expenses.renderImports(App.tabs.expenses.imports, tbody);
+    App.modal.open({
+      title: 'Journal des imports',
+      wide: true,
+      body: App.h('div', { class: 'table-wrap scroll-y' },
+        App.h('table', { class: 'table', id: 'hi-imports' },
+          App.h('thead', {}, App.h('tr', {},
+            App.h('th', {}, 'Date d’import'), App.h('th', {}, 'Source'),
+            App.h('th', {}, 'Période couverte'),
+            App.h('th', { class: 'right' }, 'Lignes'),
+            App.h('th', { style: 'width:150px' }))),
+          tbody)),
+      footer: [App.h('button', { class: 'btn', onclick: () => App.modal.close() }, 'Fermer')],
+    });
+  },
+
+  renderImports(imports, tbody) {
     App.clear(tbody);
     if (!imports.length) {
       tbody.append(App.h('tr', {}, App.h('td', { colspan: 5, class: 'empty' },

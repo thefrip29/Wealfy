@@ -107,7 +107,6 @@
     </div>
     <button class="icon-btn" id="toggle-privacy"
             title="Masquer les montants" aria-pressed="true">&#128065;</button>
-    <button class="icon-btn" id="toggle-theme" title="Thème clair / sombre">&#9789;</button>
     <button class="icon-btn" id="open-settings" title="Paramètres">&#9881;</button>
   </div>
 </header>
@@ -166,36 +165,17 @@
       </div>
     </div>
 
-    <div class="grid-2">
-      <div class="card">
-        <h3>Répartition cible vs réelle</h3>
-        <div id="ov-repartition" class="repartition"></div>
-        <p class="sub" id="ov-frais" style="margin:12px 0 0"></p>
-      </div>
-
-      <!-- Le reste à vivre était calculé, documenté, et affiché nulle part. La
-           colonne « Charge fixe » des réglages n'existe que pour l'alimenter :
-           on cochait des catégories pour nourrir un chiffre invisible. -->
-      <div class="card">
-        <h3>Mon mois <span class="sub" id="ov-mois-label"></span></h3>
-        <div id="ov-mois"></div>
-      </div>
+    <!-- Le reste a vivre a rejoint la rangee d'indicateurs : sa carte
+         repetait les revenus et l'epargne affiches juste au-dessus. -->
+    <div class="card">
+      <h3>Répartition cible vs réelle</h3>
+      <div id="ov-repartition" class="repartition"></div>
+      <p class="sub" id="ov-frais" style="margin:12px 0 0"></p>
     </div>
   </section>
 
   <!-- ============ DÉPENSES ============ -->
   <section class="panel" id="tab-expenses">
-    <!-- Point d'entrée principal de l'onglet : ajouter un relevé. -->
-    <div class="card banner">
-      <div class="banner-text">
-        <h3>Relevés bancaires</h3>
-        <p class="sub" id="ex-last-import">Aucun relevé importé pour le moment.</p>
-      </div>
-      <div class="actions">
-        <button class="btn primary big" id="ex-import">+ Ajouter un relevé</button>
-      </div>
-    </div>
-
     <div class="kpi-grid" id="ex-kpis"></div>
 
     <!-- Ce qui sort de l'habitude ce mois-ci. Masquee quand rien ne depasse :
@@ -227,13 +207,19 @@
 
     <div class="card">
       <div class="card-head">
-        <h3>Transactions <span class="sub" id="ex-month-label"></span></h3>
+        <div>
+          <h3>Transactions <span class="sub" id="ex-month-label"></span></h3>
+          <!-- Le dernier releve, en une ligne ; un clic ouvre le journal. Il
+               occupait une carte entiere en tete d'onglet. -->
+          <button class="lien-discret" id="ex-last-import">Aucun relevé importé pour le moment.</button>
+        </div>
         <div class="actions">
           <input type="search" id="ex-search"
                  placeholder="Rechercher…  (/)"
                  title="Libellé, catégorie, montant ou produit rattaché">
           <select id="ex-filter-cat"><option value="">Toutes catégories</option></select>
           <button class="btn" id="ex-add">+ Transaction</button>
+          <button class="btn primary" id="ex-import">+ Ajouter un relevé</button>
         </div>
       </div>
       <!-- Barre d'actions groupees : elle n'apparait qu'a partir de la premiere
@@ -252,49 +238,17 @@
               <th>Libellé</th>
               <th style="width:190px">Catégorie</th>
               <th style="width:130px" class="right">Montant</th>
-              <th style="width:150px">Rattachement</th>
               <th style="width:44px"></th>
             </tr>
           </thead>
           <tbody></tbody>
         </table>
       </div>
-
-      <!-- Le journal est ici, où les imports se font — plutôt que dans
-           l'Historique, qui n'a pas à recueillir ce qui ne rentre ailleurs. -->
-      <details class="note" id="ex-imports">
-        <summary>Journal des imports</summary>
-        <div class="table-wrap scroll-y">
-          <table class="table" id="hi-imports">
-            <thead>
-              <tr>
-                <th>Date d'import</th><th>Source</th><th>Période couverte</th>
-                <th class="right">Lignes</th><th style="width:150px"></th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </details>
     </div>
   </section>
 
   <!-- ============ PATRIMOINE ============ -->
   <section class="panel" id="tab-wealth">
-    <!-- Point d'entrée pour la saisie initiale du patrimoine. -->
-    <div class="card banner">
-      <div class="banner-text">
-        <h3>Mon patrimoine</h3>
-      </div>
-      <div class="actions">
-        <!-- Relire le patrimoine en dollars. Masque tant qu'aucun taux n'a ete
-             releve : convertir avec un taux invente serait pire que ne pas
-             convertir du tout. -->
-        <div class="segmente" id="we-devise" hidden></div>
-        <button class="btn primary big" id="we-add">+ Ajouter</button>
-      </div>
-    </div>
-
     <div class="kpi-grid" id="we-kpis"></div>
 
     <div class="card">
@@ -303,6 +257,11 @@
         <div class="actions">
           <span id="we-market-state"></span>
           <button class="btn" id="we-refresh-quotes">Rafraîchir les cours</button>
+          <!-- Relire le patrimoine en dollars. Masque tant qu'aucun taux n'a ete
+               releve : convertir avec un taux invente serait pire que ne pas
+               convertir du tout. -->
+          <div class="segmente" id="we-devise" hidden></div>
+          <button class="btn primary" id="we-add">+ Ajouter</button>
         </div>
       </div>
       <div id="we-assets"></div>

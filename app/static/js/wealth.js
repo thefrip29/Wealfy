@@ -418,32 +418,22 @@ App.tabs.wealth = {
         // Le serveur acceptait pourtant deja un `type` (`add_position`), et
         // `finance.quantity_held` soustrait deja tout ce qui n'est pas un
         // versement. Seul le formulaire n'envoyait jamais autre chose.
-        App.h('td', { class: 'right nowrap' },
-          App.h('button', {
-            class: 'btn small',
-            title: `Ajouter un ${kind === 'crypto' ? 'achat' : 'versement'} sur cette ${mot}`,
-            onclick: () => App.tabs.wealth.openPositionForm(asset, host, {
+        // Trois boutons par ligne faisaient un mur d'actions identiques d'une
+        // ligne à l'autre. Un seul menu, qui ne s'ouvre qu'à la demande.
+        App.h('td', { class: 'right' }, App.menuLigne([
+          [`+ ${kind === 'crypto' ? 'Achat' : 'Versement'}`,
+            () => App.tabs.wealth.openPositionForm(asset, host, {
               ticker: ligne.ticker, symbol: ligne.symbole, label: ligne.libelle,
-            }),
-          }, '+ Achat'),
-          ' ',
-          // Un support hors cote se tient en euros, pas en parts : « vendre une
-          // quantite » n'y veut rien dire.
-          ligne.kind === 'non_cote' ? null : App.h('button', {
-            class: 'btn small',
-            title: `Vendre, ou passer des frais preleves sur cette ${mot}`,
-            onclick: () => App.tabs.wealth.openSortieForm(asset, host, ligne),
-          }, '\u2212 Sortie'),
-          ' ',
+            })],
+          // Un support hors cote se tient en euros, pas en parts : « vendre
+          // une quantite » n'y veut rien dire.
+          ligne.kind === 'non_cote' ? null
+            : ['\u2212 Vente ou frais', () => App.tabs.wealth.openSortieForm(asset, host, ligne)],
           // Un echange n'est ni un achat ni une vente : aucun euro n'entre ni
-          // ne sort, deux lignes changent de taille. Faute de pouvoir
-          // l'exprimer, le frais de la plateforme n'avait nulle part ou se
-          // poser — c'est ce qui manquait.
-          ligne.kind === 'non_cote' ? null : App.h('button', {
-            class: 'btn small',
-            title: 'Echanger cette ligne contre une autre',
-            onclick: () => App.tabs.wealth.openSwapForm(asset, host, ligne),
-          }, '\u21c4 \u00c9changer'))));
+          // ne sort, deux lignes changent de taille.
+          ligne.kind === 'non_cote' ? null
+            : ['\u21c4 \u00c9changer', () => App.tabs.wealth.openSwapForm(asset, host, ligne)],
+        ]))));
     }
 
     // Chiffres de synthèse en tête : ils occupaient auparavant deux onglets
@@ -460,7 +450,9 @@ App.tabs.wealth = {
     }
     // Pas de PRU au niveau du compte : il mélangerait le prix de parts qui
     // n'ont rien de commun. Chaque ligne porte le sien.
-    if (marche.tri_pct != null) {
+    if (marche.tri_moins_d_un_an) {
+      rows.push(['TRI annualisé', '— (moins d’un an de détention)']);
+    } else if (marche.tri_pct != null) {
       rows.push(['TRI annualisé', App.fmt.pct(marche.tri_pct, 2)]);
     }
     const resume = App.metricList(rows);
@@ -921,15 +913,12 @@ App.tabs.wealth = {
   },
 
   /* ==================================================================
-     Deux niveaux : d'abord la nature de ce qu'on ajoute, ensuite le produit.
+     Deux niveaux : d'abord la nature de ce qu'on ajoute, ensuite la saisie.
 
-     Il y a eu trois boutons côte à côte, puis un seul bouton ouvrant vingt
-     cartes d'un coup. Les vingt cartes étaient lisibles mais mélangeaient un
-     Livret A, un prêt immobilier et un formulaire libre sur le même plan.
-
-     La catégorie répond « quelle sorte de chose », les cartes « laquelle » —
-     avec, parmi elles, la déclaration groupée pour qui arrive avec tout son
-     patrimoine à saisir d'un coup.
+     Il y a eu trois boutons côte à côte, puis vingt cartes de produits entre
+     ce choix et la grille de déclaration. La grille porte déjà une ligne par
+     produit, montant et taux compris, et accepte un produit comme dix : les
+     cartes n'ajoutaient qu'une étape.
      ================================================================== */
   carteChoix(libelle, sousTitre, action) {
     return App.h('button', { class: 'choice', onclick: action },
@@ -944,9 +933,12 @@ App.tabs.wealth = {
     App.modal.open({
       title: 'Qu\u2019est-ce que vous voulez ajouter ?',
       body: App.h('div', { class: 'choice-grid' },
+        // Directement la grille : une ligne par produit, montant et taux sur
+        // la même ligne. Une étape de vingt cartes la précédait, pour ne
+        // demander ensuite que ce que la grille demande déjà.
         carte('Un produit d\u2019\u00e9pargne ou de placement',
           'Livret, PEA, assurance vie, crypto, bien immobilier\u2026',
-          () => App.tabs.wealth.openProduitChooser()),
+          () => App.tabs.wealth.openQuickAdd()),
         carte('Un pr\u00eat ou un cr\u00e9dit',
           'Mensualit\u00e9 et capital restant d\u00fb calcul\u00e9s',
           () => App.tabs.wealth.openLiabilityForm(null)),
@@ -956,112 +948,6 @@ App.tabs.wealth = {
       footer: [App.h('button', {
         class: 'btn', onclick: () => App.modal.close(),
       }, 'Annuler')],
-    });
-  },
-
-  /* Second niveau : une carte par produit, group\u00e9es par famille. La
-     d\u00e9claration group\u00e9e est une carte parmi les autres, en t\u00eate d'une section
-     \u00e0 elle : c'est un chemin d'entr\u00e9e, pas un produit. */
-  openProduitChooser() {
-    const carte = App.tabs.wealth.carteChoix;
-    const body = App.h('div', {});
-
-    body.append(
-      App.h('div', { class: 'section-title' }, 'Tout d\u2019un coup'),
-      App.h('div', { class: 'choice-grid' },
-        carte('Ajouter plusieurs produits',
-          'La liste compl\u00e8te, un montant par ligne \u2014 pour la premi\u00e8re mise en route',
-          () => App.tabs.wealth.openQuickAdd())));
-
-    for (const [groupe, produits] of App.tabs.wealth.CATALOGUE) {
-      body.append(App.h('div', { class: 'section-title' }, groupe));
-      const grid = App.h('div', { class: 'choice-grid' });
-      for (const [type, libelle, avecTaux] of produits) {
-        grid.append(carte(libelle, App.tabs.wealth.SOUS_TITRES[type] || null,
-          () => App.tabs.wealth.openSimpleAssetForm(type, libelle, avecTaux)));
-      }
-      body.append(grid);
-    }
-
-    App.modal.open({
-      title: 'Quel produit ?',
-      wide: true,
-      body,
-      footer: [App.h('button', {
-        class: 'btn', onclick: () => App.tabs.wealth.openAddChooser(),
-      }, 'Retour')],
-    });
-  },
-
-  SOUS_TITRES: {
-    Livret: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
-    LDDS: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
-    LEP: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
-    LivretJeune: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
-    PEL: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
-    CEL: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
-    DepotTerme: 'Int\u00e9r\u00eats calcul\u00e9s au taux que vous indiquez',
-    PEA: 'Vous choisirez vos supports ensuite',
-    CTO: 'Vous choisirez vos supports ensuite',
-    AssuranceVie: 'Vous choisirez vos supports ensuite',
-    PER: 'Vous choisirez vos supports ensuite',
-    Crypto: 'Vous choisirez vos cryptos ensuite',
-    Immobilier: 'R\u00e9\u00e9valuation possible par indice',
-    SCPI: 'R\u00e9\u00e9valuation possible par indice',
-  },
-
-  /* Formulaire court : le type est d\u00e9j\u00e0 choisi, on ne demande que
-     l'indispensable. Le reste se r\u00e8gle ensuite dans la fiche. */
-  openSimpleAssetForm(type, libelle, avecTaux) {
-    const marche = App.tabs.wealth.MARKET.includes(type);
-    const form = App.h('form', { class: 'form-grid', onsubmit: (e) => e.preventDefault() },
-      App.field('Nom', App.input('label', { value: libelle, required: true })),
-      App.field('Montant aujourd\u2019hui (\u20ac)', App.input('valeur_actuelle', {
-        type: 'number', step: '0.01', required: true,
-      })),
-      App.field('Depuis le', App.dateField('date_acquisition', {
-        value: App.todayISO(),
-      })),
-      avecTaux ? App.field('Taux annuel (%)', App.input('taux_annuel', {
-        type: 'number', step: '0.01',
-      }), { hint: 'Laiss\u00e9 vide, le montant reste fig\u00e9' }) : null);
-
-    const save = async () => {
-      const v = App.formValues(form);
-      if (!v.valeur_actuelle) {
-        return App.invalide(form, 'valeur_actuelle', 'Indiquez un montant.');
-      }
-      const metadata = {};
-      if (v.taux_annuel) metadata.taux_annuel = parseFloat(v.taux_annuel);
-      try {
-        const asset = await App.api.post('/api/assets', {
-          type,
-          label: v.label.trim() || libelle,
-          date_acquisition: v.date_acquisition,
-          valeur_acquisition: v.valeur_actuelle,   // pas d'historique connu
-          valeur_actuelle: v.valeur_actuelle,
-          metadata,
-        });
-        App.modal.close();
-        App.toast(`${v.label || libelle} ajout\u00e9`, 'success');
-        await App.refreshAll();
-        // Un compte-titres ou un portefeuille crypto n'a d'int\u00e9r\u00eat qu'une fois
-        // ses lignes renseign\u00e9es : on y emm\u00e8ne directement.
-        if (marche) await App.tabs.wealth.openAssetDetail(asset.id);
-      } catch (e) { App.toast(e.message, 'error'); }
-    };
-
-    App.modal.open({
-      title: `Ajouter \u2014 ${libelle}`,
-      body: App.h('div', {}, form,
-        marche ? App.h('p', { class: 'hint', style: 'margin-top:14px' },
-          'Vous pourrez choisir vos supports juste apr\u00e8s, par une recherche.') : null),
-      footer: [
-        App.h('button', {
-          class: 'btn', onclick: () => App.tabs.wealth.openProduitChooser(),
-        }, 'Retour'),
-        App.h('button', { class: 'btn primary', onclick: save }, 'Ajouter'),
-      ],
     });
   },
 
@@ -1168,9 +1054,8 @@ App.tabs.wealth = {
       wide: true,
       body: App.h('div', {},
         App.h('p', { class: 'hint' },
-          'Indiquez simplement ce que vous avez aujourd’hui sur chaque produit. '
-          + 'Laissez vide ceux que vous n’avez pas. Vous pourrez tout affiner ensuite, '
-          + 'produit par produit.'),
+          'Indiquez ce que vous avez aujourd’hui sur chaque produit, un ou '
+          + 'plusieurs. Laissez vide ceux que vous n’avez pas.'),
         App.note('Plus-value à zéro, taux à renseigner — pourquoi',
           App.h('p', {},
             'La valeur d’acquisition est posée égale au montant déclaré : la '
@@ -1187,7 +1072,7 @@ App.tabs.wealth = {
         App.h('div', { style: 'margin-right:auto' },
           App.h('span', { class: 'sub' }, 'Total déclaré : '), totalNode),
         App.h('button', {
-          class: 'btn', onclick: () => App.tabs.wealth.openProduitChooser(),
+          class: 'btn', onclick: () => App.tabs.wealth.openAddChooser(),
         }, 'Retour'),
         submit,
       ],
@@ -1224,35 +1109,34 @@ App.tabs.wealth = {
           { placeholder: 'ex : 010567037' });
         add('Ou taux de revalorisation annuel (%)', 'taux_revalorisation_annuel',
           { type: 'number', step: '0.01' });
-        metaHost.append(App.h('p', { class: 'hint', style: 'grid-column:1/-1' },
+        metaHost.append(App.h('div', { style: 'grid-column:1/-1' }, App.note('Comment la valeur est estimée',
           'Aucune API ne cote un bien précis. La valeur est estimée en appliquant '
-          + 'l’évolution d’un indice à votre prix d’acquisition — c’est un ordre de '
-          + 'grandeur, pas une expertise. À défaut d’indice, le taux annuel est utilisé.'));
+          + 'l’évolution d’un indice à votre prix d’acquisition : un ordre de '
+          + 'grandeur, pas une expertise. À défaut d’indice, le taux annuel est utilisé.')));
       }
       if (App.tabs.wealth.MARKET.includes(t) && t !== 'Crypto') {
         add('Courtier', 'courtier');
         add('Numéro de compte', 'numero_compte');
         add('TER annuel (%)', 'ter_annuel', { type: 'number', step: '0.01' });
-        metaHost.append(App.h('p', { class: 'hint', style: 'grid-column:1/-1' },
-          'Le TER n’est jamais prélevé : il est intégré au cours du support et '
-          + 'ne sort d’aucun compte. Aucun mouvement ne peut donc le porter — '
-          + 'c’est une estimation, appliquée à la valeur du produit, et comptée '
-          + 'à part des frais réellement payés.'));
+        metaHost.append(App.h('div', { style: 'grid-column:1/-1' }, App.note('Le TER',
+          'Il n’est jamais prélevé : il est intégré au cours du support et ne '
+          + 'sort d’aucun compte. C’est une estimation, appliquée à la valeur du '
+          + 'produit, et comptée à part des frais réellement payés.')));
       }
       if (t === 'Crypto') {
         add('Identifiant CoinGecko', 'coingecko_id', { placeholder: 'ex : bitcoin' });
         add('Quantité détenue', 'quantite', { type: 'number', step: '0.00000001' });
-        metaHost.append(App.h('p', { class: 'hint', style: 'grid-column:1/-1' },
-          'L’identifiant CoinGecko est celui de l’URL de la page du coin '
-          + '(coingecko.com/fr/pieces/bitcoin → « bitcoin »). '
-          + 'La quantité est nécessaire pour valoriser au cours du jour.'));
+        metaHost.append(App.h('div', { style: 'grid-column:1/-1' }, App.note('Saisie sans lignes',
+          'Plus simple : ouvrez la fiche et ajoutez vos cryptos dans « Mes cryptos ». '
+          + 'Ces deux champs ne servent qu’à valoriser un portefeuille sans lignes. '
+          + 'L’identifiant CoinGecko est celui de l’URL de la page du coin '
+          + '(coingecko.com/fr/pieces/bitcoin → « bitcoin »).')));
       }
       if (App.tabs.wealth.RATE.includes(t)) {
         add('Taux annuel (%)', 'taux_annuel', { type: 'number', step: '0.01' });
-        metaHost.append(App.h('p', { class: 'hint', style: 'grid-column:1/-1' },
-          'Les livrets ne se cotent pas : leurs intérêts sont calculés par quinzaines '
-          + '(un versement porte intérêt au 1er ou au 16 suivant) et capitalisés '
-          + 'au 31 décembre. Aucun appel réseau.'));
+        metaHost.append(App.h('div', { style: 'grid-column:1/-1' }, App.note('Comment les intérêts sont calculés',
+          'Par quinzaines : un versement porte intérêt au 1er ou au 16 suivant. '
+          + 'Ils sont capitalisés au 31 décembre. Aucun appel réseau.')));
       }
       if (t === 'Custom') {
         metaHost.append(App.h('p', { class: 'hint' },

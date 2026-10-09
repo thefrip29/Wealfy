@@ -168,8 +168,10 @@ sans l'application, voir la section suivante.
 
 ### Sauvegardes CSV
 
-*Paramètres → Sauvegardes → **Sauvegarder maintenant***. Chaque sauvegarde est
-un dossier horodaté dans `sauvegarde/`, à côté de la base :
+Une sauvegarde est prise à chaque lancement, si quelque chose a changé depuis
+la précédente. *Paramètres → Données et apparence → **Sauvegarder maintenant***
+en prend une à la demande. Chaque sauvegarde est un dossier horodaté dans
+`sauvegarde/`, à côté de la base :
 
 ```
 sauvegarde/2026-08-11_20h27/
