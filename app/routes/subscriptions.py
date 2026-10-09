@@ -20,7 +20,12 @@ def detect_subscriptions():
     indiscernable d'un abonnement par les seuls chiffres. Ce n'en est pas un,
     et le compter gonflerait le total annuel d'une somme qui reste chez vous.
     """
-    mois = as_int(request.args.get("mois"), MOIS_PAR_DEFAUT)
+    trouves = detecter_depuis_la_base(as_int(request.args.get("mois"), MOIS_PAR_DEFAUT))
+    return jsonify({"abonnements": trouves, **abonnements.resume(trouves)})
+
+
+def detecter_depuis_la_base(mois=MOIS_PAR_DEFAUT):
+    """Abonnements de l'historique. Partage avec les observations."""
     neutres = set(get_setting("categories_transfert", []) or [])
     neutres |= set(get_setting("categories_non_depense", []) or [])
 
@@ -30,6 +35,4 @@ def detect_subscriptions():
         (f"-{int(mois)} months",),
     ))
     lignes = [l for l in lignes if (l["category"] or "") not in neutres]
-
-    trouves = abonnements.detecter(lignes)
-    return jsonify({"abonnements": trouves, **abonnements.resume(trouves)})
+    return abonnements.detecter(lignes)

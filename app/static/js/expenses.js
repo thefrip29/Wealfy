@@ -4,7 +4,7 @@ App.tabs.expenses = {
 
   async load() {
     const month = App.state.month;
-    const [flows, txs, imports, abos] = await Promise.all([
+    const [flows, txs, imports, abos, ecarts] = await Promise.all([
       App.api.get(`/api/month?month=${month}`),
       App.api.get(`/api/transactions?month=${month}`),
       App.api.get('/api/imports'),
@@ -12,6 +12,7 @@ App.tabs.expenses = {
       // deux ans. Charges ici pour ne pas ajouter un aller-retour a l'ouverture
       // de l'onglet.
       App.api.get('/api/subscriptions').catch(() => null),
+      App.api.get(`/api/ecarts?month=${month}`).catch(() => []),
     ]);
     App.tabs.expenses.cache = { transactions: txs, month };
     App.el('#ex-month-label').textContent = App.fmt.month(month);
@@ -19,7 +20,14 @@ App.tabs.expenses = {
     App.tabs.expenses.renderKpis(flows);
     App.tabs.expenses.renderBudgets(flows);
     App.tabs.expenses.renderAbonnements(abos);
+    App.tabs.expenses.renderEcarts(ecarts);
     App.tabs.expenses.fillCategoryFilter();
+    // Arrivée depuis le camembert ou un budget : la catégorie est filtrée
+    // d'emblée, la recherche vidée pour ne pas masquer ce qu'on vient voir.
+    if (App.tabs.expenses.filtreAPoser) {
+      App.tabs.expenses.poserFiltre(App.tabs.expenses.filtreAPoser);
+      App.tabs.expenses.filtreAPoser = null;
+    }
     App.tabs.expenses.renderTable();
     App.tabs.expenses.renderImports(imports);
   },
@@ -148,7 +156,10 @@ App.tabs.expenses = {
       const reel = depense[cat] || 0;
       const part = prevu > 0 ? (100 * reel) / prevu : 0;
       const depasse = reel > prevu;
-      host.append(App.h('div', { class: 'rep-row' },
+      host.append(App.h('button', {
+        class: 'rep-row cliquable', title: 'Voir les transactions',
+        onclick: () => { App.tabs.expenses.poserFiltre(cat); App.tabs.expenses.renderTable(); },
+      },
         App.h('div', { class: 'rep-head' },
           App.h('span', {}, cat),
           App.h('span', {},
@@ -162,6 +173,47 @@ App.tabs.expenses = {
             class: `rep-real${depasse ? ' depasse' : ''}`,
             style: `width:${Math.min(100, part)}%`,
           }))));
+    }
+  },
+
+  filtreAPoser: null,
+
+  poserFiltre(categorie) {
+    const sel = App.el('#ex-filter-cat');
+    if (![...sel.options].some((o) => o.value === categorie)) {
+      sel.append(App.h('option', { value: categorie }, categorie));
+    }
+    sel.value = categorie;
+    App.el('#ex-search').value = '';
+  },
+
+  /* Les catégories nettement au-dessus de leur moyenne des douze mois
+     précédents. La question qu'on se pose en fin de mois — « où est passé
+     l'argent ? » — sans avoir à comparer de tête. Un clic filtre la liste. */
+  renderEcarts(ecarts) {
+    const carte = App.el('#ex-ecarts-card');
+    const host = App.el('#ex-ecarts');
+    App.clear(host);
+    carte.hidden = !ecarts || !ecarts.length;
+    if (carte.hidden) return;
+    App.el('#ex-ecarts-sub').textContent =
+      `par rapport à la moyenne des ${ecarts[0].nb_mois} mois précédents`;
+    for (const e of ecarts) {
+      const part = e.montant > 0 ? (100 * e.habituel) / e.montant : 0;
+      host.append(App.h('button', {
+        class: 'rep-row cliquable', title: 'Voir les transactions',
+        onclick: () => { App.tabs.expenses.poserFiltre(e.category); App.tabs.expenses.renderTable(); },
+      },
+        App.h('div', { class: 'rep-head' },
+          App.h('span', {}, e.category),
+          App.h('span', {},
+            App.h('span', { class: 'pill warn' }, `+${App.fmt.eur(e.ecart, true)}`),
+            ' ',
+            App.h('span', { class: 'sub' },
+              `${App.fmt.eur(e.montant, true)}, habituellement ${App.fmt.eur(e.habituel, true)}`))),
+        App.h('div', { class: 'rep-bars' },
+          App.h('div', { class: 'rep-real depasse', style: 'width:100%' }),
+          App.h('div', { class: 'rep-target', style: `left:${part}%` }))));
     }
   },
 
@@ -233,9 +285,13 @@ App.tabs.expenses = {
       const enregistrer = async () => {
         if (sel.value === t.category) { afficher(); return; }
         try {
-          await App.api.put(`/api/transactions/${t.id}`, { category: sel.value });
+          const res = await App.api.put(`/api/transactions/${t.id}`, { category: sel.value });
           t.category = sel.value;
-          App.toast('Catégorie mise à jour', 'success');
+          if (res.regle_proposee) {
+            App.tabs.expenses.proposerRegle(res.regle_proposee, sel.value);
+          } else {
+            App.toast('Catégorie mise à jour', 'success');
+          }
           await App.refreshOthers();
         } catch (e) { App.toast(e.message, 'error'); }
         afficher();
@@ -247,6 +303,25 @@ App.tabs.expenses = {
     };
     afficher();
     return cell;
+  },
+
+  /* Une correction à la main vaut souvent pour tout un marchand. Le toast
+     propose d'en faire une règle, comme le bandeau d'import le fait : la
+     question ne reviendra pas au prochain relevé. */
+  proposerRegle(racine, categorie) {
+    App.toast(`Catégorie mise à jour. Toujours « ${categorie} » pour ${racine} ?`,
+      'success', 8000, {
+        libelle: 'Créer la règle',
+        faire: async () => {
+          try {
+            await App.api.post('/api/rules', { pattern: racine, valeur: categorie });
+            const res = await App.api.post('/api/rules/apply', { seulement_non_categorise: true });
+            App.toast(`Règle créée${res.modifiees ? `, ${res.modifiees} autre(s) ligne(s) classée(s)` : ''}`,
+              'success');
+            await App.refreshAll();
+          } catch (e) { App.toast(e.message, 'error'); }
+        },
+      });
   },
 
   /* Barre d'actions groupées, visible dès la première ligne cochée. */

@@ -7,6 +7,7 @@ from .. import advisor, finance, market, services
 from ..db import get_setting, query, rows_to_list
 from ._blueprint import bp
 from ._helpers import as_date, as_int, month_param
+from .subscriptions import detecter_depuis_la_base
 
 
 @bp.get("/api/overview")
@@ -19,7 +20,8 @@ def overview():
     # si le mois est en cours), pour rester coherent avec les flux affiches.
     _, last_day = finance.month_bounds(year, month)
     as_of = min(last_day, date.today())
-    snap = services.portfolio(as_of)
+    cache = services.shared_cache()
+    snap = services.portfolio(as_of, cache=cache)
     metrics = services.metrics(as_of)
     repartition = services.repartition(as_of, snap)
     etat_marche = {
@@ -39,7 +41,10 @@ def overview():
         ),
         # Observations factuelles, calculees sur ce qui vient d'etre mesure.
         "alertes": advisor.alertes(snap, metrics, repartition, etat_marche,
-                                   at_date=as_of),
+                                   at_date=as_of,
+                                   abonnements=detecter_depuis_la_base()),
+        # D'ou vient la variation du patrimoine net sur le mois.
+        "variation": services.variation_du_mois(as_of, snap, cache),
         "mois": current,
         "mois_precedent": previous,
         "variation_depenses": round(current["depenses"] - previous["depenses"], 2),
@@ -86,6 +91,13 @@ def history():
         "archive": list(reversed(services.monthly_archive(limit))),
         "imports": rows_to_list(query("SELECT * FROM imports ORDER BY date_import DESC")),
     })
+
+
+@bp.get("/api/ecarts")
+def ecarts_endpoint():
+    """Categories nettement au-dessus de leur habitude sur le mois."""
+    year, month = month_param()
+    return jsonify(services.ecarts_du_mois(year, month))
 
 
 @bp.get("/api/metrics")

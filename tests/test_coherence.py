@@ -209,5 +209,116 @@ class TestRatios(ApiTestCase):
         self.assertEqual(self.get("/api/meta")["mois_precaution_cible"], 6)
 
 
+class TestDecompositionDeLaVariation(ApiTestCase):
+    """La variation du net, decoupee en quatre parts qui tombent juste."""
+
+    def setUp(self):
+        super().setUp()
+        self.debut = finance.add_months(date.today(), -2).replace(day=1).isoformat()
+        self.montre = self.post("/api/assets", {
+            "type": "Custom", "label": "Montre", "date_acquisition": "2020-01-01",
+            "valeur_acquisition": 1000})["id"]
+        self.livret = self.post("/api/assets", {
+            "type": "Custom", "label": "Coffre", "date_acquisition": "2020-01-01",
+            "valeur_acquisition": 5000})["id"]
+
+    def variation(self):
+        return self.get(f"/api/overview?month={cle_mois()}")["variation"]
+
+    def test_les_parts_somment_a_la_variation_du_heros(self):
+        jour = date.today().replace(day=1).isoformat()
+        self.post(f"/api/assets/{self.livret}/movements",
+                  {"type": "versement", "montant": 400, "date": jour})
+        self.post(f"/api/assets/{self.montre}/valorisation",
+                  {"valeur": 1150, "date": jour})
+        ov = self.get(f"/api/overview?month={cle_mois()}")
+        v = ov["variation"]
+        serie = ov["patrimoine_serie"]
+        self.assertEqual(v["variation"],
+                         round(serie[-1]["patrimoine_net"] - serie[-2]["patrimoine_net"], 2))
+        self.assertEqual(v["apports"], 400.0)
+        self.assertEqual(v["performance"], 150.0)
+        self.assertAlmostEqual(
+            v["apports"] + v["performance"] + v["immobilier"] + v["dettes"],
+            v["variation"], places=2)
+
+    def test_clore_est_un_retrait_pas_une_perte(self):
+        self.client.put(f"/api/assets/{self.montre}", json={"archived": True})
+        v = self.variation()
+        self.assertEqual(v["apports"], -1000.0)
+        self.assertEqual(v["performance"], 0.0)
+
+    def test_un_pret_qui_s_amortit_est_un_remboursement(self):
+        self.post("/api/liabilities", {
+            "type": "PretConso", "label": "Auto", "montant_emprunte": 12000,
+            "taux_annuel": 3, "duree_mois": 48, "date_debut": "2024-01-05"})
+        v = self.variation()
+        self.assertGreater(v["dettes"], 0)
+        self.assertEqual(v["variation"], v["dettes"])
+
+    def test_l_archive_porte_la_meme_decomposition(self):
+        jour = date.today().replace(day=1).isoformat()
+        self.post(f"/api/assets/{self.livret}/movements",
+                  {"type": "versement", "montant": 250, "date": jour})
+        ligne = {r["mois"]: r for r in self.get("/api/history")["archive"]}[cle_mois()]
+        self.assertEqual(ligne["variation"], self.variation())
+
+
+class TestEcartsDuMois(ApiTestCase):
+
+    def depense(self, offset, montant, cat="Restaurants"):
+        d = finance.add_months(date.today(), offset).replace(day=3)
+        self.post("/api/transactions", {"date": d.isoformat(), "description": cat,
+                                        "amount": -montant, "category": cat})
+
+    def test_une_categorie_au_dessus_de_son_habitude(self):
+        for i in range(1, 7):
+            self.depense(-i, 180)
+            self.depense(-i, 300, "Alimentation")
+        self.depense(0, 420)
+        self.depense(0, 310, "Alimentation")
+        ecarts = self.get(f"/api/ecarts?month={cle_mois()}")
+        self.assertEqual([e["category"] for e in ecarts], ["Restaurants"])
+        self.assertEqual(ecarts[0]["habituel"], 180.0)
+        self.assertEqual(ecarts[0]["ecart"], 240.0)
+
+    def test_sans_recul_on_ne_dit_rien(self):
+        self.depense(-1, 100)
+        self.depense(0, 900)
+        self.assertEqual(self.get(f"/api/ecarts?month={cle_mois()}"), [])
+
+
+class TestAbonnementsObserves(unittest.TestCase):
+
+    def abo(self, **k):
+        base = {"libelle": "NETFLIX", "periodicite": "mensuel", "montant": 15.99,
+                "cout_annuel": 191.88, "actif": True, "jours_depuis": 10,
+                "dernier": date.today().isoformat(), "augmentation": None}
+        base.update(k)
+        return base
+
+    def regle(self, abos):
+        from app.advisor import _abonnements
+        return _abonnements(abos, date.today())
+
+    def test_une_hausse_recente_remonte(self):
+        recent = (date.today() - timedelta(days=20)).isoformat()
+        out = self.regle([self.abo(augmentation={
+            "avant": 13.49, "apres": 15.99, "hausse": 2.5, "pct": 18.5,
+            "depuis": recent})])
+        self.assertEqual(len(out), 1)
+        self.assertIn("30,00", out[0]["detail"].replace(" ", " "))
+
+    def test_une_hausse_ancienne_se_tait(self):
+        vieux = (date.today() - timedelta(days=400)).isoformat()
+        self.assertEqual(self.regle([self.abo(augmentation={
+            "avant": 13.49, "apres": 15.99, "hausse": 2.5, "pct": 18.5,
+            "depuis": vieux})]), [])
+
+    def test_un_arret_recent_remonte_un_arret_ancien_non(self):
+        self.assertEqual(len(self.regle([self.abo(actif=False, jours_depuis=60)])), 1)
+        self.assertEqual(self.regle([self.abo(actif=False, jours_depuis=500)]), [])
+
+
 if __name__ == "__main__":
     unittest.main()

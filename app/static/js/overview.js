@@ -156,7 +156,12 @@ App.tabs.overview = {
             class: 'btn small',
             onclick: () => App.settings.open(),
           }, 'Régler')
-          : null);
+          : (a.action === 'expenses'
+            ? App.h('button', {
+              class: 'btn small',
+              onclick: () => App.showTab('expenses'),
+            }, 'Voir')
+            : null));
 
       carte.append(App.h('div', { class: 'alerte' },
         App.h('span', {
@@ -192,6 +197,7 @@ App.tabs.overview = {
       meta.append(App.h('span', {}, 'sur un mois'));
     }
     meta.append(App.h('span', { class: 'sub' }, `arrêté au ${App.fmt.date(data.as_of)}`));
+    const pourquoi = App.tabs.overview.decomposition(data.variation);
 
     const stat = (label, value, cls) => App.h('div', { class: 'hero-stat' },
       App.h('div', { class: 's-label' }, label),
@@ -201,13 +207,33 @@ App.tabs.overview = {
       App.h('div', { class: 'hero-main' },
         App.h('div', { class: 'hero-label' }, 'Patrimoine net'),
         App.h('div', { class: 'hero-value' }, App.fmt.eur(m.patrimoine_net)),
-        meta),
+        meta, pourquoi),
       App.h('div', { class: 'hero-side' },
         stat('Actifs', App.fmt.eur(m.total_actif, true)),
         stat('Dettes', m.total_passif ? `− ${App.fmt.eur(m.total_passif, true)}` : '—',
           m.total_passif ? 'neg' : ''),
         stat('Épargne du mois', App.fmt.eur(data.mois.epargne, true),
           data.mois.epargne > 0 ? 'pos' : '')));
+  },
+
+  /* D'où vient la variation du mois. Le ▲ disait combien, pas pourquoi :
+     un mois à +2 000 € peut n'être que de l'épargne versée, sans que les
+     placements aient rien rapporté. Quatre parts, dont la somme tombe au
+     centime sur la variation (`services.decomposer_variation`). Une part
+     nulle n'est pas affichée, sauf la performance : zéro y est une réponse. */
+  decomposition(v) {
+    if (!v || !v.variation) return null;
+    const parts = [
+      ['Apports', v.apports, 'versements et retraits'],
+      ['Performance', v.performance, 'plus-values et intérêts'],
+      ['Immobilier', v.immobilier, 'réévaluation des biens'],
+      ['Dettes', v.dettes, v.dettes >= 0 ? 'capital remboursé' : 'nouvel emprunt'],
+    ].filter(([nom, x]) => nom === 'Performance' || Math.abs(x) >= 0.01);
+    return App.h('div', { class: 'hero-pourquoi' },
+      ...parts.map(([nom, x, aide]) => App.h('span', { title: aide },
+        `${nom} `,
+        App.h('span', { class: `montant ${x > 0 ? 'pos' : x < 0 ? 'neg' : ''}` },
+          App.fmt.signed(x)))));
   },
 
   /* ==================================================================
@@ -539,6 +565,14 @@ App.tabs.overview = {
       },
       options: {
         cutout: '62%',
+        // Du graphique à la liste : une part mène aux transactions qui la
+        // composent, sur le même mois.
+        onClick: (_e, elements) => {
+          if (elements.length) App.voirCategorie(cats[elements[0].index].category);
+        },
+        onHover: (e, elements) => {
+          e.native.target.style.cursor = elements.length ? 'pointer' : '';
+        },
         plugins: {
           legend: { position: 'right' },
           tooltip: {

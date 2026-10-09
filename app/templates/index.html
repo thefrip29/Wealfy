@@ -198,6 +198,15 @@
 
     <div class="kpi-grid" id="ex-kpis"></div>
 
+    <!-- Ce qui sort de l'habitude ce mois-ci. Masquee quand rien ne depasse :
+         une carte vide ne dit rien. -->
+    <div class="card" id="ex-ecarts-card" hidden>
+      <div class="card-head">
+        <h3>Inhabituel ce mois-ci <span class="sub" id="ex-ecarts-sub"></span></h3>
+      </div>
+      <div id="ex-ecarts" class="repartition"></div>
+    </div>
+
     <!-- Les prelevements recurrents, deduits des seules transactions. Masquee
          tant qu'aucun n'est reconnu : une carte vide ne dit rien. -->
     <div class="card" id="ex-abos-card" hidden>
@@ -323,25 +332,13 @@
   <section class="panel" id="tab-history">
     <div class="card">
       <div class="card-head">
-        <h3>Archive mensuelle</h3>
+        <h3>Archive</h3>
+        <div class="actions">
+          <!-- Deux lectures du meme passe : par mois, ou par categorie. -->
+          <div class="segmente" id="hi-vue"></div>
+        </div>
       </div>
-      <div class="table-wrap">
-        <table class="table" id="hi-archive">
-          <thead>
-            <tr>
-              <th>Mois</th>
-              <th class="right">Revenus</th>
-              <th class="right">Dépenses</th>
-              <th class="right">Solde</th>
-              <th class="right">Épargne</th>
-              <th class="right">Taux d'épargne</th>
-              <th class="right">Patrimoine net</th>
-              <th>Répartition atteinte</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
+      <div id="hi-contenu"></div>
     </div>
 
   </section>

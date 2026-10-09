@@ -280,6 +280,66 @@ def gain_annuel(at_date=None, snap=None, cache=None):
     }
 
 
+def fin_du_mois_precedent(at_date):
+    """Date d'arret du mois qui precede celui de `at_date`."""
+    d = finance.add_months(at_date.replace(day=1), -1)
+    return min(finance.month_bounds(d.year, d.month)[1], date.today())
+
+
+def decomposer_variation(apres, avant):
+    """D'ou vient l'ecart de patrimoine net entre deux photos.
+
+    Quatre parts, dont la somme tombe au centime sur la variation :
+
+    - **apports** : l'argent mis dans les produits ou repris (versements,
+      retraits, produit ouvert ou clos). Ce n'est pas un enrichissement, c'est
+      de l'epargne qui change de poche ;
+    - **performance** : ce que les placements ont rapporte ou perdu, interets
+      de livret compris. C'est l'ecart de plus-value des produits detenus des
+      deux cotes ;
+    - **immobilier** : la meme chose pour les biens, a part, parce qu'une
+      reevaluation par indice n'est pas un gain realisable ;
+    - **dettes** : le capital rembourse (positif), ou emprunte (negatif).
+
+    Un produit ouvert compte en entier comme apport, un produit clos en
+    entier comme retrait : clore n'est ni gagner ni perdre.
+    """
+    av = {a["id"]: a for a in avant["assets"]}
+    ap = {a["id"]: a for a in apres["assets"]}
+    apports = immobilier = 0.0
+    for aid, a in ap.items():
+        b = av.get(aid)
+        if b is None:
+            apports += a["valeur"]
+            continue
+        apports += a["investi"] - b["investi"]
+        if a["famille"] == "Immobilier":
+            immobilier += a["plus_value"] - b["plus_value"]
+    for aid, b in av.items():
+        if aid not in ap:
+            apports -= b["valeur"]
+    variation = round(apres["patrimoine_net"] - avant["patrimoine_net"], 2)
+    dettes = round(avant["total_passif"] - apres["total_passif"], 2)
+    apports, immobilier = round(apports, 2), round(immobilier, 2)
+    return {
+        "variation": variation,
+        "apports": apports,
+        # Par difference : la somme des quatre parts est exacte par
+        # construction, sans residu d'arrondi a expliquer.
+        "performance": round(variation - apports - immobilier - dettes, 2),
+        "immobilier": immobilier,
+        "dettes": dettes,
+    }
+
+
+def variation_du_mois(at_date, snap=None, cache=None):
+    """Decomposition de la variation du net sur le mois de `at_date`."""
+    cache = shared_cache(cache)
+    snap = snap or portfolio(at_date, cache=cache)
+    avant = portfolio(fin_du_mois_precedent(at_date), cache=cache)
+    return decomposer_variation(snap, avant)
+
+
 def net_worth_at(at_date):
     return portfolio(at_date)["patrimoine_net"]
 
@@ -597,13 +657,18 @@ def monthly_archive(limit=None):
     # du temps de rendu de l'onglet Historique.
     cache = shared_cache()
     out = []
+    precedent = None
     for key in keys:
         year, month = int(key[:4]), int(key[5:])
         flows = month_flows(year, month, cache)
         _, last_day = finance.month_bounds(year, month)
         as_of = min(last_day, date.today())
         snap = portfolio(as_of, cache=cache)
+        if precedent is None:
+            precedent = portfolio(fin_du_mois_precedent(as_of), cache=cache)
         rep = repartition(as_of, snap)
+        variation = decomposer_variation(snap, precedent)
+        precedent = snap
         out.append({
             "mois": key,
             "depenses": flows["depenses"],
@@ -615,6 +680,9 @@ def monthly_archive(limit=None):
             "patrimoine_net": snap["patrimoine_net"],
             "total_actif": snap["total_actif"],
             "total_passif": snap["total_passif"],
+            "variation": variation,
+            # Montant par categorie, pour la vue categories x mois.
+            "categories": {c["category"]: c["montant"] for c in flows["par_categorie"]},
             "repartition": [
                 {"label": b["label"], "reel_pct": b["reel_pct"], "cible_pct": b["cible_pct"]}
                 for b in rep["buckets"]
@@ -853,6 +921,50 @@ def assets_series(months=12, reference=None):
         })
     series.sort(key=lambda s: -(s["valeurs"][-1] or 0))
     return {"mois": mois, "series": series}
+
+
+# Un ecart ne se signale qu'au-dela de ces deux bornes : 50 % au-dessus de
+# l'habitude, et au moins 50 EUR. Sans la seconde, un cafe de plus suffisait.
+ECART_RELATIF = 1.5
+ECART_MINIMAL = 50.0
+
+
+def ecarts_du_mois(year, month, mois_reference=12):
+    """Les categories nettement au-dessus de leur habitude ce mois-ci.
+
+    L'habitude est la moyenne des douze mois precedents, comptee seulement
+    depuis le debut des donnees : avant le premier releve, une categorie
+    n'etait pas a zero, elle etait inconnue. C'est un constat chiffre, pas un
+    conseil, comme les observations.
+    """
+    cache = flows_cache()
+    courant = month_flows(year, month, cache)
+    debut, _ = data_range()
+    premier = date(debut.year, debut.month, 1)
+    historique = []
+    for i in range(1, mois_reference + 1):
+        d = finance.add_months(date(year, month, 1), -i)
+        if d < premier:
+            break
+        historique.append(month_flows(d.year, d.month, cache))
+    if len(historique) < 3:
+        return []          # trop peu de recul pour parler d'habitude
+    out = []
+    for c in courant["par_categorie"]:
+        moyenne = sum(
+            next((x["montant"] for x in h["par_categorie"]
+                  if x["category"] == c["category"]), 0.0)
+            for h in historique) / len(historique)
+        if (c["montant"] >= ECART_RELATIF * moyenne
+                and c["montant"] - moyenne >= ECART_MINIMAL):
+            out.append({
+                "category": c["category"],
+                "montant": c["montant"],
+                "habituel": round(moyenne, 2),
+                "ecart": round(c["montant"] - moyenne, 2),
+                "nb_mois": len(historique),
+            })
+    return sorted(out, key=lambda e: -e["ecart"])[:5]
 
 
 def expense_series(months=6, reference=None):

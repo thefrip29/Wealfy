@@ -480,6 +480,13 @@ App.setMonth = async function (ym, sens) {
   await App.showTab(App.currentTab, sens || null);
 };
 
+/* Depuis un graphique ou un budget : les transactions d'une catégorie, sur le
+   mois affiché. Le filtre est posé avant le rendu de l'onglet. */
+App.voirCategorie = async function (categorie) {
+  App.tabs.expenses.filtreAPoser = categorie;
+  await App.showTab('expenses');
+};
+
 /* Depuis l'archive : on change de mois ET d'onglet. Le mois est posé sans
    rendu, pour n'avoir qu'une seule transition au lieu de deux enchaînées. */
 App.goToMonth = async function (ym) {

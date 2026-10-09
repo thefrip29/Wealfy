@@ -190,9 +190,16 @@ App.esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
 App.clear = (node) => { while (node && node.firstChild) node.removeChild(node.firstChild); };
 
 /* ---------- toasts ---------- */
-App.toast = function (message, kind = 'info', ms = 3600) {
+/* `action` : { libelle, faire } — un seul bouton, qui ferme le toast. */
+App.toast = function (message, kind = 'info', ms = 3600, action = null) {
   const host = App.el('#toast-host');
   const node = App.h('div', { class: `toast ${kind}` }, message);
+  if (action) {
+    node.append(App.h('button', {
+      class: 'toast-action',
+      onclick: () => { node.remove(); action.faire(); },
+    }, action.libelle));
+  }
   host.append(node);
   setTimeout(() => {
     node.classList.add('leaving');

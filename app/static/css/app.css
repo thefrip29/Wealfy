@@ -623,6 +623,43 @@ main[data-slide="prev"] .panel-leaving.go .leaving-item { animation-name: carous
   font-weight: var(--weight-medium); letter-spacing: -.035em;
   line-height: 1.05; font-variant-numeric: tabular-nums;
 }
+/* D'ou vient la variation : une ligne discrete sous le heros. */
+.hero-pourquoi {
+  display: flex; flex-wrap: wrap; gap: 4px 16px;
+  margin-top: 8px; font-size: 12.5px; color: var(--muted);
+}
+.hero-pourquoi .montant { margin-left: 2px; }
+
+/* Une rangee de repartition qui mene a la liste filtree. */
+button.rep-row.cliquable {
+  display: block; width: 100%; text-align: left;
+  background: none; border: 0; padding: 0; font: inherit; color: inherit;
+  cursor: pointer;
+}
+button.rep-row.cliquable:hover .rep-head > span:first-child { color: var(--action); }
+
+/* Historique : une annee se resume en une ligne, et se deplie. */
+.table tr.annee td { font-weight: 600; background: var(--bg-surface-alt); }
+.annee-btn {
+  background: none; border: 0; padding: 0; font: inherit; color: inherit;
+  cursor: pointer; white-space: nowrap;
+}
+.annee-btn .sub { font-weight: 400; }
+.table.compacte td, .table.compacte th { padding-left: 6px; padding-right: 6px; }
+.table td.cliquable[title] { cursor: pointer; }
+.table td.cliquable[title]:hover { color: var(--action); }
+/* Le mois le plus lourd de chaque categorie. */
+.table td.pic { color: var(--perte); font-weight: 600; }
+.rep-ligne { white-space: nowrap; font-size: var(--fs-xs); }
+.alerte-txt { color: var(--alerte); }
+.table td.moyenne { color: var(--muted); border-left: 1px solid var(--line-soft); }
+
+.toast-action {
+  margin-left: 12px; background: none; border: 1px solid currentColor;
+  border-radius: 6px; padding: 2px 8px; font: inherit; color: inherit;
+  cursor: pointer; pointer-events: auto;
+}
+
 .hero-meta {
   display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
   margin-top: var(--space-3); font-size: var(--fs-sm); color: var(--muted);

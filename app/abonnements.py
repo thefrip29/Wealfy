@@ -86,7 +86,8 @@ def _augmentation(lignes):
     """
     montants = [l["montant"] for l in lignes]
     dernier = montants[-1]
-    for precedent in reversed(montants[:-1]):
+    for i in range(len(montants) - 2, -1, -1):
+        precedent = montants[i]
         if abs(precedent - dernier) < 0.01:
             continue
         if dernier > precedent:
@@ -95,6 +96,9 @@ def _augmentation(lignes):
                 "apres": round(dernier, 2),
                 "hausse": round(dernier - precedent, 2),
                 "pct": round(100 * (dernier - precedent) / precedent, 1),
+                # Premier prelevement au nouveau prix : une hausse vieille de
+                # deux ans n'a plus rien a signaler.
+                "depuis": iso(lignes[i + 1]["date"]),
             }
         return None
     return None

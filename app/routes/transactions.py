@@ -2,6 +2,7 @@
 from flask import jsonify, request
 
 from .. import importer
+from ..classifier import racine_marchand
 from ..db import execute, new_id, query, row_to_dict, rows_to_list
 from ._blueprint import bp
 from ._helpers import as_date, as_float, as_int, body, fail
@@ -94,9 +95,16 @@ def update_transaction(tid):
         return fail("Rien a modifier.")
     args.append(tid)
     execute(f"UPDATE transactions SET {', '.join(fields)} WHERE id = ?", args)
-    return jsonify(row_to_dict(
-        query("SELECT * FROM transactions WHERE id = ?", (tid,), one=True)
-    ))
+    out = row_to_dict(query("SELECT * FROM transactions WHERE id = ?", (tid,), one=True))
+    # Classer a la main une ligne, c'est souvent repondre pour tout un
+    # marchand. L'interface propose d'en faire une regle, sauf si une regle
+    # porte deja ce motif : la question ne doit pas revenir au prochain releve.
+    if "category" in data and out["category"] != existing["category"]:
+        racine = racine_marchand(out["description"] or "")
+        if racine and not query("SELECT 1 FROM rules WHERE lower(pattern) = lower(?)",
+                                (racine,), one=True):
+            out["regle_proposee"] = racine
+    return jsonify(out)
 
 
 @bp.post("/api/transactions/categorie")
