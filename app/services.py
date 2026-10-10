@@ -148,11 +148,78 @@ def market_context(at_date=None, cache=None):
     }
 
 
+NOTE_SOLDE_DECLARE = "Solde declare a la creation"
+
+
+def flux_de_valorisation(asset, movements):
+    """L'argent entre ou sorti d'un livret, lu sur ses valorisations.
+
+    Un livret ne fait pas de plus-value : ses interets sont calcules a part.
+    Quand on recale son solde sur le releve, l'ecart avec le solde precedent
+    est donc un depot ou un retrait, pas un gain. Le compter comme une
+    plus-value faisait passer 458 EUR verses sur un Livret A pour une
+    performance, et les laissait hors de l'epargne du mois.
+
+    L'ecart se mesure au solde juste avant : la valorisation precedente, plus
+    les interets credites et les mouvements depuis. Avant toute valorisation,
+    le montant declare, sans interets inventes (voir `finance.valeur_livret`).
+    Le solde pose a la creation n'est pas un flux : c'est le point de depart.
+    """
+    if asset["type"] not in market.RATE_ASSET_TYPES:
+        return []
+    # Memorise sur les donnees elles-memes : la meme cle ne peut pas donner
+    # un autre resultat, donc jamais de valeur perimee. Sans cela, l'archive
+    # rejouait ce calcul pour chaque mois et chaque livret.
+    cle = (asset["id"], asset["valeur_acquisition"], str(asset.get("metadata")),
+           asset["date_acquisition"], market.date_credit_interets(),
+           tuple((m.get("id"), m["date"], m["montant"], m["type"], m.get("note"),
+                  m.get("created_at")) for m in movements))
+    if cle in _FLUX_MEMO:
+        return _FLUX_MEMO[cle]
+    if len(_FLUX_MEMO) > 2048:
+        _FLUX_MEMO.clear()
+    _FLUX_MEMO[cle] = _flux_de_valorisation(asset, movements)
+    return _FLUX_MEMO[cle]
+
+
+_FLUX_MEMO = {}
+
+
+def _flux_de_valorisation(asset, movements):
+    ordre = sorted(movements, key=lambda m: (
+        finance.parse_date(m["date"]) or date.min, m.get("created_at") or ""))
+    out = []
+    for i, mv in enumerate(ordre):
+        if mv["type"] != "valorisation" or (mv.get("note") or "") == NOTE_SOLDE_DECLARE:
+            continue
+        d = finance.parse_date(mv["date"])
+        if d is None:
+            continue
+        avant = ordre[:i]
+        if any(m["type"] == "valorisation" for m in avant):
+            solde = market.rate_value(asset, avant, d)
+            if solde is None:
+                solde = finance.asset_value_at(asset, avant, d, use_manual_current=False)
+        else:
+            solde = float(asset["valeur_acquisition"] or 0) + sum(
+                float(m["montant"] or 0) for m in avant
+                if m["type"] in ("versement", "retrait", "frais"))
+        ecart = round(float(mv["montant"] or 0) - solde, 2)
+        if abs(ecart) >= 0.01:
+            out.append((d, ecart))
+    return out
+
+
 def asset_detail(asset, movements, at_date=None, ctx=None):
     at_date = finance.parse_date(at_date) or date.today()
     is_today = at_date >= date.today()
     saisie = finance.asset_value_at(asset, movements, at_date, use_manual_current=is_today)
     invested = finance.invested_amount(asset, movements, at_date)
+    # Sur un livret, ce qu'une valorisation ajoute ou retire est de l'argent
+    # verse ou repris : il entre dans le capital investi, pas dans la
+    # plus-value.
+    invested = round(invested + sum(
+        e for d, e in flux_de_valorisation(asset, movements) if d <= at_date), 2)
 
     # Valeur calculée, par ordre de préférence. Chaque source renvoie None si
     # elle ne peut pas produire un chiffre complet : on retombe alors sur la
@@ -430,18 +497,35 @@ def flows_cache(cache=None):
 
 
 def _versements(debut=None, fin=None):
-    """Versements sur les actifs (hors compte courant), dates et montants."""
+    """Argent net mis dans les actifs (hors compte courant), date par date.
+
+    Versements MOINS retraits : un echange de crypto passe par un retrait et
+    un versement du meme montant, et seule la moitie versee etait comptee :
+    50 EUR d'epargne fantome en septembre pour trois echanges. Un retrait
+    reel, lui, est de l'epargne reprise.
+
+    Les livrets y ajoutent l'argent lu sur leurs valorisations
+    (`flux_de_valorisation`).
+    """
     sql = ("SELECT m.montant, m.date, a.type FROM asset_movements m "
-           "JOIN assets a ON a.id = m.asset_id WHERE m.type = 'versement'")
+           "JOIN assets a ON a.id = m.asset_id "
+           "WHERE m.type IN ('versement', 'retrait')")
     args = []
     if debut is not None:
         sql += " AND m.date >= ? AND m.date <= ?"
         args = [finance.iso(debut), finance.iso(fin)]
-    return [
+    out = [
         (finance.parse_date(r["date"]), round(float(r["montant"] or 0), 2))
         for r in query(sql, args)
         if r["type"] != "CompteCourant" and r["date"]
     ]
+    livrets = [a for a in get_assets(True) if a["type"] in market.RATE_ASSET_TYPES]
+    groupes = movements_by_asset() if livrets else {}
+    for asset in livrets:
+        for d, ecart in flux_de_valorisation(asset, groupes.get(asset["id"], [])):
+            if debut is None or debut <= d <= fin:
+                out.append((d, ecart))
+    return out
 
 
 def _deja_verse(t, versements, utilises, tolerance):

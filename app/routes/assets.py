@@ -88,7 +88,7 @@ def create_asset():
             "INSERT INTO asset_movements(id, asset_id, date, montant, type, note) "
             "VALUES (?,?,?,?,'valorisation',?)",
             (new_id(), aid, aujourdhui, round(actuelle, 2),
-             "Solde declare a la creation"),
+             services.NOTE_SOLDE_DECLARE),
         )
     return jsonify(row_to_dict(query("SELECT * FROM assets WHERE id = ?", (aid,), one=True))), 201
 

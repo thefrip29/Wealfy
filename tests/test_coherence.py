@@ -346,5 +346,49 @@ class TestTriAnnualise(ApiTestCase):
         self.assertFalse(marche["tri_moins_d_un_an"])
 
 
+class TestEpargneLueSurLesLivrets(ApiTestCase):
+    """Recaler un livret sur le releve, c'est dire combien on y a mis."""
+
+    def setUp(self):
+        super().setUp()
+        self.jour = date.today().replace(day=1).isoformat()
+        self.livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A", "date_acquisition": "2003-10-02",
+            "valeur_acquisition": 4000, "metadata": {"taux_annuel": 2.4}})["id"]
+
+    def test_une_hausse_de_solde_est_de_l_epargne_pas_une_plus_value(self):
+        self.post(f"/api/assets/{self.livret}/valorisation",
+                  {"valeur": 4458, "date": self.jour})
+        self.assertEqual(self.get(f"/api/month?month={cle_mois()}")["epargne"], 458.0)
+        livret = {a["id"]: a for a in self.get("/api/assets")["assets"]}[self.livret]
+        self.assertEqual(livret["plus_value"], 0.0)
+        self.assertEqual(self.get(f"/api/overview?month={cle_mois()}")["variation"]["apports"], 458.0)
+
+    def test_une_baisse_de_solde_est_un_retrait(self):
+        self.post(f"/api/assets/{self.livret}/valorisation",
+                  {"valeur": 3756, "date": self.jour})
+        self.assertEqual(self.get(f"/api/month?month={cle_mois()}")["epargne"], -244.0)
+
+    def test_le_solde_pose_a_la_creation_n_est_pas_un_versement(self):
+        self.post("/api/assets", {"type": "Livret", "label": "LDDS",
+                                  "date_acquisition": "2015-01-01",
+                                  "valeur_acquisition": 100, "valeur_actuelle": 2000})
+        self.assertEqual(self.get(f"/api/month?month={cle_mois()}")["epargne"], 0.0)
+
+
+class TestUnEchangeNEstPasDeLEpargne(ApiTestCase):
+
+    def test_retrait_et_versement_s_annulent(self):
+        jour = date.today().replace(day=1).isoformat()
+        c = self.post("/api/assets", {"type": "Crypto", "label": "Crypto",
+                                      "date_acquisition": "2024-01-01",
+                                      "valeur_acquisition": 0})["id"]
+        self.post(f"/api/assets/{c}/movements",
+                  {"type": "retrait", "montant": 25.59, "date": jour, "ticker": "bitcoin"})
+        self.post(f"/api/assets/{c}/movements",
+                  {"type": "versement", "montant": 25.59, "date": jour, "ticker": "tether"})
+        self.assertEqual(self.get(f"/api/month?month={cle_mois()}")["epargne"], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()
