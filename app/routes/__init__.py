@@ -14,6 +14,7 @@ l'adressage. Les URL n'ont donc pas bouge, et aucun prefixe n'est ajoute.
     quotes        cours de marche
     settings      parametres et regles de categorisation
     backups       sauvegardes CSV
+    exports       images PNG des graphiques
     transfers     virements internes
     subscriptions abonnements et prelevements recurrents
 
@@ -28,6 +29,7 @@ from . import (                                                  # noqa: F401
     assets,
     backups,
     bank_imports,
+    exports,
     liabilities,
     movements,
     page,

@@ -1486,3 +1486,36 @@ class TestVersementsDuMois(ApiTestCase):
         pos = self.get(f"/api/assets/{av}/positions")
         self.assertEqual(pos["lignes"], [])
         self.assertEqual(pos["investi_total"], 200.0)
+
+
+class TestExportPng(ApiTestCase):
+    """Un graphique enregistre en PNG, sans jamais sortir de son dossier."""
+
+    PNG = "data:image/png;base64," + __import__("base64").b64encode(
+        b"\x89PNG\r\n\x1a\n" + b"\x00" * 16).decode()
+
+    def setUp(self):
+        super().setUp()
+        self.dossier = tempfile.mkdtemp()
+        self.app.config["EXPORT_DIR"] = self.dossier
+
+    def tearDown(self):
+        __import__("shutil").rmtree(self.dossier, ignore_errors=True)
+        super().tearDown()
+
+    def test_ecrit_sans_ecraser(self):
+        a = self.post("/api/export/png", {"image": self.PNG, "nom": "depenses-2026-10"})
+        b = self.post("/api/export/png", {"image": self.PNG, "nom": "depenses-2026-10"})
+        self.assertEqual(a["fichier"], "depenses-2026-10.png")
+        self.assertEqual(b["fichier"], "depenses-2026-10 (2).png")
+        self.assertEqual(sorted(os.listdir(self.dossier)), sorted([a["fichier"], b["fichier"]]))
+
+    def test_le_nom_ne_sort_pas_du_dossier(self):
+        res = self.post("/api/export/png", {"image": self.PNG, "nom": "../../evil"})
+        self.assertEqual(os.path.dirname(res["chemin"]), self.dossier)
+
+    def test_refuse_ce_qui_n_est_pas_un_png(self):
+        for image in ("", "data:image/jpeg;base64,AAAA", "data:image/png;base64,QUJD"):
+            res = self.client.post("/api/export/png", json={"image": image})
+            self.assertEqual(res.status_code, 400)
+        self.assertEqual(os.listdir(self.dossier), [])

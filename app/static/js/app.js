@@ -584,6 +584,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     (e) => App.tabs.wealth.refreshQuotes(e.target));
   App.el('#we-add').addEventListener('click', () => App.tabs.wealth.openAddChooser());
   App.el('#we-versements').addEventListener('click', () => App.tabs.wealth.openVersementsDuMois());
+  App.el('#ov-cat-png').addEventListener('click', () => App.tabs.overview.exporterCategoriesPNG());
 
   App.state.month = localStorage.getItem('patrimoine.month') || App.monthISO();
   App.setMonthLabel(App.state.month);

@@ -1045,6 +1045,8 @@ input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
 
 .grid-2 > .card.expanded { grid-column: 1 / -1; }
 .card-extra:empty { display: none; }
+/* Une action discrète au pied d'une carte de graphique. */
+.card-pied { display: flex; justify-content: flex-end; margin-top: var(--space-3); }
 .card-extra { margin-top: var(--space-4); }
 
 /* Agrandie, la carte devient elle-même une grille : graphique à gauche,

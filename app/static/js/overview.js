@@ -535,6 +535,108 @@ App.tabs.overview = {
     });
   },
 
+  /* Les dépenses du mois en image, à garder ou à partager.
+
+     L'image est dessinée ici plutôt que copiée du canevas : celui-ci suit le
+     thème (fond sombre la nuit) et sa légende ne porte pas les montants.
+     Fond clair, montant et part de chaque catégorie, total en tête. Le
+     masquage des montants est respecté : seules les parts sont écrites. */
+  async exporterCategoriesPNG() {
+    const mois = (App.tabs.overview.dernier || {}).mois;
+    const cats = (mois && mois.par_categorie) || [];
+    if (!cats.length) return App.toast('Aucune dépense ce mois-ci.', 'info');
+    const total = cats.reduce((s, c) => s + c.montant, 0);
+    const masque = App.privacyOn();
+    const police = '-apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
+
+    const L = 1200, haut = 150, pas = 46;
+    const H = Math.max(620, haut + cats.length * pas + 60);
+    const k = 2;
+    const cv = document.createElement('canvas');
+    cv.width = L * k; cv.height = H * k;
+    const g = cv.getContext('2d');
+    g.scale(k, k);
+    g.fillStyle = '#FFFFFF';
+    g.fillRect(0, 0, L, H);
+
+    g.fillStyle = '#1D1D1F';
+    g.font = `600 30px ${police}`;
+    g.fillText('Dépenses par catégorie', 56, 70);
+    g.fillStyle = '#6E6E73';
+    g.font = `400 20px ${police}`;
+    const mot = App.fmt.month(mois.mois);
+    g.fillText(mot.charAt(0).toUpperCase() + mot.slice(1)
+      + (masque ? '' : `  ·  ${App.fmt.eur(total)}`), 56, 104);
+
+    // Anneau : mêmes couleurs, même ordre que le graphique de la page.
+    const cx = 300, cy = haut + (H - haut) / 2 - 10, R = 210, r = R * 0.62;
+    let a = -Math.PI / 2;
+    cats.forEach((c, i) => {
+      const b = a + (2 * Math.PI * c.montant) / total;
+      g.beginPath();
+      g.arc(cx, cy, R, a, b);
+      g.arc(cx, cy, r, b, a, true);
+      g.closePath();
+      g.fillStyle = App.chartColors[i % App.chartColors.length];
+      g.fill();
+      a = b;
+    });
+    g.textAlign = 'center';
+    g.fillStyle = '#1D1D1F';
+    g.font = `650 32px ${police}`;
+    g.fillText(masque ? `${cats.length}` : App.fmt.eur(total, true), cx, cy + 6);
+    g.fillStyle = '#6E6E73';
+    g.font = `400 17px ${police}`;
+    g.fillText(masque ? 'catégories' : 'dépensés', cx, cy + 34);
+
+    // Légende chiffrée.
+    // Centrée face à l'anneau tant qu'elle tient dans sa hauteur.
+    const x0 = 600, x1 = L - 56;
+    const y0 = Math.max(haut + 20, cy + 6 - ((cats.length - 1) * pas) / 2);
+    cats.forEach((c, i) => {
+      const y = y0 + i * pas;
+      g.fillStyle = App.chartColors[i % App.chartColors.length];
+      g.beginPath();
+      g.roundRect(x0, y - 15, 18, 18, 5);
+      g.fill();
+      g.textAlign = 'left';
+      g.fillStyle = '#1D1D1F';
+      g.font = `500 20px ${police}`;
+      g.fillText(c.category, x0 + 32, y);
+      g.textAlign = 'right';
+      g.fillStyle = '#6E6E73';
+      g.font = `400 18px ${police}`;
+      const part = App.fmt.pct(100 * c.montant / total, 1);
+      if (masque) {
+        g.fillText(part, x1, y);
+      } else {
+        g.fillText(part, x1 - 150, y);
+        g.fillStyle = '#1D1D1F';
+        g.font = `600 20px ${police}`;
+        g.fillText(App.fmt.eur(c.montant), x1, y);
+      }
+    });
+    g.textAlign = 'left';
+    g.fillStyle = '#A1A1A6';
+    g.font = `400 14px ${police}`;
+    g.fillText('Wealfy', 56, H - 28);
+
+    const bouton = App.el('#ov-cat-png');
+    bouton.classList.add('busy');
+    try {
+      const res = await App.api.post('/api/export/png', {
+        image: cv.toDataURL('image/png'),
+        nom: `depenses-${mois.mois}`,
+        montrer: true,
+      });
+      App.toast(`Image enregistrée : ${res.fichier} (Téléchargements)`, 'success', 5000);
+    } catch (e) {
+      App.toast(e.message, 'error');
+    } finally {
+      bouton.classList.remove('busy');
+    }
+  },
+
   renderRepartition(rep, metrics) {
     const host = App.el('#ov-repartition');
     App.clear(host);
