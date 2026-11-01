@@ -182,7 +182,7 @@ App.tabs.overview = {
     host.append(
       App.h('div', { class: 'hero-main' },
         App.h('div', { class: 'hero-label' }, 'Patrimoine net'),
-        App.h('div', { class: 'hero-value' }, App.fmt.eur(m.patrimoine_net)),
+        App.tabs.overview.heroValeur(m.patrimoine_net),
         meta, pourquoi),
       App.h('div', { class: 'hero-side' },
         stat('Actifs', App.fmt.eur(m.total_actif, true)),
@@ -190,6 +190,15 @@ App.tabs.overview = {
           m.total_passif ? 'neg' : ''),
         stat('Épargne du mois', App.fmt.eur(data.mois.epargne, true),
           data.mois.epargne > 0 ? 'pos' : '')));
+  },
+
+  /* Le patrimoine net défile jusqu'à sa valeur. L'élément est gardé d'un
+     rendu à l'autre pour que le défilement parte du chiffre précédent. */
+  heroValeur(net) {
+    const el = App.tabs.overview.heroEl
+      || (App.tabs.overview.heroEl = App.h('div', { class: 'hero-value' }));
+    App.compter(el, net, (v) => App.fmt.eur(v));
+    return el;
   },
 
   /* D'où vient la variation du mois. Le ▲ disait combien, pas pourquoi :

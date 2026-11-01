@@ -6,6 +6,9 @@
 <title>Wealfy</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+<!-- La matiere : verre translucide. Retirer cette ligne rend les surfaces
+     opaques sans rien changer d'autre. -->
+<link rel="stylesheet" href="{{ url_for('static', filename='css/glass.css') }}">
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/icon.svg') }}">
 <script>
   /* Thème posé AVANT le premier rendu, pour éviter le flash blanc.
@@ -22,9 +25,11 @@
   (function () {
     var choix = null;
     try { choix = localStorage.getItem('wealfy.theme'); } catch (e) { /* ignore */ }
+    // Clair par defaut : le verre clair est l'apparence de reference. Le
+    // suivi du systeme reste un choix, dans les reglages.
     var sombre = choix === 'sombre' ? true
-      : choix === 'clair' ? false
-      : window.matchMedia('(prefers-color-scheme: dark)').matches;
+      : choix === 'systeme' ? window.matchMedia('(prefers-color-scheme: dark)').matches
+      : false;
     document.documentElement.setAttribute('data-theme', sombre ? 'dark' : 'light');
   })();
 
@@ -106,8 +111,8 @@
       <button class="icon-btn" id="month-next" title="Mois suivant">&#8250;</button>
     </div>
     <button class="icon-btn" id="toggle-privacy"
-            title="Masquer les montants" aria-pressed="true">&#128065;</button>
-    <button class="icon-btn" id="open-settings" title="Paramètres">&#9881;</button>
+            title="Masquer les montants" aria-pressed="true"></button>
+    <button class="icon-btn" id="open-settings" title="Paramètres" aria-label="Paramètres"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M21.2 12h-2.4M5.2 12H2.8M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7M18.5 18.5l-1.7-1.7M7.2 7.2L5.5 5.5"/><circle cx="12" cy="12" r="6.6"/></svg></button>
   </div>
 </header>
 

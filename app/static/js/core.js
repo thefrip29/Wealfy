@@ -795,7 +795,31 @@ App.themeChoisi = function () {
     const v = localStorage.getItem(App.CLE_THEME);
     if (App.THEMES.includes(v)) return v;
   } catch (e) { /* ignore */ }
-  return 'systeme';
+  // Clair par défaut : voir le script en tête d'index.html.
+  return 'clair';
+};
+
+/* Un montant qui défile jusqu'à sa valeur, depuis celle qu'il affichait.
+
+   Au premier affichage il part de zéro ; ensuite, d'un mois à l'autre, il
+   part du chiffre précédent : on voit le patrimoine monter ou descendre au
+   lieu d'un chiffre remplacé. Courbe qui freine à l'arrivée, 900 ms, comme
+   le déroulement des blocs. Mouvement réduit : la valeur finale, d'emblée. */
+App.compter = function (el, valeur, format) {
+  const depart = Number(el.dataset.valeur);
+  el.dataset.valeur = String(valeur);
+  const reduit = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduit || !Number.isFinite(valeur)) { el.textContent = format(valeur); return; }
+  const de = Number.isFinite(depart) ? depart : 0;
+  const duree = 900;
+  const t0 = performance.now();
+  const pas = (t) => {
+    const p = Math.min(1, (t - t0) / duree);
+    const e = 1 - Math.pow(1 - p, 4);
+    el.textContent = format(p < 1 ? de + (valeur - de) * e : valeur);
+    if (p < 1 && el.isConnected) requestAnimationFrame(pas);
+  };
+  requestAnimationFrame(pas);
 };
 
 App.systemeEnSombre = () => window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -835,8 +859,15 @@ App.setPrivacy = function (on) {
   if (btn) {
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
     btn.title = on ? 'Afficher les montants' : 'Masquer les montants';
-    btn.innerHTML = on ? '&#128065;' : '&#128584;';
+    // Icônes au trait plutôt qu'emoji : un emoji arrive en couleur, dans le
+    // style du système, et jure avec le reste de la barre.
+    btn.innerHTML = on ? App.ICONES.oeilBarre : App.ICONES.oeil;
   }
+};
+
+App.ICONES = {
+  oeil: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+  oeilBarre: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/><path d="M4 4l16 16"/></svg>',
 };
 
 App.privacyOn = () => document.body.classList.contains('privacy');
@@ -898,6 +929,15 @@ App.chart = function (canvasId, config) {
     },
   };
   config.options = App.deepMerge(defaults, config.options || {});
+  // Parts de camembert arrondies et légèrement séparées, comme les anneaux
+  // d'Apple ; barres aux coins adoucis. Un réglage explicite l'emporte.
+  for (const ds of (config.data && config.data.datasets) || []) {
+    if (config.type === 'doughnut' && (config.data.datasets[0].data || []).length > 1) {
+      ds.borderRadius ??= 6;
+      ds.spacing ??= 2;
+    }
+    if (config.type === 'bar' && ds.type !== 'line') ds.borderRadius = Math.max(ds.borderRadius || 0, 6);
+  }
   App.state.charts[canvasId] = new Chart(canvas, config);
   return App.state.charts[canvasId];
 };

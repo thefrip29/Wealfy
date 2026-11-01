@@ -9,6 +9,41 @@ Comment l'application se présente et se manipule.
 
 ## Interface
 
+### Verre clair
+
+Depuis novembre 2026, l'interface suit le langage d'Apple : des surfaces de
+verre translucides posées sur un fond pastel en mouvement. Les couleurs sont
+dans `tokens.css` ; le verre (flou, reflet, ombre) dans `glass.css`, chargée
+après `app.css`. Retirer cette ligne de `index.html` rend les surfaces
+opaques sans rien changer d'autre.
+
+- **Couleurs.** Un seul accent, le bleu d'Apple. Le bouton plein prend celui
+  d'apple.com (`#0071E3`, 4,6:1 sous un libellé blanc), un cran plus profond
+  que `#007AFF`, qui n'y tient que 4,0:1. Gains, pertes et alertes reprennent
+  les couleurs système dans leur version lisible en texte.
+- **Le verre.** Fond translucide, flou saturé de ce qui passe dessous, filet
+  clair en haut du bord et ombre longue. Il habille cartes, indicateurs,
+  observations, modales, menus, calendrier et toasts, jamais les conteneurs
+  de `RANGEES`, qui ne doivent rien peindre.
+- **La barre du haut** flotte en capsule. Une pilule de verre glisse sous
+  l'onglet actif : le même élément unique qu'avant, habillé autrement.
+- **Le mouvement.** Les durées restent celles d'`app.css`. Une seule courbe
+  s'ajoute, `--spring`, réservée aux gestes : la pilule d'onglet, un bouton
+  qu'on enfonce, une modale qui jaillit. Le survol soulève les indicateurs de
+  quelques pixels. Ces gestes passent par les propriétés `translate` et
+  `scale` : les animations d'entrée écrivent `transform` jusqu'à leur fin et
+  écraseraient tout déplacement qui passerait par lui. Le patrimoine net
+  défile jusqu'à sa valeur, en partant de la précédente (`App.compter`).
+- **Typographie.** La police du système (SF Pro, Segoe UI Variable). Les
+  montants gardent leurs chiffres tabulaires mais quittent la chasse fixe ;
+  les ISIN et les motifs la gardent (`--font-code`).
+- **Thème.** Clair par défaut. Le sombre devient un verre fumé, le suivi du
+  système reste un choix dans les réglages. L'écran de lancement est toujours
+  clair, pour ne pas précéder l'application d'un éclair noir.
+
+Ce qui suit décrit l'identité précédente, « kaki & bronze ». Elle colore
+encore le logo et l'écran de lancement ; le reste de l'interface l'a quittée.
+
 **`app/static/css/tokens.css` fait autorité sur l'identité visuelle.** `app.css`
 n'écrit **aucune couleur en dur** — il ne consomme que des *rôles*
 (`--bg-page`, `--action`, `--gain`…). Remplacer ce seul fichier suffit à changer
