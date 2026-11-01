@@ -23,6 +23,43 @@ LCL_TEXT = """Date;Libelle;Debit;Credit
 """
 
 
+# Export LCL réel, sans en-tête, libellés anonymisés : une ligne de solde en
+# tête et en pied, le libellé d'un débit et celui d'un crédit dans deux
+# colonnes différentes.
+LCL_SANS_ENTETE = """\ufeff01/10/2026;1201,39;;05834 123456B
+01/10/2026;-10,71;Carte;;CB  AU FIN GOURMET   30/09/26;;0;Divers
+01/10/2026;120;Virement;;;VIR.PERMANENT DUPONT;;
+02/10/2026;-29,62;Carte;;CB  LIDL 2687        01/10/26;;0;Divers
+05/10/2026;-83,33;Prélèvement;;ECHEANCE PRET PERSONNEL 051026;;;
+29/10/2026;17;Virement;;;VIREMENT SNCF MOBILITES VOYAGES;;
+30/10/2026;-1 047,00;Carte;;CB  SNCF-VOYAGEURS   28/10/26;;0;Divers
+31/10/2026;1717,88;;05834 123456B
+"""
+
+
+class TestCsvSansEntete(unittest.TestCase):
+    """Un CSV au point-virgule sans titres de colonnes, dans l'ordre de LCL."""
+
+    def setUp(self):
+        self.lignes, self.avert = importer.parse_statement(LCL_SANS_ENTETE)
+
+    def test_toutes_les_operations_et_rien_d_autre(self):
+        self.assertEqual(len(self.lignes), 6)
+        self.assertIn("2 ligne(s) de solde écartée(s).", self.avert)
+
+    def test_montants_signes_et_libelles(self):
+        par_libelle = {l["description"]: l["amount"] for l in self.lignes}
+        self.assertEqual(par_libelle["CB  AU FIN GOURMET   30/09/26"], -10.71)
+        self.assertEqual(par_libelle["VIR.PERMANENT DUPONT"], 120.0)
+        self.assertEqual(par_libelle["VIREMENT SNCF MOBILITES VOYAGES"], 17.0)
+        self.assertEqual(par_libelle["CB  SNCF-VOYAGEURS   28/10/26"], -1047.0)
+        self.assertEqual(par_libelle["ECHEANCE PRET PERSONNEL 051026"], -83.33)
+
+    def test_dates(self):
+        self.assertEqual(self.lignes[0]["date"], "2026-10-01")
+        self.assertEqual(self.lignes[-1]["date"], "2026-10-30")
+
+
 class TestAmountParsing(unittest.TestCase):
     def test_formats(self):
         self.assertEqual(importer.parse_amount("-25.30"), -25.30)
@@ -56,7 +93,9 @@ class TestStatementParsing(unittest.TestCase):
         lines, warnings = importer.parse_statement(
             "2024-01-05;Boulangerie;-4,20\n2024-01-06;Pharmacie;-18,00")
         self.assertEqual(len(lines), 2)
-        self.assertTrue(any("positionnelle" in w for w in warnings))
+        # L'absence d'en-tête est toujours signalée, quelle que soit la
+        # lecture qui a pris le relais.
+        self.assertTrue(any("En-tête" in w for w in warnings))
         self.assertEqual(lines[0]["amount"], -4.20)
 
     def test_empty_input(self):

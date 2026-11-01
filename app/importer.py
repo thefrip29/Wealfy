@@ -174,6 +174,88 @@ def _match_header(headers, candidates):
     return None
 
 
+# Une cellule de montant ne contient QUE des chiffres, des séparateurs et un
+# signe. Sans ce garde-fou, `parse_amount` lirait « 01/10/2026 » comme
+# 1102026 et « CB LIDL 2687 » comme 2687.
+_CELLULE_MONTANT = re.compile(r"[\s\-+()€$£\d.,\xa0\u202f]+")
+
+
+def _est_montant(cellule):
+    v = (cellule or "").strip()
+    return bool(v) and bool(_CELLULE_MONTANT.fullmatch(v)) \
+        and parse_date(v) is None and parse_amount(v) is not None
+
+
+def _deviner_colonnes(rows, seuil=.8):
+    """Colonnes d'un relevé délimité SANS ligne d'en-tête.
+
+    Certaines banques exportent un CSV sans titres de colonnes, et pas dans
+    l'ordre date, libellé, montant. LCL écrit par exemple :
+
+        date ; montant ; type ; n° de chèque ; libellé débit ; libellé crédit ;
+        … ; catégorie
+
+    encadré par deux lignes de solde (date ; solde ; ; n° de compte). La
+    lecture positionnelle prenait le montant pour le libellé et le type pour
+    le montant : un quart des lignes passait, sans libellé, crédits lus comme
+    des débits.
+
+    On regarde donc ce que CONTIENT chaque colonne, sur les lignes de la
+    largeur la plus fréquente : la date est la colonne où presque tout est une
+    date, le montant celle où presque tout est un nombre. Renvoie
+    (colonne date, colonne montant, largeur), ou None si rien ne s'impose.
+    """
+    larges = [r for r in rows if len(r) >= 3]
+    if len(larges) < 2:
+        return None
+    largeurs = {}
+    for r in larges:
+        largeurs[len(r)] = largeurs.get(len(r), 0) + 1
+    largeur = max(largeurs, key=lambda n: (largeurs[n], n))
+    typiques = [r for r in larges if len(r) == largeur]
+
+    def part(i, test):
+        return sum(1 for r in typiques if test(r[i])) / len(typiques)
+
+    col_date = max(range(largeur), key=lambda i: part(i, lambda v: parse_date((v or "").strip()) is not None))
+    if part(col_date, lambda v: parse_date((v or "").strip()) is not None) < seuil:
+        return None
+    candidates = [i for i in range(largeur) if i != col_date]
+    col_montant = max(candidates, key=lambda i: (part(i, _est_montant), -i))
+    if part(col_montant, _est_montant) < seuil:
+        return None
+    return col_date, col_montant, largeur
+
+
+def _ligne_de_solde(row, col_date, col_montant, largeur):
+    """Ligne d'une autre largeur dont le seul texte est un numéro de compte.
+
+    C'est la forme des soldes d'ouverture et de clôture : les compter comme
+    des opérations ajouterait le solde entier aux revenus du mois.
+    """
+    if len(row) == largeur:
+        return False
+    textes = [c.strip() for i, c in enumerate(row)
+              if i not in (col_date, col_montant) and (c or "").strip()]
+    if not textes:
+        return True
+    chiffres = sum(ch.isdigit() for t in textes for ch in t)
+    return chiffres >= .5 * sum(len(t.replace(" ", "")) for t in textes)
+
+
+def _libelle_le_plus_long(row, exclues):
+    """Le libellé : la plus longue cellule de texte de la ligne.
+
+    LCL range le libellé d'un débit et celui d'un crédit dans deux colonnes
+    différentes, et laisse l'autre vide ; le type (« Carte ») et la catégorie
+    (« Divers ») sont plus courts que tout libellé réel.
+    """
+    textes = [c.strip() for i, c in enumerate(row)
+              if i not in exclues and (c or "").strip()
+              and not _est_montant(c) and parse_date(c.strip()) is None]
+    return max(textes, key=len) if textes else ""
+
+
 def _sniff_delimiter(sample: str) -> str:
     lines = [l for l in sample.splitlines() if l.strip()][:10]
     best, best_score = ",", -1
@@ -598,7 +680,21 @@ def parse_statement(text: str):
                   and (idx_amount is not None or idx_debit is not None
                        or idx_credit is not None))
     body = raw_rows[1:] if has_header else raw_rows
-    if not has_header:
+    devinees = None if has_header else _deviner_colonnes(raw_rows)
+    soldes = 0
+    if devinees:
+        # Sans en-tête, mais des colonnes qui se reconnaissent à leur contenu.
+        col_date, col_montant, largeur = devinees
+        idx_date, idx_amount, idx_desc = col_date, col_montant, None
+        warnings.append(
+            "En-tête absent : colonnes reconnues à leur contenu "
+            "(date, montant, libellé le plus long)."
+        )
+        idx_debit = idx_credit = idx_fee = idx_state = idx_currency = None
+        avant = len(body)
+        body = [r for r in body if not _ligne_de_solde(r, col_date, col_montant, largeur)]
+        soldes = avant - len(body)
+    elif not has_header:
         warnings.append(
             "En-tête non reconnu : lecture positionnelle (date, libellé, montant)."
         )
@@ -635,6 +731,8 @@ def parse_statement(text: str):
             continue
 
         desc = cell(idx_desc)
+        if not desc and devinees:
+            desc = _libelle_le_plus_long(row, (idx_date, idx_amount))
         if not desc:
             # Reprend la première colonne texte non numérique disponible.
             for i, c in enumerate(row):
@@ -667,6 +765,8 @@ def parse_statement(text: str):
 
     if skipped:
         warnings.append(f"{skipped} ligne(s) ignorée(s) (date ou montant illisible).")
+    if soldes:
+        warnings.append(f"{soldes} ligne(s) de solde écartée(s).")
     if not lines:
         warnings.append("Aucune transaction reconnue dans ce contenu.")
     return lines, warnings
