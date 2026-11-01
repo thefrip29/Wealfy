@@ -315,11 +315,11 @@ App.placeIndicator = function () {
   const actif = App.el('.tab.active');
   if (!barre || !trait || !actif) return;
 
-  // Le trait s'arrête à la marge interne du bouton, comme l'ancien ::after :
-  // il souligne le mot, pas la zone cliquable.
-  const marge = parseFloat(getComputedStyle(actif).paddingLeft) || 0;
-  barre.style.setProperty('--indicator-x', `${actif.offsetLeft + marge}px`);
-  barre.style.setProperty('--indicator-w', `${actif.offsetWidth - 2 * marge}px`);
+  // La pilule de verre couvre l'onglet entier. Elle reprenait le calage de
+  // l'ancien trait, arrêté aux marges du mot : 28 px trop étroite, elle
+  // laissait déborder le libellé de part et d'autre.
+  barre.style.setProperty('--indicator-x', `${actif.offsetLeft}px`);
+  barre.style.setProperty('--indicator-w', `${actif.offsetWidth}px`);
 
   // Première pose sans animation, sinon le trait arriverait en glissant depuis
   // le bord gauche au chargement de la page.
@@ -583,6 +583,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   App.el('#we-refresh-quotes').addEventListener('click',
     (e) => App.tabs.wealth.refreshQuotes(e.target));
   App.el('#we-add').addEventListener('click', () => App.tabs.wealth.openAddChooser());
+  App.el('#we-versements').addEventListener('click', () => App.tabs.wealth.openVersementsDuMois());
 
   App.state.month = localStorage.getItem('patrimoine.month') || App.monthISO();
   App.setMonthLabel(App.state.month);

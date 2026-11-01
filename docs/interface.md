@@ -387,7 +387,8 @@ leur base.
 
 ### Mes versements du mois
 
-La case *Taux d'épargne* porte un bouton **+ Mes versements**. Le salaire
+L'onglet *Patrimoine* porte, dans l'en-tête de la carte Actifs, un bouton
+**+ Versements du mois**. Le salaire
 d'octobre tombe fin octobre et s'investit début novembre : la fenêtre propose
 donc par défaut le **mois écoulé**, une ligne par livret ou placement ouvert,
 et date les versements du **dernier jour de ce mois** pour qu'ils comptent dans
@@ -406,8 +407,9 @@ seconde fois comme épargne.
 
 Le héros donnait la variation du patrimoine net, ▲ ou ▼. Un mois à +2 000 €
 peut pourtant n'être que de l'épargne versée, sans que les placements aient
-rien rapporté. Une ligne sous le héros la découpe en quatre parts
-(`services.decomposer_variation`) :
+rien rapporté. `services.decomposer_variation` la découpe en quatre parts.
+Elles ne s'affichent plus sous le héros (retirées en novembre 2026, avec la
+date d'arrêt) ; l'archive de l'Historique les garde :
 
 | Part | Ce qu'elle compte |
 |---|---|

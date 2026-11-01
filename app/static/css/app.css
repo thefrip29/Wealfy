@@ -623,12 +623,6 @@ main[data-slide="prev"] .panel-leaving.go .leaving-item { animation-name: carous
   font-weight: var(--weight-medium); letter-spacing: -.035em;
   line-height: 1.05; font-variant-numeric: tabular-nums;
 }
-/* D'ou vient la variation : une ligne discrete sous le heros. */
-.hero-pourquoi {
-  display: flex; flex-wrap: wrap; gap: 4px 16px;
-  margin-top: 8px; font-size: 12.5px; color: var(--muted);
-}
-.hero-pourquoi .montant { margin-left: 2px; }
 
 /* Une rangee de repartition qui mene a la liste filtree. */
 button.rep-row.cliquable {

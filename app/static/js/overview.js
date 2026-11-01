@@ -25,28 +25,6 @@ App.tabs.overview = {
     App.tabs.overview.renderRepartition(data.repartition, data.metrics);
   },
 
-  /* Le reste à vivre, en cinquième case de la rangée d'indicateurs.
-
-     Il avait sa carte, « Mon mois », qui répétait les revenus et l'épargne
-     déjà affichés juste au-dessus. Il rejoint la rangée ; son détail
-     (charges fixes, mensualités et leurs ratios) se déplie dans la case.
-
-     Deux situations que le même zéro ne sépare pas : le réglage n'a jamais
-     été fait, ou il l'est mais le mois n'a pas de revenu. Elles n'appellent
-     pas la même phrase. */
-  /* Le taux d'épargne, et de quoi saisir ses versements du mois écoulé. */
-  kpiEpargne(cur) {
-    const k = App.tabs.overview.kpi("Taux d'épargne",
-      cur.taux_epargne === null ? '—' : App.fmt.ratio(cur.taux_epargne),
-      `${App.fmt.eur(cur.epargne)} épargnés sur ${App.fmt.eur(cur.revenus)} de revenus`,
-      cur.taux_epargne !== null && cur.taux_epargne >= 0.2 ? 'good' : '');
-    k.append(App.h('button', {
-      class: 'btn small', style: 'margin-top:8px',
-      onclick: () => App.tabs.wealth.openVersementsDuMois(),
-    }, '+ Mes versements'));
-    return k;
-  },
-
   /* Accueil d'une base vide.
 
      Les deux points d'entree existaient deja, mais sur les onglets Patrimoine
@@ -145,8 +123,6 @@ App.tabs.overview = {
       }
       meta.append(App.h('span', {}, 'sur un mois'));
     }
-    meta.append(App.h('span', { class: 'sub' }, `arrêté au ${App.fmt.date(data.as_of)}`));
-    const pourquoi = App.tabs.overview.decomposition(data.variation);
 
     const stat = (label, value, cls) => App.h('div', { class: 'hero-stat' },
       App.h('div', { class: 's-label' }, label),
@@ -156,7 +132,7 @@ App.tabs.overview = {
       App.h('div', { class: 'hero-main' },
         App.h('div', { class: 'hero-label' }, 'Patrimoine net'),
         App.tabs.overview.heroValeur(m.patrimoine_net),
-        meta, pourquoi),
+        meta),
       App.h('div', { class: 'hero-side' },
         stat('Actifs', App.fmt.eur(m.total_actif, true)),
         stat('Dettes', m.total_passif ? `− ${App.fmt.eur(m.total_passif, true)}` : '—',
@@ -172,26 +148,6 @@ App.tabs.overview = {
       || (App.tabs.overview.heroEl = App.h('div', { class: 'hero-value' }));
     App.compter(el, net, (v) => App.fmt.eur(v));
     return el;
-  },
-
-  /* D'où vient la variation du mois. Le ▲ disait combien, pas pourquoi :
-     un mois à +2 000 € peut n'être que de l'épargne versée, sans que les
-     placements aient rien rapporté. Quatre parts, dont la somme tombe au
-     centime sur la variation (`services.decomposer_variation`). Une part
-     nulle n'est pas affichée, sauf la performance : zéro y est une réponse. */
-  decomposition(v) {
-    if (!v || !v.variation) return null;
-    const parts = [
-      ['Apports', v.apports, 'versements et retraits'],
-      ['Performance', v.performance, 'plus-values et intérêts'],
-      ['Immobilier', v.immobilier, 'réévaluation des biens'],
-      ['Dettes', v.dettes, v.dettes >= 0 ? 'capital remboursé' : 'nouvel emprunt'],
-    ].filter(([nom, x]) => nom === 'Performance' || Math.abs(x) >= 0.01);
-    return App.h('div', { class: 'hero-pourquoi' },
-      ...parts.map(([nom, x, aide]) => App.h('span', { title: aide },
-        `${nom} `,
-        App.h('span', { class: `montant ${x > 0 ? 'pos' : x < 0 ? 'neg' : ''}` },
-          App.fmt.signed(x)))));
   },
 
   /* ==================================================================
@@ -446,7 +402,10 @@ App.tabs.overview = {
         cur.transferts_internes
           ? `hors ${App.fmt.eur(cur.transferts_internes)} de virements internes`
           : `${cur.nb_revenus} ligne(s) de revenu`),
-      App.tabs.overview.kpiEpargne(cur),
+      App.tabs.overview.kpi("Taux d'épargne",
+        cur.taux_epargne === null ? '—' : App.fmt.ratio(cur.taux_epargne),
+        `${App.fmt.eur(cur.epargne)} épargnés sur ${App.fmt.eur(cur.revenus)} de revenus`,
+        cur.taux_epargne !== null && cur.taux_epargne >= 0.2 ? 'good' : ''),
       App.tabs.overview.kpi("Couverture d'urgence",
         m.mois_couverture_urgence === null ? '—' : `${App.fmt.num(m.mois_couverture_urgence, 1)} mois`,
         `${App.fmt.eur(m.solde_livrets, true)} de livrets`,
