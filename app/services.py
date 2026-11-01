@@ -427,14 +427,23 @@ def repartition(at_date=None):
     if isinstance(buckets, dict):  # ancien format {type: pct}
         buckets = [{"label": k, "types": [k], "pct": v} for k, v in buckets.items()]
 
-    verse = versements_declares(debut, fin)
-    if not verse:
+    declares = versements_declares(debut, fin)
+    verse = dict(declares)
+    if not declares:
         for r in query("SELECT asset_id, type, montant FROM asset_movements "
                        "WHERE type IN ('versement', 'retrait') AND date >= ? AND date <= ?",
                        [finance.iso(debut), finance.iso(fin)]):
             signe = 1 if r["type"] == "versement" else -1
             verse[r["asset_id"]] = verse.get(r["asset_id"], 0) + signe * abs(float(r["montant"] or 0))
     actifs = [a for a in get_assets(True) if a["type"] != "CompteCourant"]
+    if not declares:
+        # Comme l'epargne du mois : l'argent lu sur la valorisation d'un livret.
+        groupes = movements_by_asset()
+        for a in actifs:
+            if a["type"] in market.RATE_ASSET_TYPES:
+                for d, ecart in flux_de_valorisation(a, groupes.get(a["id"], [])):
+                    if debut <= d <= fin:
+                        verse[a["id"]] = verse.get(a["id"], 0) + ecart
 
     # Une poche sans type coche se reconnait a son nom : celui d'un type
     # (« PEA ») ou celui d'un de vos produits (« Livret A »). Elle ne cherchait
