@@ -394,3 +394,52 @@ input[type=search] { border-radius: 999px; padding-left: 14px; }
 @media (max-width: 620px) {
   .hero-value { font-size: 34px; }
 }
+
+/* ---------- fluidité ----------
+   Le verre floute ce qui passe dessous, et ce flou se recalcule à chaque
+   image où le dessous bouge. Deux choses le faisaient bouger tout le temps :
+
+   1. Les entrées et le carrousel animaient `filter: blur()` sur les cartes.
+      Un filtre sur une surface de verre coupe son `backdrop-filter` : la
+      carte arrivait mate, puis le verre s'allumait d'un coup en fin
+      d'animation. Les entrées ne glissent plus que par `transform` et
+      `opacity`, que le GPU compose sans repeindre.
+   2. Le fond « lave » dérivait sans fin sous une quinzaine de surfaces
+      floutées : autant de flous recalculés soixante fois par seconde. Il est
+      figé ; ses couleurs restent, vues à travers le verre. */
+@keyframes reveal {
+  from { opacity: 0; transform: translateY(18px) scale(.985); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes carousel-in-right {
+  from { transform: translateX(var(--slide-dist, 100%)); }
+  to   { transform: none; }
+}
+@keyframes carousel-in-left {
+  from { transform: translateX(calc(var(--slide-dist, 100%) * -1)); }
+  to   { transform: none; }
+}
+@keyframes carousel-out-left {
+  from { transform: none; }
+  to   { transform: translateX(calc(var(--slide-dist, 100%) * -1)); }
+}
+@keyframes carousel-out-right {
+  from { transform: none; }
+  to   { transform: translateX(var(--slide-dist, 100%)); }
+}
+:root { --t-reveal: 620ms; --reveal-step: 45ms; }
+.panel.revealing .reveal-item { will-change: transform, opacity; }
+.lava .blob { animation-play-state: paused; will-change: auto; }
+
+/* ---------- libellés sur une ligne ----------
+   Une capsule qui passe à la ligne devient un ovale à deux étages. Un
+   libellé trop long pour sa place se coupe d'une ellipse plutôt que de
+   déborder de sa capsule. */
+.btn, .tab, .pill, .tabs-inline button, .segmente button {
+  white-space: nowrap;
+}
+.btn {
+  max-width: 100%; min-width: 0; vertical-align: middle;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.pill { max-width: 100%; }

@@ -4,7 +4,7 @@ App.tabs.expenses = {
 
   async load() {
     const month = App.state.month;
-    const [flows, txs, imports, abos, ecarts] = await Promise.all([
+    const [flows, txs, imports, abos] = await Promise.all([
       App.api.get(`/api/month?month=${month}`),
       App.api.get(`/api/transactions?month=${month}`),
       App.api.get('/api/imports'),
@@ -12,7 +12,6 @@ App.tabs.expenses = {
       // deux ans. Charges ici pour ne pas ajouter un aller-retour a l'ouverture
       // de l'onglet.
       App.api.get('/api/subscriptions').catch(() => null),
-      App.api.get(`/api/ecarts?month=${month}`).catch(() => []),
     ]);
     App.tabs.expenses.cache = { transactions: txs, month };
     App.el('#ex-month-label').textContent = App.fmt.month(month);
@@ -20,7 +19,6 @@ App.tabs.expenses = {
     App.tabs.expenses.renderKpis(flows);
     App.tabs.expenses.renderBudgets(flows);
     App.tabs.expenses.renderAbonnements(abos);
-    App.tabs.expenses.renderEcarts(ecarts);
     App.tabs.expenses.fillCategoryFilter();
     // Arrivée depuis le camembert ou un budget : la catégorie est filtrée
     // d'emblée, la recherche vidée pour ne pas masquer ce qu'on vient voir.
@@ -187,36 +185,6 @@ App.tabs.expenses = {
     }
     sel.value = categorie;
     App.el('#ex-search').value = '';
-  },
-
-  /* Les catégories nettement au-dessus de leur moyenne des douze mois
-     précédents. La question qu'on se pose en fin de mois — « où est passé
-     l'argent ? » — sans avoir à comparer de tête. Un clic filtre la liste. */
-  renderEcarts(ecarts) {
-    const carte = App.el('#ex-ecarts-card');
-    const host = App.el('#ex-ecarts');
-    App.clear(host);
-    carte.hidden = !ecarts || !ecarts.length;
-    if (carte.hidden) return;
-    App.el('#ex-ecarts-sub').textContent =
-      `par rapport à la moyenne des ${ecarts[0].nb_mois} mois précédents`;
-    for (const e of ecarts) {
-      const part = e.montant > 0 ? (100 * e.habituel) / e.montant : 0;
-      host.append(App.h('button', {
-        class: 'rep-row cliquable', title: 'Voir les transactions',
-        onclick: () => { App.tabs.expenses.poserFiltre(e.category); App.tabs.expenses.renderTable(); },
-      },
-        App.h('div', { class: 'rep-head' },
-          App.h('span', {}, e.category),
-          App.h('span', {},
-            App.h('span', { class: 'pill warn' }, `+${App.fmt.eur(e.ecart, true)}`),
-            ' ',
-            App.h('span', { class: 'sub' },
-              `${App.fmt.eur(e.montant, true)}, habituellement ${App.fmt.eur(e.habituel, true)}`))),
-        App.h('div', { class: 'rep-bars' },
-          App.h('div', { class: 'rep-real depasse', style: 'width:100%' }),
-          App.h('div', { class: 'rep-target', style: `left:${part}%` }))));
-    }
   },
 
   /* Le filtre gagne « À classer » en tête : c'est le geste principal après un

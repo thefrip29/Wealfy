@@ -105,6 +105,11 @@ Le survol assombrit encore, dans les deux thèmes.
 
 ### Fond animé
 
+> Depuis le verre clair, le fond est **figé** : quinze surfaces floutées
+> au-dessus d'un fond qui bouge, c'étaient quinze flous recalculés à chaque
+> image. Ses couleurs restent, vues à travers le verre. Ce qui suit décrit le
+> mouvement d'origine, toujours dans `app.css`.
+
 Un fond « lampe à lave » dérive derrière la page : quatre masses kaki et bronze,
 floutées, en **mouvement continu**.
 
@@ -183,8 +188,15 @@ fondu-échelle, notifications qui glissent.
 L'**arrivée du contenu** — au démarrage comme au changement d'onglet — se fait
 en cascade du haut vers le bas : chaque bloc monte de 28 px en se dépliant
 légèrement depuis son bord supérieur (`transform-origin: top`), comme une bande
-qu'on abaisse. `--t-reveal` 1050 ms par bloc, `--reveal-step` 95 ms de décalage,
-soit environ 1,9 s pour que la page entière se soit posée.
+qu'on abaisse. `--t-reveal` 620 ms par bloc, `--reveal-step` 45 ms de décalage,
+soit environ 1 s pour que la page entière se soit posée.
+
+**Ni flou, ni rejeu.** Les entrées et le carrousel animaient aussi un
+`filter: blur()` : sur une carte en verre, un filtre coupe le
+`backdrop-filter`, et la carte arrivait mate avant que le verre ne s'allume
+d'un coup. Ils n'animent plus que `transform` et `opacity` (`glass.css`). Et un
+enregistrement ne rejoue plus l'entrée : `App.refresh` redessine l'onglet sur
+place au lieu de le masquer le temps de la requête.
 
 Les **rangées s'ouvrent cellule par cellule** : la ligne d'indicateurs ne
 débarque pas d'un bloc au milieu de la cascade, ses quatre cases se succèdent.
@@ -363,16 +375,32 @@ La première avait sa propre section dans ce fichier et n'apparaissait sur aucun
 raison d'être** que de l'alimenter. On cochait donc des catégories pour nourrir
 un chiffre que personne ne montrait.
 
-Le reste à vivre est la cinquième case de la rangée d'indicateurs. Il a eu sa
-carte, *Mon mois*, qui répétait les revenus et l'épargne affichés juste
-au-dessus. Son détail (charges fixes, mensualités, revenu moyen) se déplie dans
-la case. **Rien n'est calculé en plus** : tout arrivait déjà dans
-`/api/overview`.
+Le reste à vivre a été la cinquième case de la rangée d'indicateurs, puis en
+est **retiré** (novembre 2026) : la Vue d'ensemble garde quatre cases. Les
+grandeurs restent calculées dans `/api/overview`, et le taux d'endettement
+continue d'alimenter les observations.
 
 Les deux pourcentages du détail se rapportent au **revenu moyen des trois mois
 révolus** (`revenu_moyen_3m`), pas aux revenus du mois : le libellé le dit. Ils
 s'affichaient « des revenus » juste sous un montant de revenus qui n'était pas
 leur base.
+
+### Mes versements du mois
+
+La case *Taux d'épargne* porte un bouton **+ Mes versements**. Le salaire
+d'octobre tombe fin octobre et s'investit début novembre : la fenêtre propose
+donc par défaut le **mois écoulé**, une ligne par livret ou placement ouvert,
+et date les versements du **dernier jour de ce mois** pour qu'ils comptent dans
+son épargne. Ce qui y est déjà versé s'affiche sous le nom du support.
+
+Sur un compte à lignes (PEA, assurance vie, crypto), le versement nomme sa
+ligne, et une ligne cotée demande la quantité achetée : sans elles, il créait
+une ligne « (sans ticker) » et le compte perdait sa valorisation. Tout est
+enregistré d'un coup, ou rien (`POST /api/versements-du-mois`).
+
+Si le virement correspondant apparaît sur le relevé du mois suivant plus de
+quatre jours après, rattachez-le au produit : sinon il serait compté une
+seconde fois comme épargne.
 
 ### D'où vient la variation du mois
 
@@ -559,10 +587,8 @@ un clic ouvre le journal des imports. Les deux occupaient une carte en tête
 d'onglet et un repli en bas du tableau. Un mois vide propose directement
 l'import plutôt qu'un tableau nu.
 
-Une carte **Inhabituel ce mois-ci** signale les catégories nettement au-dessus
-de leur moyenne des douze mois précédents (50 % et 50 € au moins), comptée
-depuis le premier relevé. Elle se tait sous trois mois de recul. Un clic sur
-une catégorie, ici, sur un budget, sur le camembert de la synthèse ou sur une
+La carte **Inhabituel ce mois-ci** a été retirée de l'onglet (novembre 2026) ;
+`/api/ecarts` reste disponible. Un clic sur un budget, sur le camembert de la synthèse ou sur une
 cellule de l'Historique ouvre les transactions filtrées.
 
 Classer une ligne à la main propose d'en faire une règle pour tout le

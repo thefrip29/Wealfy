@@ -34,43 +34,16 @@ App.tabs.overview = {
      Deux situations que le même zéro ne sépare pas : le réglage n'a jamais
      été fait, ou il l'est mais le mois n'a pas de revenu. Elles n'appellent
      pas la même phrase. */
-  kpiResteAVivre(data) {
-    const m = data.metrics;
-    const kpi = App.tabs.overview.kpi;
-    const configurees = ((App.state.meta || {}).categories_charges_fixes || []).length;
-    if (!configurees) {
-      const k = kpi('Reste à vivre', '—');
-      k.append(App.h('button', {
-        class: 'btn small', style: 'margin-top:8px',
-        onclick: () => App.settings.open('classement'),
-      }, 'Choisir mes charges fixes'));
-      return k;
-    }
-    // Sans revenu, le reste à vivre serait un négatif sans objet : il se
-    // compte SUR des revenus.
-    if (!m.revenus_mois) return kpi('Reste à vivre', '—', 'aucun revenu ce mois-ci');
-
-    const fixes = m.charges_fixes_mois || 0;
-    const k = kpi('Reste à vivre', App.fmt.eur(m.reste_a_vivre_mois),
-      'après charges fixes et épargne');
-    // Les deux ratios se rapportent au revenu moyen des trois mois révolus,
-    // pas aux revenus du mois : le dire.
-    const lignes = [
-      ['Revenus du mois', App.fmt.eur(m.revenus_mois)],
-      ['Charges fixes', App.fmt.eur(fixes)
-        + (m.part_charges_fixes === null ? ''
-          : ` · ${App.fmt.pct(m.part_charges_fixes, 0)} du revenu moyen`)],
-      ['Épargne', App.fmt.eur(m.epargne_mois)],
-    ];
-    if (m.mensualites_mois) {
-      lignes.push(['Mensualités de prêt', App.fmt.eur(m.mensualites_mois)
-        + (m.taux_endettement === null ? ''
-          : ` · ${App.fmt.pct(m.taux_endettement, 0)} du revenu moyen`)]);
-    }
-    if (m.revenu_moyen_3m) {
-      lignes.push(['Revenu moyen (3 mois)', App.fmt.eur(m.revenu_moyen_3m)]);
-    }
-    k.append(App.note('Détail', App.metricList(lignes)));
+  /* Le taux d'épargne, et de quoi saisir ses versements du mois écoulé. */
+  kpiEpargne(cur) {
+    const k = App.tabs.overview.kpi("Taux d'épargne",
+      cur.taux_epargne === null ? '—' : App.fmt.ratio(cur.taux_epargne),
+      `${App.fmt.eur(cur.epargne)} épargnés sur ${App.fmt.eur(cur.revenus)} de revenus`,
+      cur.taux_epargne !== null && cur.taux_epargne >= 0.2 ? 'good' : '');
+    k.append(App.h('button', {
+      class: 'btn small', style: 'margin-top:8px',
+      onclick: () => App.tabs.wealth.openVersementsDuMois(),
+    }, '+ Mes versements'));
     return k;
   },
 
@@ -464,8 +437,7 @@ App.tabs.overview = {
     }
 
     // Le patrimoine net est déjà en héros : ces cases le complètent au lieu
-    // de le répéter. Le reste à vivre y a rejoint les autres indicateurs du
-    // mois, au lieu d'occuper une carte qui répétait revenus et épargne.
+    // de le répéter.
     host.append(
       App.tabs.overview.kpi('Dépensé ce mois', App.fmt.eur(cur.depenses), deltaText, deltaClass),
       // `nb_transactions` comptait TOUT le mois, dépenses comprises : sous
@@ -474,11 +446,7 @@ App.tabs.overview = {
         cur.transferts_internes
           ? `hors ${App.fmt.eur(cur.transferts_internes)} de virements internes`
           : `${cur.nb_revenus} ligne(s) de revenu`),
-      App.tabs.overview.kpi("Taux d'épargne",
-        cur.taux_epargne === null ? '—' : App.fmt.ratio(cur.taux_epargne),
-        `${App.fmt.eur(cur.epargne)} épargnés sur ${App.fmt.eur(cur.revenus)} de revenus`,
-        cur.taux_epargne !== null && cur.taux_epargne >= 0.2 ? 'good' : ''),
-      App.tabs.overview.kpiResteAVivre(data),
+      App.tabs.overview.kpiEpargne(cur),
       App.tabs.overview.kpi("Couverture d'urgence",
         m.mois_couverture_urgence === null ? '—' : `${App.fmt.num(m.mois_couverture_urgence, 1)} mois`,
         `${App.fmt.eur(m.solde_livrets, true)} de livrets`,

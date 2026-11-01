@@ -661,6 +661,13 @@ button.rep-row.cliquable:hover .rep-head > span:first-child { color: var(--actio
 }
 
 /* Lien sans relief : le dernier releve, sous le titre des transactions. */
+/* Versements du mois : support, ligne, montant, quantité. */
+.quick-row.vm-row { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.2fr) 120px 130px; }
+.vm-row select { width: 100%; }
+@media (max-width: 640px) {
+  .quick-row.vm-row { grid-template-columns: 1fr 1fr; }
+}
+
 .lien-discret {
   background: none; border: 0; padding: 0; margin-top: 2px;
   font: inherit; font-size: var(--fs-xs); color: var(--muted);

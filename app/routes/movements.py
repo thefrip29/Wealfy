@@ -1,12 +1,12 @@
 """Mouvements d'actifs : apports, retraits, valorisations."""
 from datetime import date
 
-from flask import jsonify
+from flask import jsonify, request
 
-from .. import importer, market, services
-from ..db import execute, new_id, query, row_to_dict
+from .. import finance, importer, market, services
+from ..db import execute, get_db, new_id, query, row_to_dict
 from ._blueprint import bp
-from ._helpers import as_date, as_float, body, fail
+from ._helpers import as_date, as_float, body, fail, month_param
 
 
 @bp.get("/api/assets/<aid>/movements")
@@ -162,3 +162,109 @@ def confirm_movements(aid):
         "ok": True, "crees": created, "ignorees": ignores,
         "symboles_amorces": sorted(set(mappes)),
     })
+
+
+# Ce qui ne se garnit pas d'un versement mensuel : un bien se valorise, un
+# compte courant n'est pas de l'epargne (`services._versements` l'ecarte).
+_HORS_VERSEMENTS = {"Immobilier", "SCPI", "Vehicule", "CompteCourant"}
+
+
+def _supports_du_mois(year, month):
+    """Les produits ouverts a la fin du mois, avec ce qui y est deja verse."""
+    debut, fin = finance.month_bounds(year, month)
+    at = min(fin, date.today())
+    ctx = services.market_context(at)
+    groupes = services.movements_by_asset()
+    supports = []
+    for a in services.get_assets(False):
+        if a["type"] in _HORS_VERSEMENTS:
+            continue
+        mvts = groupes.get(a["id"], [])
+        deja = sum(
+            float(m["montant"] or 0) for m in mvts
+            if m["type"] == "versement" and debut.isoformat() <= (m["date"] or "") <= fin.isoformat()
+        )
+        lignes = [
+            {"ticker": l["ticker"], "libelle": l.get("libelle") or l["ticker"],
+             "kind": l.get("kind") or "titre", "cours": l.get("cours")}
+            for l in market.line_values(mvts, ctx["securities"], ctx["prices"], at)
+            if l["ticker"] != "(sans ticker)"
+            and ((l["quantite"] or 0) > 0 or l.get("kind") == market.NON_COTE)
+        ]
+        supports.append({
+            "id": a["id"], "label": a["label"], "type": a["type"],
+            "deja_verse": round(deja, 2), "lignes": lignes,
+        })
+    return supports
+
+
+@bp.get("/api/versements-du-mois")
+def versements_du_mois():
+    """De quoi saisir en une fois l'epargne d'un mois, support par support.
+
+    Le salaire d'octobre tombe fin octobre et s'investit debut novembre : par
+    defaut, c'est le mois ecoule qu'on garnit, et le versement est date de son
+    dernier jour pour compter dans l'epargne de ce mois-la.
+    """
+    year, month = month_param("mois")
+    if "mois" not in request.args:
+        today = date.today()
+        year, month = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
+    _, fin = finance.month_bounds(year, month)
+    return jsonify({
+        "mois": f"{year:04d}-{month:02d}",
+        "date": min(fin, date.today()).isoformat(),
+        "supports": _supports_du_mois(year, month),
+    })
+
+
+@bp.post("/api/versements-du-mois")
+def enregistrer_versements_du_mois():
+    """Enregistre plusieurs versements d'un coup, tous ou aucun.
+
+    Sur un produit qui a des lignes (PEA, assurance vie, crypto), le versement
+    doit nommer sa ligne : sans ticker, il creait une ligne « (sans ticker) » a
+    zero part et faisait retomber tout le compte sur sa valeur saisie. Une
+    ligne cotee demande aussi la quantite achetee.
+    """
+    data = body()
+    d = as_date(data.get("date"))
+    if not d:
+        return fail("Date invalide.")
+    supports = {s["id"]: s for s in _supports_du_mois(*map(int, d.split("-")[:2]))}
+
+    a_creer = []
+    for v in data.get("versements") or []:
+        montant = as_float(v.get("montant"))
+        if not montant:
+            continue
+        s = supports.get(v.get("asset_id"))
+        if not s:
+            return fail("Produit introuvable ou ferme a cette date.")
+        if montant < 0:
+            return fail(f"{s['label']} : un versement est un montant positif.")
+        ticker = (v.get("ticker") or "").strip() or None
+        quantite = prix = None
+        if s["lignes"]:
+            ligne = next((l for l in s["lignes"] if l["ticker"] == ticker), None)
+            if not ligne:
+                return fail(f"{s['label']} : choisissez la ligne qui recoit le versement.")
+            if ligne["kind"] != market.NON_COTE:
+                quantite = as_float(v.get("quantite"))
+                if not quantite or quantite <= 0:
+                    return fail(f"{s['label']} : indiquez la quantite achetee.")
+                prix = round(montant / quantite, 8)
+        a_creer.append((s["id"], round(abs(montant), 2), quantite, prix, ticker))
+
+    if not a_creer:
+        return fail("Aucun montant saisi.")
+    db = get_db()
+    for aid, montant, quantite, prix, ticker in a_creer:
+        db.execute(
+            "INSERT INTO asset_movements(id, asset_id, date, montant, type, quantite, "
+            "prix_unitaire, ticker, frais, note) VALUES (?,?,?,?,'versement',?,?,?,0,?)",
+            (new_id(), aid, d, montant, quantite, prix, ticker, "Versement du mois"),
+        )
+    db.commit()
+    return jsonify({"ok": True, "crees": len(a_creer),
+                    "total": round(sum(x[1] for x in a_creer), 2)}), 201

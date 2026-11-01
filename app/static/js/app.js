@@ -435,8 +435,20 @@ App.raccourcis = function (e) {
 
 /* Recharge l'onglet courant. Les references suivent, dans `showTab`, et
    seulement pour les onglets qui les lisent. */
+/* Redessine l'onglet courant SUR PLACE, après une écriture.
+
+   Il repassait par `showTab` : le panneau devenait transparent le temps de
+   l'aller-retour serveur, puis rejouait toute son animation d'entrée. Chaque
+   enregistrement faisait donc clignoter la page entière. Les animations
+   d'entrée restent réservées aux vrais changements d'onglet ou de mois. */
 App.refresh = async function () {
-  await App.showTab(App.currentTab);
+  const name = App.currentTab;
+  try {
+    if (App.BESOIN_REFS[name]) await App.loadRefs();
+    await App.tabs[name].load();
+  } catch (e) {
+    App.toast(e.message, 'error');
+  }
 };
 
 /* Redessine les graphiques de l'onglet courant depuis les donnees deja

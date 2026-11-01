@@ -1421,3 +1421,54 @@ class TestSettingsAndRules(ApiTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestVersementsDuMois(ApiTestCase):
+    """Saisir en une fois ce qu'on a investi sur le mois ecoule."""
+
+    def setUp(self):
+        super().setUp()
+        self.livret = self.post("/api/assets", {
+            "type": "Livret", "label": "Livret A",
+            "date_acquisition": "2024-01-02", "valeur_acquisition": 1000,
+        })["id"]
+        self.pea = self.post("/api/assets", {
+            "type": "PEA", "label": "PEA",
+            "date_acquisition": "2024-01-02", "valeur_acquisition": 0,
+        })["id"]
+        self.post(f"/api/assets/{self.pea}/positions", {
+            "ticker": "CW8", "quantite": 2, "prix_unitaire": 100, "date": "2024-01-05",
+        })
+
+    def test_les_supports_et_leurs_lignes(self):
+        res = self.get("/api/versements-du-mois?mois=2024-03")
+        self.assertEqual(res["date"], "2024-03-31")
+        par_id = {s["id"]: s for s in res["supports"]}
+        self.assertEqual(par_id[self.livret]["lignes"], [])
+        self.assertEqual([l["ticker"] for l in par_id[self.pea]["lignes"]], ["CW8"])
+
+    def test_par_defaut_le_mois_ecoule(self):
+        from datetime import date
+        t = date.today()
+        attendu = f"{t.year:04d}-{t.month - 1:02d}" if t.month > 1 else f"{t.year - 1}-12"
+        self.assertEqual(self.get("/api/versements-du-mois")["mois"], attendu)
+
+    def test_compte_dans_l_epargne_du_mois_choisi(self):
+        res = self.post("/api/versements-du-mois", {"date": "2024-03-31", "versements": [
+            {"asset_id": self.livret, "montant": 300},
+            {"asset_id": self.pea, "montant": 210, "ticker": "CW8", "quantite": 2},
+        ]})
+        self.assertEqual((res["crees"], res["total"]), (2, 510.0))
+        self.assertEqual(self.get("/api/overview?month=2024-03")["mois"]["epargne"], 510.0)
+        self.assertEqual(self.get("/api/overview?month=2024-04")["mois"]["epargne"], 0)
+        par_id = {s["id"]: s for s in self.get("/api/versements-du-mois?mois=2024-03")["supports"]}
+        self.assertEqual(par_id[self.livret]["deja_verse"], 300.0)
+
+    def test_une_ligne_cotee_demande_ligne_et_quantite_et_rien_n_est_ecrit(self):
+        for v in ({"asset_id": self.pea, "montant": 100},
+                  {"asset_id": self.pea, "montant": 100, "ticker": "CW8"}):
+            res = self.client.post("/api/versements-du-mois", json={
+                "date": "2024-03-31",
+                "versements": [{"asset_id": self.livret, "montant": 50}, v]})
+            self.assertEqual(res.status_code, 400)
+        self.assertEqual(self.get("/api/overview?month=2024-03")["mois"]["epargne"], 0)

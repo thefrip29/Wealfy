@@ -951,6 +951,134 @@ App.tabs.wealth = {
     });
   },
 
+  /* ---------- versements du mois écoulé ----------
+
+     Le salaire d'octobre tombe fin octobre et s'investit début novembre : on
+     saisit alors, support par support, ce qu'on a mis de côté POUR octobre.
+     Le versement est daté du dernier jour du mois choisi, pour compter dans
+     l'épargne de ce mois-là. Sur un compte à lignes, il nomme sa ligne et sa
+     quantité : sans elles, le compte perdait sa valorisation. */
+  async openVersementsDuMois(mois) {
+    let data;
+    try {
+      data = await App.api.get('/api/versements-du-mois'
+        + (mois ? `?mois=${mois}` : ''));
+    } catch (e) { App.toast(e.message, 'error'); return; }
+
+    const form = App.h('form', { onsubmit: (e) => e.preventDefault() });
+    const totalNode = App.h('strong', {}, App.fmt.montant(0));
+    const submit = App.h('button', { class: 'btn primary', disabled: true }, 'Enregistrer');
+    const rangs = [];
+
+    const courant = App.monthISO();
+    const choixMois = App.select('mois',
+      Array.from({ length: 12 }, (_, i) => App.shiftMonth(courant, -i))
+        .map((ym) => [ym, App.fmt.month(ym)]),
+      data.mois);
+    choixMois.addEventListener('change',
+      () => App.tabs.wealth.openVersementsDuMois(choixMois.value));
+
+    const majTotal = () => {
+      const remplis = rangs.filter((r) => parseFloat(r.montant.value) > 0);
+      totalNode.textContent = App.fmt.montant(
+        remplis.reduce((s, r) => s + parseFloat(r.montant.value), 0));
+      submit.textContent = remplis.length
+        ? `Enregistrer ${remplis.length} versement${remplis.length > 1 ? 's' : ''}`
+        : 'Enregistrer';
+      submit.disabled = !remplis.length;
+    };
+
+    const grille = App.h('div', { class: 'quick-grid' });
+    for (const s of data.supports) {
+      const montant = App.input(`m-${s.id}`, {
+        type: 'number', step: '0.01', min: '0', placeholder: '0,00',
+      });
+      const ligne = s.lignes.length > 1
+        ? App.select(`l-${s.id}`, s.lignes.map((l) => [l.ticker, l.libelle]))
+        : null;
+      const quantite = App.input(`q-${s.id}`, {
+        type: 'number', step: '0.00000001', min: '0', placeholder: 'quantité',
+      });
+      const choisie = () => (ligne
+        ? s.lignes.find((l) => l.ticker === ligne.value) : s.lignes[0]);
+      // La quantité n'a de sens que sur une ligne cotée : un fonds euro se
+      // tient en euros, un livret n'a pas de lignes.
+      const majQuantite = () => {
+        const l = choisie();
+        quantite.hidden = !l || l.kind === 'non_cote';
+        const m = parseFloat(montant.value);
+        quantite.placeholder = l && l.cours && m > 0
+          ? `≈ ${App.fmt.num(m / l.cours, 4)} au cours` : 'quantité';
+      };
+      montant.addEventListener('input', () => { majQuantite(); majTotal(); });
+      if (ligne) ligne.addEventListener('change', majQuantite);
+      majQuantite();
+
+      const detail = [
+        s.lignes.length === 1 ? s.lignes[0].libelle : null,
+        s.deja_verse ? `déjà ${App.fmt.montant(s.deja_verse)} ce mois` : null,
+      ].filter(Boolean).join(' · ');
+      grille.append(App.h('div', { class: 'quick-row vm-row' },
+        App.h('div', { class: 'quick-label' },
+          App.h('strong', {}, s.label),
+          detail ? App.h('div', { class: 'sub' }, detail) : null),
+        App.h('div', {}, ligne),
+        App.h('div', { class: 'quick-amount' }, montant),
+        App.h('div', { class: 'quick-amount' }, quantite)));
+      rangs.push({ s, montant, quantite, choisie });
+    }
+    form.append(
+      App.h('div', { class: 'form-grid' },
+        App.field('Mois', choixMois),
+        App.field('Date des versements', App.dateField('date', { value: data.date }),
+          { hint: 'Le dernier jour du mois : ils comptent dans son épargne' })),
+      data.supports.length ? grille
+        : App.h('p', { class: 'empty' }, 'Aucun livret ni placement ouvert à cette date.'));
+
+    submit.addEventListener('click', async () => {
+      const date = App.formValues(form).date;
+      if (!date) return App.invalide(form, 'date', 'Indiquez une date.');
+      const versements = [];
+      for (const r of rangs) {
+        const m = parseFloat(r.montant.value);
+        if (!(m > 0)) continue;
+        const l = r.choisie();
+        const q = parseFloat(r.quantite.value);
+        if (l && l.kind !== 'non_cote' && !(q > 0)) {
+          return App.invalide(form, r.quantite.name, 'Indiquez la quantité achetée.');
+        }
+        versements.push({
+          asset_id: r.s.id, montant: m,
+          ticker: l ? l.ticker : null, quantite: q > 0 ? q : null,
+        });
+      }
+      try {
+        const res = await App.api.post('/api/versements-du-mois', { date, versements });
+        App.modal.close();
+        App.toast(`${res.crees} versement(s) pour ${App.fmt.month(data.mois)} — `
+          + App.fmt.montant(res.total), 'success');
+        await App.refreshAll();
+      } catch (e) { App.toast(e.message, 'error'); }
+    });
+
+    App.modal.open({
+      title: 'Mes versements du mois',
+      wide: true,
+      garder: true,
+      body: App.h('div', {},
+        App.h('p', { class: 'hint' },
+          'Ce que vous avez mis sur chaque support pour ce mois. Laissez vide '
+          + 'ceux que vous n’avez pas alimentés.'),
+        form),
+      footer: [
+        App.h('div', { style: 'margin-right:auto' },
+          App.h('span', { class: 'sub' }, 'Total : '), totalNode),
+        App.h('button', { class: 'btn', onclick: () => App.modal.close() }, 'Annuler'),
+        submit,
+      ],
+    });
+  },
+
   /* ---------- saisie rapide du patrimoine existant ---------- */
 
   /* Catalogue des produits courants. Aucun taux n'est pré-rempli : les taux
