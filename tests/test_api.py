@@ -1388,6 +1388,29 @@ class TestInternalTransfers(ApiTestCase):
         self.assertEqual(self.get("/api/transfers/detect")["total"], 0)
 
 
+class TestRepartitionParNom(ApiTestCase):
+    """Une poche sans type coche se reconnait au nom d'un type ou d'un produit."""
+
+    def test_poche_au_nom_d_un_produit(self):
+        for label, valeur in (("Livret A", 5000), ("Revolut Epargne", 1000)):
+            self.post("/api/assets", {"type": "Livret", "label": label,
+                                      "date_acquisition": "2024-01-02",
+                                      "valeur_acquisition": valeur})
+        self.post("/api/assets", {"type": "PEA", "label": "Mon PEA",
+                                  "date_acquisition": "2024-01-02",
+                                  "valeur_acquisition": 4000})
+        self.client.put("/api/settings", json={"repartition_cible": [
+            {"label": "Livret A", "types": [], "pct": 50},
+            {"label": "PEA", "types": [], "pct": 50},
+        ]})
+        rep = self.get("/api/overview")["repartition"]
+        par_nom = {b["label"]: b for b in rep["buckets"]}
+        self.assertEqual(par_nom["Livret A"]["montant"], 5000.0)
+        self.assertEqual(par_nom["PEA"]["montant"], 4000.0)
+        self.assertEqual(rep["base"], 9000.0)
+        self.assertEqual(rep["hors_poches"], 1000.0)
+
+
 class TestSettingsAndRules(ApiTestCase):
     def test_settings_round_trip(self):
         self.client.put("/api/settings", json={

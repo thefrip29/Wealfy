@@ -241,8 +241,32 @@ class YahooFinance(Provider):
             raise MarketError("Aucun cours renvoye pour ce symbole")
         return results[0]
 
+    # Twelve Data nomme une valeur d'Euronext sans suffixe (« DCAM »), Yahoo
+    # la veut avec celui de sa place (« DCAM.PA ») et repond 404 sans lui. Une
+    # ligne mappee du temps de Twelve Data restait donc sans cours, et tout le
+    # compte retombait sur sa valeur saisie. La place se lit dans l'ISIN.
+    _SUFFIXES_EURONEXT = {"FR": ".PA", "NL": ".AS", "BE": ".BR", "PT": ".LS", "IE": ".PA"}
+
+    @classmethod
+    def _symboles(cls, item):
+        symbole = item["symbol"]
+        yield symbole
+        if "." in symbole or "euronext" not in (item.get("exchange") or "").casefold():
+            return
+        premier = cls._SUFFIXES_EURONEXT.get((item.get("isin") or "")[:2].upper(), ".PA")
+        for suffixe in dict.fromkeys([premier, ".PA", ".AS", ".BR"]):
+            yield symbole + suffixe
+
     def _quote_one(self, item):
-        result = self._chart(item["symbol"])
+        erreur = None
+        for symbole in self._symboles(item):
+            try:
+                result = self._chart(symbole)
+                break
+            except MarketError as exc:
+                erreur = erreur or exc
+        else:
+            raise erreur
         meta = result.get("meta") or {}
         price = meta.get("regularMarketPrice")
         if price in (None, ""):
@@ -644,7 +668,8 @@ def refresh_quotes(provider=None, crypto_provider=None):
         if not sec or not sec.get("symbol"):
             non_mappes.append(ticker)
             continue
-        entry = {"cle": ticker, "symbol": sec["symbol"], "exchange": sec.get("exchange")}
+        entry = {"cle": ticker, "symbol": sec["symbol"], "exchange": sec.get("exchange"),
+                 "isin": sec.get("isin")}
         if sec.get("kind") == "crypto" or asset_type in CRYPTO_ASSET_TYPES:
             coin_items.append(entry)
         else:

@@ -418,14 +418,25 @@ def repartition(at_date=None, snap=None):
     if isinstance(buckets, dict):  # ancien format {type: pct}
         buckets = [{"label": k, "types": [k], "pct": v} for k, v in buckets.items()]
 
-    covered, out = set(), []
+    # Une poche sans type coche se reconnait a son nom : celui d'un type
+    # (« PEA ») ou celui d'un de vos produits (« Livret A »). Elle ne cherchait
+    # que le type, et « Livret A » restait a 0 € — ce qui faussait aussi la
+    # part de toutes les autres poches.
+    def contenu(bucket):
+        types = set(bucket.get("types") or [])
+        if types:
+            return lambda a: a["type"] in types
+        nom = (bucket.get("label") or "").strip().casefold()
+        return lambda a: a["type"].casefold() == nom or (a.get("label") or "").strip().casefold() == nom
+
+    couverts, out = set(), []
     for bucket in buckets:
-        types = set(bucket.get("types") or [bucket.get("label")])
-        covered |= types
-        montant = round(sum(a["valeur"] for a in snap["assets"] if a["type"] in types), 2)
+        dedans = [a for a in snap["assets"] if contenu(bucket)(a)]
+        couverts |= {a["id"] for a in dedans}
+        montant = round(sum(a["valeur"] for a in dedans), 2)
         out.append({
             "label": bucket.get("label"),
-            "types": sorted(types),
+            "types": sorted(set(bucket.get("types") or []) or {a["type"] for a in dedans}),
             "cible_pct": float(bucket.get("pct") or 0),
             "montant": montant,
         })
@@ -435,7 +446,7 @@ def repartition(at_date=None, snap=None):
         bucket["ecart_pct"] = round(bucket["reel_pct"] - bucket["cible_pct"], 2)
         cible_montant = base * bucket["cible_pct"] / 100
         bucket["ecart_montant"] = round(bucket["montant"] - cible_montant, 2)
-    hors = round(sum(a["valeur"] for a in snap["assets"] if a["type"] not in covered), 2)
+    hors = round(sum(a["valeur"] for a in snap["assets"] if a["id"] not in couverts), 2)
     return {"buckets": out, "base": base, "hors_poches": hors}
 
 

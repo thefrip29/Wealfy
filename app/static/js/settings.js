@@ -364,17 +364,21 @@ App.settings = {
         // Des cases plutôt qu'une liste à sélection multiple : le Ctrl+clic
         // était un geste caché, et un clic sans lui effaçait tout le choix.
         const typesSel = App.h('div', { class: 'cases-types' });
-        // Sans type coché, le serveur compte le type qui porte le nom de la
-        // poche, s'il existe. Sinon la poche reste à 0 % sans rien dire :
-        // « Livret A » ne désigne aucun type, « Livret » oui. On le dit ici.
+        // Sans type coché, le serveur compte le type ou le produit qui porte
+        // le nom de la poche. Si aucun ne le porte, elle reste à 0 % : on le
+        // dit ici plutôt que de laisser un écart incompréhensible.
+        const nomsProduits = (App.state.assets || []).map((a) => (a.label || '').trim().toLowerCase());
         const avertir = App.h('p', { class: 'hint', style: 'grid-column:1/-1' });
         const verifier = () => {
           const coches = (b.types || []).length;
+          const nom = (b.label || '').trim().toLowerCase();
+          const reconnu = allTypes.some((t) => t.toLowerCase() === nom)
+            || nomsProduits.includes(nom);
           avertir.textContent = coches ? ''
-            : (allTypes.includes(b.label)
-              ? `Aucun type coché : seul le type « ${b.label} » est compté.`
+            : (reconnu
+              ? `Aucun type coché : seul ce qui s’appelle « ${b.label} » est compté.`
               : 'Aucun type coché : cette poche restera à 0 %. Cochez les types qu’elle regroupe.');
-          avertir.classList.toggle('alerte-txt', !coches && !allTypes.includes(b.label));
+          avertir.classList.toggle('alerte-txt', !coches && !reconnu);
         };
         for (const t of allTypes) {
           const cb = App.h('input', { type: 'checkbox', value: t });
