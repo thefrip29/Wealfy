@@ -1464,6 +1464,18 @@ class TestVersementsDuMois(ApiTestCase):
         par_id = {s["id"]: s for s in self.get("/api/versements-du-mois?mois=2024-03")["supports"]}
         self.assertEqual(par_id[self.livret]["deja_verse"], 300.0)
 
+    def test_plusieurs_lignes_d_un_meme_compte(self):
+        self.post(f"/api/assets/{self.pea}/positions", {
+            "ticker": "ESE", "quantite": 1, "prix_unitaire": 50, "date": "2024-01-05",
+        })
+        res = self.post("/api/versements-du-mois", {"date": "2024-03-31", "versements": [
+            {"asset_id": self.pea, "montant": 100, "ticker": "CW8", "quantite": 1},
+            {"asset_id": self.pea, "montant": 60, "ticker": "ESE", "quantite": 1},
+        ]})
+        self.assertEqual((res["crees"], res["total"]), (2, 160.0))
+        par_id = {s["id"]: s for s in self.get("/api/versements-du-mois?mois=2024-03")["supports"]}
+        self.assertEqual(par_id[self.pea]["deja_verse"], 160.0)
+
     def test_une_ligne_cotee_demande_ligne_et_quantite_et_rien_n_est_ecrit(self):
         for v in ({"asset_id": self.pea, "montant": 100},
                   {"asset_id": self.pea, "montant": 100, "ticker": "CW8"}):

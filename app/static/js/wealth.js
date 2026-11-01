@@ -989,43 +989,39 @@ App.tabs.wealth = {
     };
 
     const grille = App.h('div', { class: 'quick-grid' });
+    // Une saisie par ligne : on alimente souvent plusieurs lignes d'un même
+    // compte le même mois (du bitcoin ET de l'ether sur le compte crypto).
     for (const s of data.supports) {
-      const montant = App.input(`m-${s.id}`, {
-        type: 'number', step: '0.01', min: '0', placeholder: '0,00',
-      });
-      const ligne = s.lignes.length > 1
-        ? App.select(`l-${s.id}`, s.lignes.map((l) => [l.ticker, l.libelle]))
-        : null;
-      const quantite = App.input(`q-${s.id}`, {
-        type: 'number', step: '0.00000001', min: '0', placeholder: 'quantité',
-      });
-      const choisie = () => (ligne
-        ? s.lignes.find((l) => l.ticker === ligne.value) : s.lignes[0]);
-      // La quantité n'a de sens que sur une ligne cotée : un fonds euro se
-      // tient en euros, un livret n'a pas de lignes.
-      const majQuantite = () => {
-        const l = choisie();
+      const lignes = s.lignes.length ? s.lignes : [null];
+      lignes.forEach((l, i) => {
+        const montant = App.input(`m-${s.id}-${i}`, {
+          type: 'number', step: '0.01', min: '0', placeholder: '0,00',
+        });
+        const quantite = App.input(`q-${s.id}-${i}`, {
+          type: 'number', step: '0.00000001', min: '0', placeholder: 'quantité',
+        });
+        // La quantité n'a de sens que sur une ligne cotée : un fonds euro se
+        // tient en euros, un livret n'a pas de lignes.
         quantite.hidden = !l || l.kind === 'non_cote';
-        const m = parseFloat(montant.value);
-        quantite.placeholder = l && l.cours && m > 0
-          ? `≈ ${App.fmt.num(m / l.cours, 4)} au cours` : 'quantité';
-      };
-      montant.addEventListener('input', () => { majQuantite(); majTotal(); });
-      if (ligne) ligne.addEventListener('change', majQuantite);
-      majQuantite();
+        montant.addEventListener('input', () => {
+          const m = parseFloat(montant.value);
+          quantite.placeholder = l && l.cours && m > 0
+            ? `≈ ${App.fmt.num(m / l.cours, 4)} au cours` : 'quantité';
+          majTotal();
+        });
 
-      const detail = [
-        s.lignes.length === 1 ? s.lignes[0].libelle : null,
-        s.deja_verse ? `déjà ${App.fmt.montant(s.deja_verse)} ce mois` : null,
-      ].filter(Boolean).join(' · ');
-      grille.append(App.h('div', { class: 'quick-row vm-row' },
-        App.h('div', { class: 'quick-label' },
-          App.h('strong', {}, s.label),
-          detail ? App.h('div', { class: 'sub' }, detail) : null),
-        App.h('div', {}, ligne),
-        App.h('div', { class: 'quick-amount' }, montant),
-        App.h('div', { class: 'quick-amount' }, quantite)));
-      rangs.push({ s, montant, quantite, choisie });
+        const tete = i === 0;
+        grille.append(App.h('div', { class: `quick-row vm-row${tete ? ' vm-tete' : ''}` },
+          App.h('div', { class: 'quick-label' },
+            tete ? App.h('strong', {}, s.label) : null,
+            tete && s.deja_verse
+              ? App.h('div', { class: 'sub' }, `déjà ${App.fmt.montant(s.deja_verse)} ce mois`)
+              : null),
+          App.h('div', { class: 'vm-ligne' }, l ? l.libelle : ''),
+          App.h('div', { class: 'quick-amount' }, montant),
+          App.h('div', { class: 'quick-amount' }, quantite)));
+        rangs.push({ s, montant, quantite, choisie: () => l });
+      });
     }
     form.append(
       App.h('div', { class: 'form-grid' },
