@@ -251,7 +251,7 @@ class TestDecompositionDeLaVariation(ApiTestCase):
     def test_un_pret_qui_s_amortit_est_un_remboursement(self):
         self.post("/api/liabilities", {
             "type": "PretConso", "label": "Auto", "montant_emprunte": 12000,
-            "taux_annuel": 3, "duree_mois": 48, "date_debut": "2024-01-05"})
+            "taux_annuel": 3, "duree_mois": 48, "date_debut": "2024-01-01"})
         v = self.variation()
         self.assertGreater(v["dettes"], 0)
         self.assertEqual(v["variation"], v["dettes"])
