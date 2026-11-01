@@ -401,6 +401,34 @@ def pypdf_silencieux(test):
     test.addCleanup(logger.setLevel, niveau)
 
 
+class TestOperationsIdentiques(ApiTestCase):
+    """Trois paiements identiques le même jour sont trois paiements."""
+
+    RELEVE = ("Date;Libelle;Montant\n"
+              "14/10/2026;CB BLUE LAVERIE 13/10/26;-0,50\n"
+              "14/10/2026;CB BLUE LAVERIE 13/10/26;-0,50\n"
+              "14/10/2026;CB BLUE LAVERIE 13/10/26;-0,50\n"
+              "15/10/2026;CB LIDL;-12,00\n")
+
+    def test_aucune_n_est_un_doublon_au_premier_import(self):
+        p = self.post("/api/imports/preview", {"text": self.RELEVE})
+        self.assertEqual(p["doublons"], 0)
+        res = self.post("/api/imports/confirm", {"lignes": p["lignes"], "source": "t"})
+        self.assertEqual(res["importees"], 4)
+
+    def test_le_meme_releve_reimporte_est_entierement_reconnu(self):
+        p = self.post("/api/imports/preview", {"text": self.RELEVE})
+        self.post("/api/imports/confirm", {"lignes": p["lignes"], "source": "t"})
+        self.assertEqual(self.post("/api/imports/preview", {"text": self.RELEVE})["doublons"], 4)
+
+    def test_un_releve_qui_n_en_avait_qu_une_laisse_passer_les_autres(self):
+        une = "Date;Libelle;Montant\n14/10/2026;CB BLUE LAVERIE 13/10/26;-0,50\n"
+        p = self.post("/api/imports/preview", {"text": une})
+        self.post("/api/imports/confirm", {"lignes": p["lignes"], "source": "t"})
+        p = self.post("/api/imports/preview", {"text": self.RELEVE})
+        self.assertEqual(p["doublons"], 1)
+
+
 class TestDepotDeFichier(ApiTestCase):
     """Le fichier depose est converti en texte cote serveur, puis rendu a
     l'utilisateur pour qu'il le VOIE avant analyse : l'extraction d'un PDF est

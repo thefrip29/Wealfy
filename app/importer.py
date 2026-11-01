@@ -775,8 +775,20 @@ def parse_statement(text: str):
 # --- déduplication --------------------------------------------------------
 
 
-def dedup_hash(d, amount, description) -> str:
+def dedup_hash(d, amount, description, occurrence=1) -> str:
+    """Empreinte d'une opération, pour reconnaître un doublon d'un import à
+    l'autre.
+
+    `occurrence` numérote les opérations IDENTIQUES d'un même relevé : trois
+    passages à la laverie le même jour, 0,50 EUR chacun, sont trois paiements.
+    Sans ce numéro, ils avaient la même empreinte et les deux derniers
+    passaient pour des doublons. La première garde l'empreinte d'origine, ce
+    qui laisse les imports passés reconnaissables ; réimporter le même relevé
+    redonne les mêmes numéros, donc les mêmes doublons.
+    """
     key = f"{iso(d)}|{float(amount):.2f}|{norm(description)}"
+    if occurrence > 1:
+        key += f"|{occurrence}"
     return hashlib.sha1(key.encode("utf-8")).hexdigest()
 
 

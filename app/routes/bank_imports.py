@@ -53,11 +53,12 @@ def preview_import():
     existing = {r["dedup_hash"] for r in query(
         "SELECT dedup_hash FROM transactions WHERE dedup_hash IS NOT NULL"
     )}
-    seen, out, doublons = set(), [], 0
+    vus, out, doublons = Counter(), [], 0
     for line in lines:
-        h = importer.dedup_hash(line["date"], line["amount"], line["description"])
-        duplicate = h in existing or h in seen
-        seen.add(h)
+        base = importer.dedup_hash(line["date"], line["amount"], line["description"])
+        vus[base] += 1
+        h = importer.dedup_hash(line["date"], line["amount"], line["description"], vus[base])
+        duplicate = h in existing
         if duplicate:
             doublons += 1
         category, liability_id, origine, confiance = importer.classify(
