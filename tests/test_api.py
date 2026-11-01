@@ -1472,3 +1472,17 @@ class TestVersementsDuMois(ApiTestCase):
                 "versements": [{"asset_id": self.livret, "montant": 50}, v]})
             self.assertEqual(res.status_code, 400)
         self.assertEqual(self.get("/api/overview?month=2024-03")["mois"]["epargne"], 0)
+
+    def test_un_versement_sans_ligne_n_invente_pas_de_ligne(self):
+        av = self.post("/api/assets", {
+            "type": "AssuranceVie", "label": "AV",
+            "date_acquisition": "2024-01-02", "valeur_acquisition": 0,
+        })["id"]
+        self.post(f"/api/assets/{av}/movements",
+                  {"type": "valorisation", "montant": 1000, "date": "2024-02-01"})
+        self.post("/api/versements-du-mois", {"date": "2024-03-31", "versements": [
+            {"asset_id": av, "montant": 200}]})
+        self.assertEqual(self.get(f"/api/assets/{av}")["asset"]["valeur"], 1200.0)
+        pos = self.get(f"/api/assets/{av}/positions")
+        self.assertEqual(pos["lignes"], [])
+        self.assertEqual(pos["investi_total"], 200.0)

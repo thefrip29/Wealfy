@@ -17,12 +17,17 @@ def list_positions(aid):
     at = as_date(request.args.get("date"), date.today().isoformat())
     ctx = services.market_context(at)
     movements = services.get_movements(aid)
-    lignes = market.line_values(movements, ctx["securities"], ctx["prices"], at)
+    toutes = market.line_values(movements, ctx["securities"], ctx["prices"], at)
+    # Un versement en euros sans support (sur un compte suivi par ses
+    # valorisations) n'est pas une ligne : il s'affichait « (sans ticker) », a
+    # zero part. Son argent reste compte dans le capital investi.
+    lignes = [l for l in toutes
+              if not (l["ticker"] == "(sans ticker)" and not l["quantite"])]
     valorisees = [l for l in lignes if l["valeur"] is not None]
     return jsonify({
         "lignes": lignes,
         "valeur_totale": round(sum(l["valeur"] for l in valorisees), 2) if valorisees else None,
-        "investi_total": round(sum(l["investi"] for l in lignes), 2),
+        "investi_total": round(sum(l["investi"] for l in toutes), 2),
         "complet": bool(lignes) and all(l["valeur"] is not None for l in lignes),
         "kind": "crypto" if asset["type"] in market.CRYPTO_ASSET_TYPES else "titre",
     })
