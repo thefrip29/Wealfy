@@ -23,7 +23,7 @@ def overview():
     cache = services.shared_cache()
     snap = services.portfolio(as_of, cache=cache)
     metrics = services.metrics(as_of)
-    repartition = services.repartition(as_of, snap)
+    repartition = services.repartition(as_of)
     etat_marche = {
         "active": bool(get_setting("market_enabled", False)),
         "cache_perime": market.cache_is_stale(),

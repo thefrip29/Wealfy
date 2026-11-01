@@ -394,6 +394,18 @@ donc par défaut le **mois écoulé**, une ligne par livret ou placement ouvert,
 et date les versements du **dernier jour de ce mois** pour qu'ils comptent dans
 son épargne. Ce qui y est déjà versé s'affiche sous le nom du support.
 
+Chaque ligne d'un compte a sa propre case : on alimente souvent bitcoin ET
+ether le même mois.
+
+**Un mois saisi par ce bouton fait foi.** Son épargne et sa carte *Versements
+du mois vs cible* (Vue d'ensemble, ex-« Répartition cible vs réelle ») ne
+comptent que ces saisies : ni les achats notés au fil du mois, ni l'écart lu
+sur la valorisation d'un livret ne s'y ajoutent. Un mois sans saisie garde le
+calcul d'avant (versements nets des retraits). La cible se compare aux
+versements du mois — c'est une stratégie de DCA —, plus au patrimoine
+détenu. Une poche sans type coché se reconnaît au nom d'un type ou d'un
+produit (« Livret A »).
+
 Sur un compte à lignes (PEA, assurance vie, crypto), le versement nomme sa
 ligne, et une ligne cotée demande la quantité achetée : sans elles, il créait
 une ligne « (sans ticker) » et le compte perdait sa valorisation. Tout est

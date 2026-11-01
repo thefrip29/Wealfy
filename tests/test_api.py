@@ -1212,8 +1212,20 @@ class TestAnalytics(ApiTestCase):
         self.assertEqual(flows["epargne"], 500.0)
 
     def test_repartition_target_vs_real(self):
+        """La cible se compare aux versements du mois, pas au patrimoine."""
         self.seed()
+        ids = {a["type"]: a["id"] for a in self.get("/api/assets")["assets"]}
+        lignes = {s["id"]: s["lignes"] for s in
+                  self.get(f"/api/versements-du-mois?mois={month_key()}")["supports"]}
+        versements = [{"asset_id": ids["Livret"], "montant": 300}]
+        pea = {"asset_id": ids["PEA"], "montant": 100}
+        if lignes.get(ids["PEA"]):
+            pea.update(ticker=lignes[ids["PEA"]][0]["ticker"], quantite=1)
+        versements.append(pea)
+        self.post("/api/versements-du-mois",
+                  {"date": date.today().isoformat(), "versements": versements})
         rep = self.get(f"/api/overview?month={month_key()}")["repartition"]
+        self.assertEqual(rep["base"], 400.0)
         labels = {b["label"]: b for b in rep["buckets"]}
         self.assertIn("PEA", labels)
         self.assertIn("Livret", labels)
@@ -1392,23 +1404,57 @@ class TestRepartitionParNom(ApiTestCase):
     """Une poche sans type coche se reconnait au nom d'un type ou d'un produit."""
 
     def test_poche_au_nom_d_un_produit(self):
-        for label, valeur in (("Livret A", 5000), ("Revolut Epargne", 1000)):
-            self.post("/api/assets", {"type": "Livret", "label": label,
-                                      "date_acquisition": "2024-01-02",
-                                      "valeur_acquisition": valeur})
-        self.post("/api/assets", {"type": "PEA", "label": "Mon PEA",
-                                  "date_acquisition": "2024-01-02",
-                                  "valeur_acquisition": 4000})
+        ids = {}
+        for typ, label in (("Livret", "Livret A"), ("Livret", "Revolut Epargne"), ("PEA", "Mon PEA")):
+            ids[label] = self.post("/api/assets", {"type": typ, "label": label,
+                                                   "date_acquisition": "2024-01-02",
+                                                   "valeur_acquisition": 5000})["id"]
+        for label, montant in (("Livret A", 500), ("Revolut Epargne", 100), ("Mon PEA", 400)):
+            self.post(f"/api/assets/{ids[label]}/movements", {
+                "date": "2024-03-31", "montant": montant, "type": "versement"})
         self.client.put("/api/settings", json={"repartition_cible": [
             {"label": "Livret A", "types": [], "pct": 50},
             {"label": "PEA", "types": [], "pct": 50},
         ]})
-        rep = self.get("/api/overview")["repartition"]
+        rep = self.get("/api/overview?month=2024-03")["repartition"]
         par_nom = {b["label"]: b for b in rep["buckets"]}
-        self.assertEqual(par_nom["Livret A"]["montant"], 5000.0)
-        self.assertEqual(par_nom["PEA"]["montant"], 4000.0)
-        self.assertEqual(rep["base"], 9000.0)
-        self.assertEqual(rep["hors_poches"], 1000.0)
+        self.assertEqual(par_nom["Livret A"]["montant"], 500.0)
+        self.assertEqual(par_nom["PEA"]["montant"], 400.0)
+        self.assertEqual(rep["base"], 900.0)
+        self.assertEqual(rep["hors_poches"], 100.0)
+
+    def test_un_mois_declare_ne_compte_que_ses_saisies(self):
+        """Le bouton fait foi : ni l'achat noté au fil du mois, ni l'écart lu
+        sur la valorisation d'un livret ne s'ajoutent à ce qu'on a déclaré."""
+        livret = self.post("/api/assets", {"type": "Livret", "label": "Livret A",
+                                           "date_acquisition": "2024-01-02",
+                                           "valeur_acquisition": 1254})["id"]
+        pea = self.post("/api/assets", {"type": "PEA", "label": "PEA",
+                                        "date_acquisition": "2024-01-02",
+                                        "valeur_acquisition": 0})["id"]
+        self.post(f"/api/assets/{livret}/movements", {
+            "date": "2024-03-07", "montant": 1010, "type": "valorisation"})
+        self.post(f"/api/assets/{pea}/movements", {
+            "date": "2024-03-07", "montant": 150, "type": "versement"})
+        self.post("/api/versements-du-mois", {"date": "2024-03-31", "versements": [
+            {"asset_id": livret, "montant": 575},
+            {"asset_id": pea, "montant": 605},
+        ]})
+        self.client.put("/api/settings", json={"repartition_cible": [
+            {"label": "Livret A", "types": [], "pct": 50},
+            {"label": "PEA", "types": [], "pct": 50}]})
+        ov = self.get("/api/overview?month=2024-03")
+        self.assertEqual(ov["mois"]["epargne"], 1180.0)
+        self.assertEqual(ov["repartition"]["base"], 1180.0)
+        par_nom = {b["label"]: b["montant"] for b in ov["repartition"]["buckets"]}
+        self.assertEqual(par_nom, {"Livret A": 575.0, "PEA": 605.0})
+
+    def test_mois_sans_versement(self):
+        self.client.put("/api/settings", json={"repartition_cible": [
+            {"label": "PEA", "types": ["PEA"], "pct": 100}]})
+        rep = self.get("/api/overview?month=2024-03")["repartition"]
+        self.assertEqual(rep["base"], 0)
+        self.assertIsNone(rep["buckets"][0]["ecart_pct"])
 
 
 class TestSettingsAndRules(ApiTestCase):

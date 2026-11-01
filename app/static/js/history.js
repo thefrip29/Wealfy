@@ -114,7 +114,10 @@ App.tabs.history = {
      prend la couleur d'alerte. */
   repartition(row) {
     const rep = App.h('span', { class: 'rep-ligne' });
-    (row.repartition || []).forEach((b, i) => {
+    // Un mois sans versement n'a pas de répartition à comparer.
+    const poches = (row.repartition || []).filter((b) => b.reel_pct !== null);
+    if (!poches.length) return App.h('span', { class: 'sub' }, '—');
+    poches.forEach((b, i) => {
       const ecart = b.reel_pct - b.cible_pct;
       if (i) rep.append(App.h('span', { class: 'sub' }, ' · '));
       rep.append(App.h('span', {

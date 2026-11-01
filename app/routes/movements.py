@@ -263,7 +263,7 @@ def enregistrer_versements_du_mois():
         db.execute(
             "INSERT INTO asset_movements(id, asset_id, date, montant, type, quantite, "
             "prix_unitaire, ticker, frais, note) VALUES (?,?,?,?,'versement',?,?,?,0,?)",
-            (new_id(), aid, d, montant, quantite, prix, ticker, "Versement du mois"),
+            (new_id(), aid, d, montant, quantite, prix, ticker, services.NOTE_VERSEMENT_DU_MOIS),
         )
     db.commit()
     return jsonify({"ok": True, "crees": len(a_creer),

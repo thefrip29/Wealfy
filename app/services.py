@@ -411,12 +411,30 @@ def net_worth_at(at_date):
     return portfolio(at_date)["patrimoine_net"]
 
 
-def repartition(at_date=None, snap=None):
-    """Répartition cible vs réelle sur les poches définies en paramètres."""
-    snap = snap or portfolio(at_date)
+def repartition(at_date=None):
+    """Répartition cible vs réelle des VERSEMENTS du mois, poche par poche.
+
+    La cible est une stratégie de DCA : chaque mois, tant sur le livret, tant
+    sur le PEA, tant en crypto. Elle se compare donc à ce qui a été versé ce
+    mois-là, pas au patrimoine détenu, où un livret rempli depuis des années
+    écrasait toute la répartition. Un mois saisi par « + Versements du mois »
+    ne compte que ces saisies ; sinon tous ses versements, nets des retraits
+    (un échange de crypto, retrait puis versement, s'annule).
+    """
+    at_date = finance.parse_date(at_date) or date.today()
+    debut, fin = finance.month_bounds(at_date.year, at_date.month)
     buckets = get_setting("repartition_cible", []) or []
     if isinstance(buckets, dict):  # ancien format {type: pct}
         buckets = [{"label": k, "types": [k], "pct": v} for k, v in buckets.items()]
+
+    verse = versements_declares(debut, fin)
+    if not verse:
+        for r in query("SELECT asset_id, type, montant FROM asset_movements "
+                       "WHERE type IN ('versement', 'retrait') AND date >= ? AND date <= ?",
+                       [finance.iso(debut), finance.iso(fin)]):
+            signe = 1 if r["type"] == "versement" else -1
+            verse[r["asset_id"]] = verse.get(r["asset_id"], 0) + signe * abs(float(r["montant"] or 0))
+    actifs = [a for a in get_assets(True) if a["type"] != "CompteCourant"]
 
     # Une poche sans type coche se reconnait a son nom : celui d'un type
     # (« PEA ») ou celui d'un de vos produits (« Livret A »). Elle ne cherchait
@@ -431,9 +449,9 @@ def repartition(at_date=None, snap=None):
 
     couverts, out = set(), []
     for bucket in buckets:
-        dedans = [a for a in snap["assets"] if contenu(bucket)(a)]
+        dedans = [a for a in actifs if contenu(bucket)(a)]
         couverts |= {a["id"] for a in dedans}
-        montant = round(sum(a["valeur"] for a in dedans), 2)
+        montant = round(max(0.0, sum(verse.get(a["id"], 0) for a in dedans)), 2)
         out.append({
             "label": bucket.get("label"),
             "types": sorted(set(bucket.get("types") or []) or {a["type"] for a in dedans}),
@@ -442,12 +460,15 @@ def repartition(at_date=None, snap=None):
         })
     base = round(sum(b["montant"] for b in out), 2)
     for bucket in out:
-        bucket["reel_pct"] = round(100 * bucket["montant"] / base, 2) if base else 0.0
-        bucket["ecart_pct"] = round(bucket["reel_pct"] - bucket["cible_pct"], 2)
         cible_montant = base * bucket["cible_pct"] / 100
-        bucket["ecart_montant"] = round(bucket["montant"] - cible_montant, 2)
-    hors = round(sum(a["valeur"] for a in snap["assets"] if a["id"] not in couverts), 2)
-    return {"buckets": out, "base": base, "hors_poches": hors}
+        # Rien verse ce mois : pas d'ecart a constater, seulement un mois vide.
+        bucket["reel_pct"] = round(100 * bucket["montant"] / base, 2) if base else None
+        bucket["ecart_pct"] = (round(bucket["reel_pct"] - bucket["cible_pct"], 2)
+                               if base else None)
+        bucket["ecart_montant"] = round(bucket["montant"] - cible_montant, 2) if base else None
+    hors = round(max(0.0, sum(v for k, v in verse.items() if k not in couverts)), 2)
+    return {"mois": f"{at_date.year:04d}-{at_date.month:02d}", "base": base,
+            "buckets": out, "hors_poches": hors}
 
 
 # --- flux mensuels --------------------------------------------------------
@@ -505,6 +526,25 @@ def flows_cache(cache=None):
 
     cache["versements"] = _versements()
     return cache
+
+
+# Marque des versements saisis par « + Versements du mois ». Un mois qui en a
+# est DECLARE : ce que vous dites y avoir investi fait son epargne et sa
+# repartition, a l'exclusion de ce que l'app deduisait par ailleurs (achats
+# notes au fil de l'eau, ecart lu sur la valorisation d'un livret). Vous
+# saisissiez 1 180 EUR et en voyiez 1 086 : une valorisation d'octobre etait
+# lue comme un retrait de 244 EUR.
+NOTE_VERSEMENT_DU_MOIS = "Versement du mois"
+
+
+def versements_declares(debut, fin):
+    """{asset_id: montant} des versements du mois saisis par le bouton."""
+    out = defaultdict(float)
+    for r in query("SELECT asset_id, montant FROM asset_movements "
+                   "WHERE type = 'versement' AND note = ? AND date >= ? AND date <= ?",
+                   [NOTE_VERSEMENT_DU_MOIS, finance.iso(debut), finance.iso(fin)]):
+        out[r["asset_id"]] += abs(float(r["montant"] or 0))
+    return dict(out)
 
 
 def _versements(debut=None, fin=None):
@@ -612,6 +652,9 @@ def month_flows(year, month, cache=None):
         if t["amount"] < 0 and t["category"] in excluded and not t["asset_id"]
         and not _deja_verse(t, proches, utilises, tolerance)
     )
+    declares = versements_declares(start, end)
+    if declares:
+        versements = sum(declares.values())
     versements = round(versements, 2)
 
     return {
@@ -761,7 +804,7 @@ def monthly_archive(limit=None):
         snap = portfolio(as_of, cache=cache)
         if precedent is None:
             precedent = portfolio(fin_du_mois_precedent(as_of), cache=cache)
-        rep = repartition(as_of, snap)
+        rep = repartition(as_of)
         variation = decomposer_variation(snap, precedent)
         precedent = snap
         out.append({

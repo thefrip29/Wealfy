@@ -655,6 +655,17 @@ App.tabs.overview = {
         'Aucune poche définie. Configurez la répartition cible dans les paramètres.'));
       return;
     }
+    // La cible se compare aux versements du mois (« + Versements du mois »),
+    // pas au patrimoine détenu : c'est une stratégie de DCA.
+    if (!rep.base) {
+      host.append(App.h('p', { class: 'muted' },
+        `Aucun versement en ${App.fmt.month(rep.mois)}. `,
+        App.h('button', {
+          class: 'btn small',
+          onclick: () => App.tabs.wealth.openVersementsDuMois(rep.mois),
+        }, '+ Versements du mois')));
+      return;
+    }
     for (const b of rep.buckets) {
       const ecartClass = Math.abs(b.ecart_pct) < 5 ? 'ok' : 'warn';
       host.append(App.h('div', { class: 'rep-row' },
@@ -670,7 +681,7 @@ App.tabs.overview = {
           App.h('div', { class: 'rep-target', style: `left:${Math.min(100, b.cible_pct)}%` }))));
     }
     host.append(App.h('div', { class: 'rep-legend' },
-      App.h('span', {}, `Base : ${App.fmt.eur(rep.base)}`),
+      App.h('span', {}, `Versé en ${App.fmt.month(rep.mois)} : ${App.fmt.eur(rep.base)}`),
       rep.hors_poches ? App.h('span', {}, `Hors poches : ${App.fmt.eur(rep.hors_poches)}`) : null,
       App.h('span', {}, 'Trait vertical : la cible')));
   },
