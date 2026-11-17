@@ -1,6 +1,20 @@
-/* Paramètres : catégories, règles de classification, répartition cible,
-   frais annuels, types d'actifs personnalisés. */
+/* Paramètres.
+
+   Sept rubriques, une idée chacune, dans une colonne latérale. Il y avait
+   trois onglets de 1 100 à 1 600 pixels de haut, dont un — « Données et
+   apparence » — empilait sept sous-titres sans rapport entre eux : le thème,
+   les cours, les sauvegardes et les types d'actifs.
+
+   Trois règles tiennent l'ensemble :
+   - tout s'enregistre à la modification, sans exception ni bouton
+     « Enregistrer » isolé ;
+   - une rubrique dit en une phrase à quoi elle sert, et c'est tout : les
+     notes repliables expliquaient ce que les libellés doivent dire seuls ;
+   - un geste destructeur se confirme SUR PLACE. `App.confirm` remplace la
+     modale courante : supprimer une sauvegarde vous sortait des paramètres. */
 App.settings = {
+  CLE_RUBRIQUE: 'patrimoine.reglages.rubrique',
+
   async open(focus) {
     const [settings, rules, market] = await Promise.all([
       App.api.get('/api/settings'),
@@ -9,63 +23,87 @@ App.settings = {
     ]);
     App.state.settings = settings;
 
-    // Quatre sections dont le contenu correspond au titre. « Types d'actifs
-    // personnalisés » était logé sous « Cours de marché », avec lesquels il n'a
-    // rien à voir ; il rejoint les sauvegardes dans « Général ».
-    // Trois sections. Chacune porte les mots qui y mènent depuis ailleurs :
-    // la pastille « cours désactivés » ouvre sur « cours ».
-    const sections = [
-      ['Classement des dépenses', App.h('div', {},
-        App.settings.panelCategories(settings),
-        App.h('div', { class: 'section-title' }, 'Règles de classification'),
-        App.settings.panelRules(rules, settings)), ['classement', 'categorie']],
-      ['Objectifs', App.h('div', {},
-        App.settings.panelRepartition(settings),
-        App.h('div', { class: 'section-title' }, 'Épargne de précaution'),
-        App.settings.panelPrecaution(settings),
-        App.h('div', { class: 'section-title' }, 'Crédit des intérêts'),
-        App.settings.panelTaux(settings)), ['objectif', 'precaution', 'repartition']],
-      ['Données et apparence', App.h('div', {},
-        App.h('div', { class: 'section-title' }, 'Apparence'),
-        App.settings.panelApparence(),
-        App.h('div', { class: 'section-title' }, 'Cours de marché'),
-        App.settings.panelMarket(settings, market),
-        App.h('div', { class: 'section-title' }, 'Sauvegardes'),
-        App.settings.panelBackups(settings),
-        App.h('div', { class: 'section-title' }, 'Types d’actifs personnalisés'),
-        App.settings.panelAssetTypes(settings)), ['cours', 'sauvegarde', 'apparence', 'type']],
+    // Chaque rubrique porte les mots qui y mènent depuis ailleurs : la
+    // pastille « cours désactivés » de Patrimoine ouvre sur « cours ».
+    const rubriques = [
+      {
+        id: 'affichage', titre: 'Affichage', alias: ['apparence', 'theme'],
+        phrase: 'Thème et animations. Propres à cet ordinateur, ils ne suivent pas vos données.',
+        rendu: () => App.settings.panelApparence(),
+      },
+      {
+        id: 'categories', titre: 'Catégories', alias: ['categorie', 'classement', 'budget', 'role'],
+        phrase: 'Vos catégories, ce que chacune compte dans les calculs, et le budget visé.',
+        rendu: () => App.settings.panelCategories(settings),
+      },
+      {
+        id: 'regles', titre: 'Règles', alias: ['regle'],
+        phrase: 'Un mot du libellé, une catégorie : appliquées à chaque relevé importé.',
+        rendu: () => App.settings.panelRules(rules, settings),
+      },
+      {
+        id: 'objectifs', titre: 'Objectifs', alias: ['objectif', 'repartition', 'precaution'],
+        phrase: 'La répartition visée de votre patrimoine, et le coussin de sécurité.',
+        rendu: () => App.settings.panelObjectifs(settings),
+      },
+      {
+        id: 'patrimoine', titre: 'Patrimoine', alias: ['type', 'interet'],
+        phrase: 'Les types d’actifs que la liste ne propose pas, et la date des intérêts.',
+        rendu: () => App.settings.panelPatrimoine(settings),
+      },
+      {
+        id: 'cours', titre: 'Cours de marché', alias: ['cours', 'marche', 'cle'],
+        phrase: 'Valoriser actions, fonds et cryptos au cours du jour.',
+        rendu: () => App.settings.panelMarket(settings, market),
+      },
+      {
+        id: 'sauvegardes', titre: 'Sauvegardes', alias: ['sauvegarde', 'restaur'],
+        phrase: 'Une copie de vos données en CSV, lisible dans un tableur.',
+        rendu: () => App.settings.panelBackups(),
+      },
     ];
-    const cherche = (focus || '').toLowerCase();
-    const trouve = sections.findIndex(([label, , alias]) => cherche
-      && (label.toLowerCase().includes(cherche) || alias.some((a) => cherche.includes(a))));
-    const startIndex = trouve >= 0 ? trouve : 0;
 
-    const nav = App.h('div', { class: 'tabs-inline' });
-    const stack = App.h('div', {});
-    sections.forEach(([label, node], i) => {
-      const btn = App.h('button', { class: i === startIndex ? 'active' : '' }, label);
-      const panel = App.h('div', { class: `subpanel${i === startIndex ? ' active' : ''}` }, node);
-      btn.addEventListener('click', () => {
-        App.els('button', nav).forEach((b) => b.classList.remove('active'));
-        App.els('.subpanel', stack).forEach((p) => p.classList.remove('active'));
-        btn.classList.add('active');
-        panel.classList.add('active');
-      });
-      nav.append(btn);
-      stack.append(panel);
-    });
+    const cherche = (focus || '').toLowerCase();
+    let memorisee = null;
+    try { memorisee = localStorage.getItem(App.settings.CLE_RUBRIQUE); } catch (e) { /* ignore */ }
+    const parFocus = cherche && rubriques.find((r) => r.titre.toLowerCase().includes(cherche)
+      || r.alias.some((a) => cherche.includes(a)));
+    const depart = parFocus || rubriques.find((r) => r.id === memorisee) || rubriques[1];
+
+    const nav = App.h('nav', { class: 'reglages-nav', 'aria-label': 'Rubriques' });
+    const contenu = App.h('div', { class: 'reglages-contenu' });
+    const rendus = {};
+
+    // Rendu à la première visite seulement : les sauvegardes et la table des
+    // symboles interrogent le serveur, inutile de le faire pour une rubrique
+    // qu'on n'ouvrira pas.
+    const montrer = (r) => {
+      App.els('button', nav).forEach((b) => b.classList.toggle('active', b.dataset.id === r.id));
+      if (!rendus[r.id]) {
+        rendus[r.id] = App.h('section', { class: 'reglages-rubrique' },
+          App.h('h3', {}, r.titre),
+          App.h('p', { class: 'reglages-phrase' }, r.phrase),
+          r.rendu());
+      }
+      App.clear(contenu);
+      contenu.append(rendus[r.id]);
+      contenu.scrollTop = 0;
+      try { localStorage.setItem(App.settings.CLE_RUBRIQUE, r.id); } catch (e) { /* ignore */ }
+    };
+
+    for (const r of rubriques) {
+      const b = App.h('button', { type: 'button', 'data-id': r.id }, r.titre);
+      b.addEventListener('click', () => montrer(r));
+      nav.append(b);
+    }
+    nav.append(App.h('div', { class: 'reglages-auto' },
+      'Enregistrement automatique',
+      App.settings.temoin = App.h('span', { class: 'temoin', 'aria-live': 'polite' })));
 
     App.modal.open({
       title: 'Paramètres',
       wide: true,
-      // Deux modèles d'enregistrement coexistaient sans le dire : certains
-      // réglages s'écrivaient au clic, d'autres attendaient un bouton. Il n'en
-      // reste qu'un, et l'exception est annoncée là où elle se trouve.
-      body: App.h('div', {},
-        App.h('p', { class: 'hint', style: 'margin-bottom:12px' },
-          'Vos modifications sont enregistrées au fur et à mesure. ',
-          App.settings.temoin = App.h('span', { class: 'temoin', 'aria-live': 'polite' })),
-        nav, stack),
+      body: App.h('div', { class: 'reglages' }, nav, contenu),
       onClose: async () => {
         if (!App.settings.aRafraichir) return;
         App.settings.aRafraichir = false;
@@ -73,6 +111,7 @@ App.settings = {
       },
       footer: [App.h('button', { class: 'btn primary', onclick: () => App.modal.close() }, 'Fermer')],
     });
+    montrer(depart);
   },
 
   /* Reglages dont dependent les listes de reference de l'application. */
@@ -82,17 +121,10 @@ App.settings = {
   /* Reglages qui ne changent RIEN de ce qui est affiche a l'instant : ils
      n'agissent que sur de futurs imports ou de futurs appels reseau. */
   CLES_SANS_RENDU: ['market_api_key', 'market_auto_refresh',
-    'market_cache_ttl_hours'],
+    'market_cache_ttl_hours', 'market_provider'],
 
-  /* Chaque case cochee relancait un PUT, un `loadMeta` ET un `refreshAll`
-     complet — derriere une modale ouverte, ou rien de tout cela ne se voit.
-     Cocher six charges fixes, c'etait six fois trente lectures pour rien.
-
-     Le rafraichissement est donc reporte a la fermeture des reglages : une
-     seule fois, au moment ou l'on revient a la page. */
-  /* Un toast par case cochée, c'était un toast toutes les deux secondes, en
-     bas à droite, loin du regard. Un témoin discret à côté de la phrase qui
-     annonce l'enregistrement suffit ; les erreurs restent des toasts. */
+  /* Le rafraichissement de la page est reporte a la fermeture des reglages :
+     une seule fois, au moment ou l'on revient a ce qu'il change. */
   async save(patch, message = 'Enregistré') {
     try {
       await App.api.put('/api/settings', patch);
@@ -103,13 +135,17 @@ App.settings = {
       if (!cles.every((c) => App.settings.CLES_SANS_RENDU.includes(c))) {
         App.settings.aRafraichir = true;
       }
-    } catch (e) { App.toast(e.message, 'error'); }
+      return true;
+    } catch (e) {
+      App.toast(e.message, 'error');
+      return false;
+    }
   },
 
   signaler(message) {
     const t = App.settings.temoin;
     if (!t || !t.isConnected) return;
-    t.textContent = `\u2713 ${message}`;
+    t.textContent = `✓ ${message}`;
     t.classList.remove('visible');
     void t.offsetWidth;          // relance la transition
     t.classList.add('visible');
@@ -117,756 +153,67 @@ App.settings = {
     App.settings.temoinDelai = setTimeout(() => t.classList.remove('visible'), 1800);
   },
 
-  /* ---------- catégories ---------- */
-  panelCategories(settings) {
-    const build = (key, title, hint) => {
-      const list = App.h('div', { class: 'actions' });
-      const render = () => {
-        App.clear(list);
-        for (const cat of settings[key] || []) {
-          list.append(App.h('span', { class: 'pill' }, cat, ' ',
-            App.h('a', {
-              href: '#', style: 'color:var(--red);text-decoration:none',
-              onclick: async (e) => {
-                e.preventDefault();
-                settings[key] = settings[key].filter((c) => c !== cat);
-                render();
-                await App.settings.save({ [key]: settings[key] }, 'Catégorie supprimée');
-              },
-            }, '×')));
-        }
-      };
-      render();
-      const input = App.input('new', { placeholder: 'Nouvelle catégorie…' });
-      const add = async () => {
-        const value = input.value.trim();
-        if (!value) return;
-        if ((settings[key] || []).includes(value)) return App.toast('Déjà présente', 'error');
-        settings[key] = [...(settings[key] || []), value];
-        input.value = '';
-        render();
-        await App.settings.save({ [key]: settings[key] }, 'Catégorie ajoutée');
-      };
-      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
-      return App.h('div', {},
-        App.h('div', { class: 'section-title' }, title),
-        hint ? App.h('p', { class: 'hint' }, hint) : null,
-        list,
-        App.h('div', { class: 'actions', style: 'margin-top:10px' },
-          input, App.h('button', { class: 'btn', onclick: add }, 'Ajouter')));
-    };
+  /* ---------- briques communes ---------- */
 
-    /* Le rôle de chaque catégorie de dépense, en un seul tableau.
-
-       C'était trois listes de cases à cocher, empilées, portant chacune la même
-       liste de catégories sous trois titres différents. Il fallait parcourir
-       l'écran trois fois pour savoir ce qu'une catégorie faisait, et rien ne
-       montrait qu'une même catégorie pouvait se retrouver cochée dans deux
-       colonnes qui se contredisent — épargne et virement interne, par exemple.
-       Une ligne par catégorie, trois colonnes : la contradiction se voit. */
-    const ROLES = [
-      ['categories_non_depense', 'Épargne',
-        'Comptée comme épargne plutôt que comme dépense, et entre dans le taux d’épargne'],
-      ['categories_charges_fixes', 'Charge fixe',
-        'Tombe tous les mois quoi qu’il arrive ; sert au calcul du reste à vivre'],
-      ['categories_transfert', 'Virement interne',
-        'Ni dépense, ni revenu, ni épargne : l’argent a seulement changé de poche'],
-    ];
-
-    const tableRoles = () => {
-      const tbody = App.h('tbody', {});
-      const render = () => {
-        App.clear(tbody);
-        const cats = settings.categories_depenses || [];
-        if (!cats.length) {
-          tbody.append(App.h('tr', {}, App.h('td', { colspan: 5, class: 'empty' },
-            'Aucune catégorie de dépense.')));
-          return;
-        }
-        const budgets = Object.assign({}, settings.budgets_categories || {});
-        for (const cat of cats) {
-          const cellules = ROLES.map(([key, , titre]) => {
-            const cb = App.h('input', { type: 'checkbox', title: titre });
-            cb.checked = (settings[key] || []).includes(cat);
-            cb.addEventListener('change', async () => {
-              const set = new Set(settings[key] || []);
-              if (cb.checked) set.add(cat); else set.delete(cat);
-              settings[key] = [...set];
-              await App.settings.save({ [key]: settings[key] }, 'Rôles mis à jour');
-            });
-            return App.h('td', { class: 'center' }, cb);
-          });
-          // Le budget vit dans le meme tableau que les roles : c'est la meme
-          // question posee a la meme ligne — ce que fait cette categorie, et
-          // combien j'y mets. Enregistre a la sortie du champ, pas a la frappe.
-          const montant = App.input('b', {
-            type: 'number', step: '1', placeholder: '\u2014',
-            value: budgets[cat] ?? '',
-          });
-          montant.addEventListener('change', async () => {
-            const v = parseFloat(montant.value);
-            if (Number.isFinite(v) && v > 0) budgets[cat] = v;
-            else delete budgets[cat];
-            settings.budgets_categories = budgets;
-            await App.settings.save({ budgets_categories: budgets },
-              'Budgets mis \u00e0 jour');
-          });
-          tbody.append(App.h('tr', {}, App.h('td', {}, cat), ...cellules,
-            App.h('td', { class: 'budget-cell' }, montant)));
-        }
-      };
-      render();
-      return App.h('div', { class: 'table-wrap scroll-y' },
-        App.h('table', { class: 'table' },
-          App.h('thead', {}, App.h('tr', {},
-            App.h('th', {}, 'Catégorie'),
-            ...ROLES.map(([, libelle, titre]) => App.h('th', {
-              class: 'center', title: titre,
-            }, libelle)),
-            App.h('th', {
-              class: 'right', style: 'width:130px',
-              title: 'Montant mensuel vis\u00e9 ; laiss\u00e9 vide, aucun budget',
-            }, 'Budget / mois'))),
-          tbody));
-    };
-
-    return App.h('div', {},
-      build('categories_depenses', 'Catégories de dépenses'),
-      build('categories_revenus', 'Catégories de revenus'),
-
-      App.h('div', { class: 'section-title' }, 'Rôle de chaque catégorie'),
-      App.note('Ce que chaque colonne change',
-        App.h('p', {}, App.h('strong', {}, 'Épargne'),
-          ' : un virement vers un livret n’est pas une dépense. Coché, il est '
-          + 'compté comme épargne et entre dans le taux d’épargne.'),
-        App.h('p', {}, App.h('strong', {}, 'Charge fixe'),
-          ' : ce qui tombe tous les mois quoi qu’il arrive. Ce qui reste une fois '
-          + 'ces charges et votre épargne mises de côté, c’est votre reste à vivre.'),
-        App.h('p', {}, App.h('strong', {}, 'Virement interne'),
-          ' : un virement LCL → Revolut apparaît deux fois, en débit sur un relevé '
-          + 'et en crédit sur l’autre. Ces catégories ne comptent ni comme dépense, '
-          + 'ni comme revenu, ni comme épargne.')),
-      tableRoles());
-  },
-
-  /* ---------- règles ---------- */
-  panelRules(rules, settings) {
-    const tbody = App.h('tbody', {});
-    const render = () => {
-      App.clear(tbody);
-      if (!rules.length) {
-        tbody.append(App.h('tr', {}, App.h('td', { colspan: 5, class: 'empty' },
-          'Aucune règle. Les revenus (salaire, parents, loyers) ne peuvent pas être devinés '
-          + 'sans règle : définissez-les ici une fois pour toutes.')));
-      }
-      for (const r of rules) {
-        tbody.append(App.h('tr', {},
-          App.h('td', {}, App.h('code', {}, r.pattern)),
-          App.h('td', {}, r.cible_type === 'type_revenu' ? 'Revenu' : 'Dépense'),
-          App.h('td', {}, App.h('span', { class: 'pill accent' }, r.valeur)),
-          App.h('td', { class: 'right num' }, r.priorite),
-          App.h('td', { class: 'right' }, App.h('button', {
-            class: 'icon-btn',
-            onclick: async () => {
-              await App.api.del(`/api/rules/${r.id}`);
-              rules.splice(rules.indexOf(r), 1);
-              render();
-              App.settings.signaler('Règle supprimée');
-            },
-          }, '×'))));
-      }
-    };
-    render();
-
-    const pattern = App.input('pattern', { placeholder: 'ex : VIREMENT DUPONT' });
-    const cible = App.select('cible_type',
-      [['categorie_depense', 'Dépense'], ['type_revenu', 'Revenu']], 'categorie_depense');
-    const valeur = App.select('valeur', App.categoriesAll(), 'Salaire');
-
-    const add = async () => {
-      if (!pattern.value.trim()) return App.toast('Motif requis', 'error');
-      try {
-        const res = await App.api.post('/api/rules', {
-          pattern: pattern.value.trim(), cible_type: cible.value,
-          valeur: valeur.value,
-        });
-        rules.push({
-          id: res.id, pattern: pattern.value.trim(), cible_type: cible.value,
-          valeur: valeur.value, priorite: 100,
-        });
-        pattern.value = '';
-        render();
-        App.settings.signaler('Règle ajoutée');
-      } catch (e) { App.toast(e.message, 'error'); }
-    };
-
-    const applyNow = async () => {
-      try {
-        const res = await App.api.post('/api/rules/apply', { seulement_non_categorise: true });
-        App.toast(`${res.modifiees} transaction(s) reclassée(s)`, 'success');
-        await App.refreshAll();
-      } catch (e) { App.toast(e.message, 'error'); }
-    };
-
-    return App.h('div', {},
-      App.h('p', { class: 'hint' },
-        'Le motif est cherché dans le libellé, sans tenir compte de la casse ni des '
-        + 'accents. Le remboursement de prêt, lui, est détecté par le montant et '
-        + 'la date, sans règle. Le plus simple reste de classer une ligne dans la '
-        + 'liste : l’application propose alors d’en faire une règle.'),
-      App.note('Classer un virement entre vos comptes',
-        App.h('p', {},
-          'C’est une règle comme une autre : donnez le motif qui revient dans le '
-          + 'libellé — « revolut », « virement interne » — et choisissez une '
-          + 'catégorie marquée « virement interne » dans le tableau des rôles.'),
-        App.h('p', {},
-          'Après un import, l’application propose de son côté les paires '
-          + 'débit/crédit qu’elle repère entre deux relevés : ce rapprochement '
-          + 'rattrape ce qu’aucun motif ne décrit.')),
-      App.h('div', { class: 'table-wrap scroll-y', style: 'margin-top:10px' },
-        App.h('table', { class: 'table' },
-          App.h('thead', {}, App.h('tr', {},
-            App.h('th', {}, 'Motif'), App.h('th', {}, 'Cible'), App.h('th', {}, 'Valeur'),
-            App.h('th', { class: 'right' }, 'Priorité'), App.h('th', {}))),
-          tbody)),
-      App.h('div', { class: 'section-title' }, 'Nouvelle règle'),
-      App.h('div', { class: 'form-grid' },
-        App.field('Motif', pattern),
-        App.field('Cible', cible),
-        App.field('Valeur attribuée', valeur)),
-      App.h('div', { class: 'actions', style: 'margin-top:12px' },
-        App.h('button', { class: 'btn primary', onclick: add }, 'Ajouter la règle'),
-        App.h('button', { class: 'btn', onclick: applyNow },
-          'Appliquer aux transactions non catégorisées')));
-  },
-
-  /* ---------- répartition cible ---------- */
-  panelRepartition(settings) {
-    let buckets = JSON.parse(JSON.stringify(settings.repartition_cible || []));
-    if (!Array.isArray(buckets)) {
-      buckets = Object.entries(buckets).map(([k, v]) => ({ label: k, types: [k], pct: v }));
+  /* Confirmation sur place : le bouton change de libellé et attend un second
+     clic dans les quatre secondes. Pas de modale par-dessus — il n'y en a
+     qu'une, et l'ouvrir fermerait les paramètres. */
+  confirmerSurPlace(bouton, question, action) {
+    if (bouton.dataset.arme === '1') {
+      clearTimeout(bouton._delai);
+      bouton.dataset.arme = '';
+      bouton.textContent = bouton.dataset.libelle;
+      bouton.classList.remove('arme');
+      return action();
     }
-    const allTypes = (App.state.meta.asset_types || []).map((t) => t.type);
-    const host = App.h('div', {});
-    const totalNode = App.h('p', { class: 'hint' });
-
-    // Enregistrement à la modification, comme les catégories. Le bouton
-    // « Enregistrer » qui gardait ces poches était un piège : les catégories
-    // et les cases à cocher, elles, s'écrivaient toutes seules, et rien ne
-    // distinguait les deux à l'écran. Une répartition retouchée puis abandonnée
-    // était perdue en silence.
-    const enregistrer = () => App.settings.save(
-      { repartition_cible: buckets }, 'Répartition enregistrée');
-
-    const render = () => {
-      App.clear(host);
-      buckets.forEach((b, i) => {
-        // Des cases plutôt qu'une liste à sélection multiple : le Ctrl+clic
-        // était un geste caché, et un clic sans lui effaçait tout le choix.
-        const typesSel = App.h('div', { class: 'cases-types' });
-        // Sans type coché, le serveur compte le type ou le produit qui porte
-        // le nom de la poche. Si aucun ne le porte, elle reste à 0 % : on le
-        // dit ici plutôt que de laisser un écart incompréhensible.
-        const nomsProduits = (App.state.assets || []).map((a) => (a.label || '').trim().toLowerCase());
-        const avertir = App.h('p', { class: 'hint', style: 'grid-column:1/-1' });
-        const verifier = () => {
-          const coches = (b.types || []).length;
-          const nom = (b.label || '').trim().toLowerCase();
-          const reconnu = allTypes.some((t) => t.toLowerCase() === nom)
-            || nomsProduits.includes(nom);
-          avertir.textContent = coches ? ''
-            : (reconnu
-              ? `Aucun type coché : seul ce qui s’appelle « ${b.label} » est compté.`
-              : 'Aucun type coché : cette poche restera à 0 %. Cochez les types qu’elle regroupe.');
-          avertir.classList.toggle('alerte-txt', !coches && !reconnu);
-        };
-        for (const t of allTypes) {
-          const cb = App.h('input', { type: 'checkbox', value: t });
-          cb.checked = (b.types || []).includes(t);
-          cb.addEventListener('change', () => {
-            b.types = Array.from(typesSel.querySelectorAll('input:checked'))
-              .map((c) => c.value);
-            verifier();
-            enregistrer();
-          });
-          typesSel.append(App.h('label', { class: 'checkline' }, cb, t));
-        }
-        verifier();
-        const labelIn = App.input('l', { value: b.label || '' });
-        labelIn.addEventListener('input', () => { b.label = labelIn.value; verifier(); });
-        labelIn.addEventListener('change', enregistrer);
-        const pctIn = App.input('p', { type: 'number', step: '0.1', value: b.pct ?? 0 });
-        pctIn.addEventListener('input', () => {
-          b.pct = parseFloat(pctIn.value) || 0;
-          updateTotal();
-        });
-        pctIn.addEventListener('change', enregistrer);
-        host.append(App.h('div', { class: 'form-grid', style: 'margin-bottom:10px' },
-          App.field('Poche', labelIn),
-          App.field('Cible (%)', pctIn),
-          App.field("Types d'actifs inclus", typesSel),
-          App.h('div', { class: 'field' }, App.h('label', {}, ' '),
-            App.h('button', {
-              class: 'btn danger',
-              onclick: () => { buckets.splice(i, 1); render(); updateTotal(); enregistrer(); },
-            }, 'Retirer')),
-          avertir));
-      });
-    };
-    const updateTotal = () => {
-      const total = buckets.reduce((s, b) => s + (parseFloat(b.pct) || 0), 0);
-      totalNode.textContent = `Total des cibles : ${App.fmt.num(total, 1)} %`
-        + (Math.abs(total - 100) > 0.01 ? ' — attention, la somme n’est pas 100 %.' : ' ✓');
-    };
-    render(); updateTotal();
-
-    return App.h('div', {},
-      App.h('p', { class: 'hint' },
-        'Stratégie DCA : définissez la cible de chaque poche. L’écart cible / réel est '
-        + 'affiché sur la vue d’ensemble et dans l’archive mensuelle.'),
-      App.h('div', { style: 'margin-top:12px' }, host),
-      totalNode,
-      App.h('div', { class: 'actions', style: 'margin-top:12px' },
-        App.h('button', {
-          class: 'btn',
-          onclick: () => {
-            buckets.push({ label: 'Nouvelle poche', types: [], pct: 0 });
-            render(); updateTotal();
-          },
-        }, '+ Poche')));
+    bouton.dataset.libelle = bouton.textContent;
+    bouton.dataset.arme = '1';
+    bouton.textContent = question;
+    bouton.classList.add('arme');
+    bouton._delai = setTimeout(() => {
+      bouton.dataset.arme = '';
+      bouton.textContent = bouton.dataset.libelle;
+      bouton.classList.remove('arme');
+    }, 4000);
+    return null;
   },
 
-  /* ---------- épargne de précaution ----------
-     Le seuil vivait en deux endroits : 3 mois en dur sous l'indicateur de la
-     synthèse, 4 mois dans l'observation. Un seul réglage, lu par les deux. */
-  panelPrecaution(settings) {
-    const moisIn = App.input('mois', {
-      type: 'number', min: 1, max: 24, step: '1',
-      value: settings.mois_precaution_cible ?? 4,
-    });
-    moisIn.addEventListener('change', () => {
-      const v = Math.min(24, Math.max(1, parseInt(moisIn.value, 10) || 4));
-      moisIn.value = v;
-      App.settings.save({ mois_precaution_cible: v }, 'Cible enregistrée');
-    });
-    return App.h('div', {},
-      App.h('p', { class: 'hint' },
-        'Le nombre de mois de dépenses que vos livrets doivent couvrir. '
-        + 'En dessous, la couverture d’urgence passe en alerte.'),
-      App.h('div', { class: 'form-grid', style: 'margin-top:12px' },
-        App.field('Mois de dépenses', moisIn)));
+  boutonRetirer(titre, action) {
+    const b = App.h('button', { type: 'button', class: 'icon-btn retirer', title: titre, 'aria-label': titre }, '×');
+    b.addEventListener('click', action);
+    return b;
   },
 
-  /* Date de capitalisation des livrets et depots a terme. */
-  panelTaux(settings) {
-    const courant = String(settings.date_credit_interets || '12-31');
-    const [mm, jj] = courant.split('-');
-    const jourIn = App.input('jour', { type: 'number', min: 1, max: 31, value: Number(jj) || 31 });
-    const moisIn = App.select('mois', [
-      ['01', 'janvier'], ['02', 'février'], ['03', 'mars'], ['04', 'avril'],
-      ['05', 'mai'], ['06', 'juin'], ['07', 'juillet'], ['08', 'août'],
-      ['09', 'septembre'], ['10', 'octobre'], ['11', 'novembre'], ['12', 'décembre'],
-    ], mm || '12');
-
-    const save = async () => {
-      const j = Math.min(31, Math.max(1, parseInt(jourIn.value, 10) || 31));
-      const valeur = `${moisIn.value}-${String(j).padStart(2, '0')}`;
-      await App.settings.save({ date_credit_interets: valeur },
-        'Date de crédit enregistrée');
-    };
-    jourIn.addEventListener('change', save);
-    moisIn.addEventListener('change', save);
-
-    return App.h('div', {},
-      App.h('p', { class: 'hint' },
-        'Le jour où vos intérêts sont versés sur le capital. C’est le '
-        + '31 décembre pour la plupart des livrets — à changer seulement si vous '
-        + 'détenez un dépôt à terme qui crédite à sa date anniversaire.'),
-      App.h('div', { class: 'form-grid', style: 'margin-top:12px' },
-        App.field('Jour', jourIn),
-        App.field('Mois', moisIn)),
-      App.note('Ce que cette date change',
-        App.h('p', {},
-          'Jusqu’à elle, la valeur affichée d’un livret reste le capital, celui de '
-          + 'votre relevé bancaire. Les intérêts à venir sont indiqués à côté, et '
-          + 'viennent s’ajouter au capital à l’échéance.'),
-        App.h('p', {},
-          'Elle vaut pour le Livret A, le LDDS, le LEP, le Livret Jeune, le PEL et '
-          + 'le CEL, qui créditent tous au 31 décembre.')));
-  },
-
-  /* ---------- sauvegardes CSV ---------- */
-  panelBackups(settings) {
-    const host = App.h('div', {});
-    const tbody = App.h('tbody', {});
-    const entete = App.h('p', { class: 'hint' });
-
-    const octets = (n) => (n < 1024 ? `${n} o`
-      : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} Ko`
-        : `${(n / 1024 / 1024).toFixed(1)} Mo`);
-
-    const recharger = async () => {
-      let data;
-      try { data = await App.api.get('/api/backups'); }
-      catch (e) { return App.toast(e.message, 'error'); }
-
-      entete.textContent = data.sauvegardes.length
-        ? `${data.sauvegardes.length} sauvegarde(s), ${octets(data.taille_totale)} en tout `
-          + `· les ${data.maximum} plus récentes sont conservées`
-        : 'Aucune sauvegarde pour le moment.';
-
-      App.clear(tbody);
-      if (!data.sauvegardes.length) {
-        tbody.append(App.h('tr', {}, App.h('td', { colspan: 4, class: 'empty' },
-          'Cliquez sur « Sauvegarder maintenant » pour créer la première.')));
+  /* Un champ suivi de son bouton : la ligne d'ajout, partout la même. */
+  ligneAjout(champs, libelle, action) {
+    const bouton = App.h('button', { type: 'button', class: 'btn' }, libelle);
+    bouton.addEventListener('click', action);
+    for (const c of champs) {
+      if (c.tagName === 'INPUT') {
+        c.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); action(); } });
       }
-      for (const s of data.sauvegardes) {
-        tbody.append(App.h('tr', {},
-          App.h('td', { class: 'nowrap' }, App.fmt.dateTime(s.date)),
-          App.h('td', { class: 'right num' },
-            s.patrimoine_net === null ? '—' : App.fmt.eur(s.patrimoine_net)),
-          App.h('td', { class: 'right num' }, octets(s.taille)),
-          App.h('td', { class: 'right' },
-            App.h('button', {
-              class: 'btn small',
-              title: 'Remplacer vos données actuelles par celles-ci',
-              onclick: () => App.settings.confirmRestore(s, recharger),
-            }, 'Restaurer'),
-            ' ',
-            App.h('button', {
-              class: 'btn small danger',
-              onclick: () => App.confirm(
-                `Supprimer la sauvegarde du ${App.fmt.dateTime(s.date)} ?`,
-                async () => {
-                  await App.api.del(`/api/backups/${s.id}`);
-                  App.toast('Sauvegarde supprimée', 'success');
-                  await recharger();
-                }),
-            }, '×'))));
-      }
-    };
-
-    const sauvegarder = async (btn) => {
-      btn.classList.add('busy');
-      try {
-        const res = await App.api.post('/api/backups', {});
-        if (res.inchange) {
-          App.toast(res.message, 'success');
-        } else {
-          App.toast(`Sauvegarde créée — ${res.fichiers} fichiers, ${octets(res.taille)}`
-            + (res.anciennes_supprimees.length
-              ? ` · ${res.anciennes_supprimees.length} ancienne(s) effacée(s)` : ''),
-          'success');
-        }
-        await recharger();
-      } catch (e) { App.toast(e.message, 'error'); }
-      btn.classList.remove('busy');
-    };
-
-    recharger();
-
-    return App.h('div', {}, host,
-      App.h('p', { class: 'hint' },
-        'Chaque sauvegarde est un dossier horodaté contenant un fichier CSV par '
-        + 'table, plus un « resume.csv » qui se lit directement dans un tableur.'),
-      App.h('div', { class: 'actions', style: 'margin:14px 0' },
-        App.h('button', {
-          class: 'btn primary', onclick: (e) => sauvegarder(e.target),
-        }, 'Sauvegarder maintenant'),
-        App.h('button', {
-          class: 'btn',
-          onclick: async () => {
-            try { await App.api.post('/api/backups/open', {}); }
-            catch (e) { App.toast(e.message, 'error'); }
-          },
-        }, 'Ouvrir le dossier')),
-      entete,
-      App.h('div', { class: 'table-wrap scroll-y', style: 'margin-top:10px' },
-        App.h('table', { class: 'table' },
-          App.h('thead', {}, App.h('tr', {},
-            App.h('th', {}, 'Date'),
-            App.h('th', { class: 'right' }, 'Patrimoine net'),
-            App.h('th', { class: 'right' }, 'Taille'),
-            App.h('th', {}))),
-          tbody)),
-      App.note('Pourquoi les fichiers restent légers',
-        App.h('p', {},
-          'Le cache des cours de marché n’est pas sauvegardé : il se '
-          + 'retélécharge d’un clic, et c’est la table qui grossit le plus vite '
-          + '(un cours par ligne et par jour).'),
-        App.h('p', {},
-          'Rien n’est réécrit si rien n’a changé depuis la dernière sauvegarde, '
-          + 'et les plus anciennes sont effacées automatiquement au-delà du '
-          + 'nombre conservé.'),
-        App.h('p', {},
-          'Votre clé API n’est pas exportée : elle resterait en clair dans '
-          + 'autant de fichiers que de sauvegardes.')));
+    }
+    return App.h('div', { class: 'reglages-ajout' }, ...champs, bouton);
   },
 
-  confirmRestore(s, apres) {
-    App.modal.open({
-      title: 'Restaurer cette sauvegarde ?',
-      body: App.h('div', {},
-        App.h('p', {},
-          `Vos données actuelles seront remplacées par celles du `
-          + `${App.fmt.dateTime(s.date)}`
-          + (s.patrimoine_net === null ? '' : ` (patrimoine net ${App.fmt.eur(s.patrimoine_net)})`)
-          + '.'),
-        App.h('p', { class: 'callout' },
-          'Tout ce que vous avez saisi depuis cette date sera perdu. '
-          + 'Une sauvegarde de sécurité est prise juste avant, ce qui permet de '
-          + 'revenir en arrière — mais l’opération n’est pas anodine.')),
-      footer: [
-        App.h('button', { class: 'btn', onclick: () => App.modal.close() }, 'Annuler'),
-        App.h('button', {
-          class: 'btn danger',
-          onclick: async () => {
-            try {
-              const res = await App.api.post(`/api/backups/${s.id}/restore`, {});
-              App.modal.close();
-              App.toast(`${res.lignes} ligne(s) restaurée(s)`, 'success');
-              await apres();
-              await App.refreshAll();
-            } catch (e) { App.toast(e.message, 'error'); }
-          },
-        }, 'Restaurer'),
-      ],
-    });
+  bloc(titre, ...enfants) {
+    return App.h('div', { class: 'reglages-bloc' },
+      titre ? App.h('h4', {}, titre) : null, ...enfants);
   },
 
-  /* ---------- cours de marché ---------- */
-  panelMarket(settings, status) {
-    const enabled = App.h('input', { type: 'checkbox' });
-    enabled.checked = !!settings.market_enabled;
-    const providerSel = App.select('market_provider', [
-      ['twelvedata', 'Twelve Data (titres, clé requise)'],
-      ['yahoo', 'Yahoo Finance (sans clé, API non officielle)'],
-    ], settings.market_provider);
-    /* La clé n'est plus renvoyée par l'API : le serveur n'expose qu'un booléen
-       (voir CLES_SECRETES dans app/routes/settings.py). Le champ part donc
-       toujours vide, et son texte d'invite dit l'état plutôt que la valeur. */
-    const cleEnPlace = !!settings.market_api_key_configuree;
-    const keyIn = App.input('market_api_key', {
-      type: 'password', value: '',
-      placeholder: cleEnPlace ? 'clé enregistrée — laisser vide pour la garder'
-        : 'clé API Twelve Data',
-    });
-
-    const save = () => {
-      const reglages = {
-        market_enabled: enabled.checked,
-        market_provider: providerSel.value,
-      };
-      /* Champ vide alors qu'une clé existe : on ne l'envoie PAS. Sans cette
-         garde, le simple fait d'enregistrer un autre réglage effacerait la clé,
-         puisque le champ ne peut plus être pré-rempli. Pour la retirer
-         volontairement, le bouton « Oublier la clé » ci-dessous. */
-      const saisie = keyIn.value.trim();
-      if (saisie || !cleEnPlace) reglages.market_api_key = saisie;
-      App.settings.save(reglages, 'Réglages des cours enregistrés');
-    };
-
-    const oublierCle = async () => {
-      await App.settings.save({ market_api_key: '' }, 'Clé oubliée');
-      keyIn.value = '';
-    };
-
-    /* --- test d'un symbole : la vérification de couverture Euronext --- */
-    const testSym = App.input('sym', { placeholder: 'ex : CW8' });
-    const testEx = App.input('exch', { placeholder: 'ex : Euronext' });
-    const testOut = App.h('div', { class: 'hint' });
-    const runTest = async () => {
-      testOut.textContent = 'Test en cours…';
-      try {
-        const res = await App.api.post('/api/market/test', {
-          symbol: testSym.value.trim(), exchange: testEx.value.trim(),
-        });
-        App.clear(testOut);
-        testOut.append(res.ok
-          ? App.h('span', { class: 'pill ok' },
-            `${res.symbole} : ${App.fmt.num(res.price, 4)} ${res.currency}`
-            + (res.exchange ? ` · ${res.exchange}` : '')
-            + ` · ${App.fmt.date(res.date)}`)
-          : App.h('span', { class: 'pill warn' }, `${res.symbole} : ${res.erreur}`));
-      } catch (e) {
-        App.clear(testOut);
-        testOut.append(App.h('span', { class: 'pill warn' }, e.message));
-      }
-    };
-
-    /* --- correspondances ticker -> symbole --- */
-    const tbody = App.h('tbody', {});
-    const renderSecurities = async () => {
-      const data = await App.api.get('/api/securities');
-      const bySymbol = Object.fromEntries(data.securities.map((s) => [s.ticker, s]));
-      const tickers = [...new Set([
-        ...data.tickers_utilises.map((t) => t.ticker),
-        ...data.securities.map((s) => s.ticker),
-      ])].sort();
-      App.clear(tbody);
-      if (!tickers.length) {
-        tbody.append(App.h('tr', {}, App.h('td', { colspan: 7, class: 'empty' },
-          'Aucun ticker dans vos mouvements. Renseignez le ticker ou l’ISIN '
-          + 'de vos achats pour pouvoir les coter.')));
-        return;
-      }
-      for (const ticker of tickers) {
-        const sec = bySymbol[ticker] || {};
-        const label = App.input('l', { value: sec.label || '', placeholder: 'nom affiché' });
-        const symbol = App.input('s', { value: sec.symbol || '', placeholder: 'symbole' });
-        const exchange = App.input('e', { value: sec.exchange || '', placeholder: 'place' });
-        const currency = App.input('c', { value: sec.currency || 'EUR' });
-        const bench = App.input('b', {
-          value: sec.benchmark_symbol || '', placeholder: 'indice de réf.',
-        });
-        const persist = async () => {
-          await App.api.post('/api/securities', {
-            ticker,
-            label: label.value.trim(),
-            symbol: symbol.value.trim(),
-            exchange: exchange.value.trim(),
-            currency: currency.value.trim().toUpperCase() || 'EUR',
-            benchmark_symbol: bench.value.trim(),
-          });
-        };
-        for (const input of [label, symbol, exchange, currency, bench]) {
-          input.addEventListener('change', async () => {
-            try { await persist(); App.settings.signaler('Correspondance enregistrée'); }
-            catch (e) { App.toast(e.message, 'error'); }
-          });
-        }
-        tbody.append(App.h('tr', {},
-          App.h('td', {}, App.h('code', {}, ticker)),
-          App.h('td', {}, label),
-          App.h('td', {}, symbol),
-          App.h('td', {}, exchange),
-          App.h('td', {}, currency),
-          App.h('td', {}, bench),
-          App.h('td', { class: 'right' },
-            sec.symbol ? App.h('span', { class: 'pill ok' }, 'mappé')
-              : App.h('span', { class: 'pill warn' }, 'à faire'))));
-      }
-    };
-    renderSecurities();
-
-    const statusLine = App.h('div', {});
-    const renderStatus = (s) => {
-      App.clear(statusLine);
-      const rows = [
-        ['État', s.active ? 'activé' : 'désactivé (aucun appel réseau)'],
-        ['Clé API', s.cle_configuree ? 'configurée' : 'absente'],
-        ['Dernier rafraîchissement', s.dernier_refresh
-          ? App.fmt.dateTime(s.dernier_refresh) : 'jamais'],
-        ['Cours en cache', String(s.nb_cours_en_cache)],
-        ['Tickers sans correspondance', s.tickers_non_mappes.length
-          ? s.tickers_non_mappes.join(', ') : 'aucun'],
-      ];
-      statusLine.append(App.metricList(rows));
-    };
-    renderStatus(status);
-
-    return App.h('div', {},
-      App.h('div', { class: 'callout' },
-        App.h('strong', {}, 'Ceci fait sortir des données de votre machine.'),
-        ' Une fois activés, les symboles interrogés et votre clé API sont envoyés '
-        + 'au fournisseur à chaque rafraîchissement. Vos montants, quantités et '
-        + 'transactions, eux, ne sortent jamais — mais une liste de tickers '
-        + 'renseigne déjà sur la composition de votre portefeuille. '
-        + 'La clé est stockée en clair dans patrimoine.db.'),
-
-      App.h('div', { class: 'form-grid', style: 'margin-top:16px' },
-        App.field('Activer les cours de marché', enabled),
-        App.field('Fournisseur', providerSel),
-        App.field('Clé API', keyIn, {
-          hint: cleEnPlace
-            ? 'gratuite sur twelvedata.com — une clé est déjà enregistrée, '
-              + 'laissez le champ vide pour la conserver'
-            : 'gratuite sur twelvedata.com',
-        })),
-      // Seule section qui garde un bouton, et c'est délibéré : le reste des
-      // réglages s'enregistre à la modification, mais activer les cours fait
-      // sortir des données de la machine. Un réglage à conséquence se confirme.
-      //
-      // Le rafraîchissement, lui, se déclenchait de trois endroits : ici, la
-      // barre de l'onglet Patrimoine, et l'automatique au lancement. Seul celui
-      // de la barre reste, là où la pastille dit si les cours sont à jour.
-      App.h('div', { class: 'actions', style: 'margin-top:12px' },
-        App.h('button', { class: 'btn primary', onclick: save }, 'Enregistrer'),
-        cleEnPlace ? App.h('button', { class: 'btn', onclick: oublierCle },
-          'Oublier la clé') : null),
-
-      App.h('div', { class: 'section-title' }, 'État'),
-      statusLine,
-
-      // Rarement utile : la recherche depuis la fiche d'un actif remplit la
-      // table toute seule. Disponible pour corriger, replié sinon.
-      App.note('Avancé : symboles et correspondances',
-      App.h('div', { class: 'section-title' }, 'Vérifier la couverture d’un symbole'),
-      App.h('p', { class: 'hint' },
-        'À faire avant de vous fier aux valorisations : les offres gratuites couvrent '
-        + 'bien mieux les valeurs américaines que les ETF Euronext éligibles PEA.'),
-      App.h('div', { class: 'form-grid', style: 'margin-top:10px' },
-        App.field('Symbole ou ISIN', testSym),
-        App.field('Place (facultatif)', testEx),
-        App.h('div', { class: 'field' }, App.h('label', {}, ' '),
-          App.h('button', { class: 'btn', onclick: runTest }, 'Tester'))),
-      App.h('div', { style: 'margin-top:10px' }, testOut),
-
-      App.h('div', { class: 'section-title' }, 'Correspondance de vos lignes'),
-      App.h('p', { class: 'hint' },
-        'Pour corriger un symbole, ou en saisir un que la recherche ne trouve '
-        + 'pas. L’indice de référence sert à la comparaison de performance.'),
-      App.h('div', { class: 'table-wrap scroll-y', style: 'margin-top:10px' },
-        App.h('table', { class: 'table' },
-          App.h('thead', {}, App.h('tr', {},
-            App.h('th', {}, 'Ticker / ISIN'), App.h('th', {}, 'Nom affiché'),
-            App.h('th', {}, 'Symbole fournisseur'),
-            App.h('th', {}, 'Place'), App.h('th', {}, 'Devise'),
-            App.h('th', {}, 'Indice de réf.'), App.h('th', { class: 'right' }, 'État'))),
-          tbody))),
-
-      App.h('p', { class: 'hint', style: 'margin-top:12px' },
-        'Livrets et dépôts à terme n’utilisent pas d’API : renseignez leur taux annuel '
-        + 'dans la fiche de l’actif, les intérêts sont calculés par quinzaines. '
-        + 'L’immobilier se réévalue par indice INSEE ou par un taux annuel saisi.'));
-  },
-
-  /* ---------- apparence ----------
-
-     `App.setAnimations` existait, `App.animationsEconomes` aussi, et RIEN ne
-     les appelait : le mode économe n'était atteignable qu'en écrivant dans
-     `localStorage` depuis une console — que l'application, ouverte dans sa
-     propre fenêtre, n'offre pas. Voici l'interrupteur qui manquait.
-
-     Le réglage ne passe pas par le serveur : il vaut pour cette machine, pas
-     pour ces données, et une sauvegarde restaurée ailleurs n'a pas à imposer
-     le mode d'affichage d'un autre écran. */
+  /* ---------- affichage ---------- */
   panelApparence() {
-    const reduit = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const cb = App.h('input', { type: 'checkbox', disabled: reduit || null });
-    cb.checked = App.animationsEconomes() || reduit;
-    cb.addEventListener('change', () => {
-      App.setAnimations(cb.checked);
-      App.settings.signaler(cb.checked ? 'Animations allégées' : 'Animations complètes');
-    });
-
-    // Une case a cocher seule dans une `form-grid` flottait au milieu d'une
-    // cellule dimensionnee pour un champ de saisie. `checkline` est le motif
-    // deja utilise ailleurs pour une case suivie de son libelle.
-    // Le thème quitte la barre du haut : un bouton à trois états cachait son
-    // état sous une icône. Ici les trois crans se lisent d'un coup.
     const theme = App.h('div', { class: 'segmente' });
     const peindreTheme = () => {
       App.clear(theme);
       for (const [code, libelle] of [['systeme', 'Système'], ['clair', 'Clair'], ['sombre', 'Sombre']]) {
         const actif = App.themeChoisi() === code;
         theme.append(App.h('button', {
+          type: 'button',
           class: `segmente-cran${actif ? ' actif' : ''}`,
           'aria-pressed': actif ? 'true' : 'false',
           onclick: () => {
             App.setTheme(code);
-            // Les graphiques lisent leurs couleurs au rendu : on les refait,
-            // et rien d'autre.
             App.redessinerGraphiques();
             peindreTheme();
           },
@@ -875,42 +222,431 @@ App.settings = {
     };
     peindreTheme();
 
+    // Le reglage ne passe pas par le serveur : il vaut pour cette machine.
+    const reduit = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const cb = App.h('input', { type: 'checkbox', disabled: reduit || null });
+    cb.checked = App.animationsEconomes() || reduit;
+    cb.addEventListener('change', () => {
+      App.setAnimations(cb.checked);
+      App.settings.signaler(cb.checked ? 'Animations allégées' : 'Animations complètes');
+    });
+
     return App.h('div', {},
-      App.h('div', { class: 'field', style: 'margin-bottom:12px' },
-        App.h('label', {}, 'Thème'), theme),
-      App.h('label', { class: 'checkline' }, cb, 'Animations économes'),
-      App.h('p', { class: 'hint', style: 'margin-top:6px' },
-        reduit
-          ? 'Imposé par votre système : « réduire les animations » est activé.'
-          : 'Supprime les flous animés et fige le fond. Les trajectoires et les '
-            + 'durées ne changent pas.'),
-      App.note('Ce que le mode économe change',
-        App.h('p', {},
-          'Les trajectoires et les durées ne bougent pas. Seuls disparaissent le '
-          + 'flou d’amorce et le mouvement du fond : ce sont les deux seuls postes '
-          + 'qui coûtent une re-rastérisation à chaque image. Le reste est traité '
-          + 'par le compositeur et ne pèse quasiment rien.')));
+      App.settings.ligneReglage('Thème', theme),
+      App.settings.ligneReglage('Animations économes', App.settings.interrupteur(cb),
+        reduit ? 'Imposé par votre système.' : 'Fige le fond et retire les flous animés.'));
   },
 
-  /* ---------- types d'actifs personnalisés ---------- */
+  /* Libellé et explication à gauche, commande à droite. */
+  ligneReglage(libelle, commande, aide) {
+    return App.h('div', { class: 'reglage' },
+      App.h('div', { class: 'reglage-texte' },
+        App.h('div', { class: 'reglage-libelle' }, libelle),
+        aide ? App.h('div', { class: 'reglage-aide' }, aide) : null),
+      App.h('div', { class: 'reglage-commande' }, commande));
+  },
+
+  interrupteur(cb) {
+    cb.classList.add('interrupteur-case');
+    return App.h('label', { class: 'interrupteur' }, cb, App.h('span', { 'aria-hidden': 'true' }));
+  },
+
+  /* ---------- catégories ----------
+
+     Un rôle par catégorie, et un seul. C'étaient trois cases indépendantes —
+     épargne, charge fixe, virement interne — que rien n'empêchait de cocher
+     ensemble. Or le reste à vivre vaut « revenus − charges fixes − épargne » :
+     une catégorie à la fois épargne et charge fixe était soustraite deux fois.
+     Un menu rend la contradiction impossible.
+
+     La liste des catégories de dépenses n'existe plus à part : c'est la
+     première colonne du tableau. Elle apparaissait deux fois. */
+  ROLES: [
+    ['', 'Dépense', null],
+    ['fixe', 'Charge fixe', 'categories_charges_fixes'],
+    ['epargne', 'Épargne', 'categories_non_depense'],
+    ['transfert', 'Virement interne', 'categories_transfert'],
+  ],
+
+  roleDe(settings, cat) {
+    // Ordre de lecture d'une donnée ancienne qui en cumulait plusieurs : le
+    // rôle le plus neutre l'emporte, c'est lui qui fausse le moins les totaux.
+    if ((settings.categories_transfert || []).includes(cat)) return 'transfert';
+    if ((settings.categories_non_depense || []).includes(cat)) return 'epargne';
+    if ((settings.categories_charges_fixes || []).includes(cat)) return 'fixe';
+    return '';
+  },
+
+  nbRoles(settings, cat) {
+    return App.settings.ROLES.filter(([, , cle]) => cle && (settings[cle] || []).includes(cat)).length;
+  },
+
+  panelCategories(settings) {
+    const tbody = App.h('tbody', {});
+
+    const patchRole = (cat, role) => {
+      const patch = {};
+      for (const [code, , cle] of App.settings.ROLES) {
+        if (!cle) continue;
+        const set = new Set(settings[cle] || []);
+        set.delete(cat);
+        if (code === role) set.add(cat);
+        patch[cle] = [...set];
+      }
+      return patch;
+    };
+
+    const render = () => {
+      App.clear(tbody);
+      const cats = settings.categories_depenses || [];
+      if (!cats.length) {
+        tbody.append(App.h('tr', {}, App.h('td', { colspan: 4, class: 'empty' },
+          'Aucune catégorie de dépense.')));
+      }
+      const budgets = Object.assign({}, settings.budgets_categories || {});
+      for (const cat of cats) {
+        const role = App.settings.roleDe(settings, cat);
+        const conflit = App.settings.nbRoles(settings, cat) > 1;
+        const sel = App.select('role', App.settings.ROLES.map(([c, l]) => [c, l]), role);
+        if (conflit) {
+          sel.classList.add('conflit');
+          sel.title = 'Cette catégorie avait plusieurs rôles à la fois. Choisissez-en un.';
+        }
+
+        // Un budget n'a de sens que sur une dépense : l'épargne et les
+        // virements internes ne sont jamais comptés comme consommés.
+        const montant = App.input('b', {
+          type: 'number', step: '1', min: '0', placeholder: '—',
+          value: budgets[cat] ?? '',
+        });
+        const sansBudget = () => role === 'epargne' || role === 'transfert';
+        montant.disabled = sansBudget();
+        montant.title = sansBudget() ? 'Pas de budget sur une catégorie qui n’est pas une dépense' : '';
+
+        sel.addEventListener('change', async () => {
+          const patch = patchRole(cat, sel.value);
+          Object.assign(settings, patch);
+          await App.settings.save(patch, 'Rôle mis à jour');
+          render();
+        });
+        montant.addEventListener('change', async () => {
+          const v = parseFloat(montant.value);
+          if (Number.isFinite(v) && v > 0) budgets[cat] = v; else delete budgets[cat];
+          settings.budgets_categories = budgets;
+          await App.settings.save({ budgets_categories: budgets }, 'Budget mis à jour');
+        });
+
+        const retirer = App.settings.boutonRetirer(`Supprimer « ${cat} »`, async () => {
+          const patch = patchRole(cat, '');
+          patch.categories_depenses = cats.filter((c) => c !== cat);
+          const b = Object.assign({}, settings.budgets_categories || {});
+          delete b[cat];
+          patch.budgets_categories = b;
+          Object.assign(settings, patch);
+          render();
+          await App.settings.save(patch, 'Catégorie supprimée');
+        });
+
+        tbody.append(App.h('tr', {},
+          App.h('td', {}, cat),
+          App.h('td', {}, sel),
+          App.h('td', { class: 'budget-cell' }, montant),
+          App.h('td', { class: 'right' }, retirer)));
+      }
+    };
+    render();
+
+    const nouvelle = App.input('cat', { placeholder: 'Nouvelle catégorie de dépense' });
+    const ajouterDepense = async () => {
+      const v = nouvelle.value.trim();
+      if (!v) return;
+      if ((settings.categories_depenses || []).includes(v)) return App.toast('Déjà présente', 'error');
+      settings.categories_depenses = [...(settings.categories_depenses || []), v];
+      nouvelle.value = '';
+      render();
+      await App.settings.save({ categories_depenses: settings.categories_depenses }, 'Catégorie ajoutée');
+    };
+
+    return App.h('div', {},
+      App.settings.bloc('Dépenses',
+        App.h('p', { class: 'reglages-aide' },
+          App.h('strong', {}, 'Charge fixe'), ' : retirée du reste à vivre. ',
+          App.h('strong', {}, 'Épargne'), ' : sort des dépenses, entre dans le taux d’épargne. ',
+          App.h('strong', {}, 'Virement interne'), ' : ni dépense, ni revenu.'),
+        App.h('div', { class: 'table-wrap' },
+          App.h('table', { class: 'table reglages-table' },
+            App.h('thead', {}, App.h('tr', {},
+              App.h('th', {}, 'Catégorie'),
+              App.h('th', { style: 'width:180px' }, 'Rôle'),
+              App.h('th', { class: 'right', style: 'width:130px' }, 'Budget / mois'),
+              App.h('th', { style: 'width:40px' }))),
+            tbody)),
+        App.settings.ligneAjout([nouvelle], 'Ajouter', ajouterDepense)),
+      App.settings.bloc('Revenus',
+        App.settings.listeEditable(settings, 'categories_revenus', 'Nouvelle catégorie de revenu')));
+  },
+
+  /* Des étiquettes retirables et un champ d'ajout : catégories de revenus. */
+  listeEditable(settings, cle, invite) {
+    const liste = App.h('div', { class: 'etiquettes' });
+    const render = () => {
+      App.clear(liste);
+      const valeurs = settings[cle] || [];
+      if (!valeurs.length) liste.append(App.h('span', { class: 'muted' }, 'Aucune.'));
+      for (const v of valeurs) {
+        liste.append(App.h('span', { class: 'etiquette' }, v,
+          App.settings.boutonRetirer(`Supprimer « ${v} »`, async () => {
+            settings[cle] = (settings[cle] || []).filter((x) => x !== v);
+            render();
+            await App.settings.save({ [cle]: settings[cle] }, 'Catégorie supprimée');
+          })));
+      }
+    };
+    render();
+    const champ = App.input('v', { placeholder: invite });
+    const ajouter = async () => {
+      const v = champ.value.trim();
+      if (!v) return;
+      if ((settings[cle] || []).includes(v)) return App.toast('Déjà présente', 'error');
+      settings[cle] = [...(settings[cle] || []), v];
+      champ.value = '';
+      render();
+      await App.settings.save({ [cle]: settings[cle] }, 'Catégorie ajoutée');
+    };
+    return App.h('div', {}, liste, App.settings.ligneAjout([champ], 'Ajouter', ajouter));
+  },
+
+  /* ---------- règles ----------
+
+     Deux colonnes ont disparu. « Cible » (dépense ou revenu) n'était lue par
+     rien au moment de classer : elle se déduit désormais de la catégorie
+     choisie. « Priorité » affichait 100 ou 200 sans qu'aucun écran permette de
+     la changer. */
+  selectCategorie(settings, valeur) {
+    const sel = App.h('select', { name: 'valeur' });
+    const groupes = [['Dépenses', settings.categories_depenses || []],
+      ['Revenus', settings.categories_revenus || []]];
+    for (const [libelle, cats] of groupes) {
+      const g = App.h('optgroup', { label: libelle });
+      for (const c of cats) {
+        const o = App.h('option', { value: c }, c);
+        if (c === valeur) o.selected = true;
+        g.append(o);
+      }
+      sel.append(g);
+    }
+    return sel;
+  },
+
+  panelRules(rules, settings) {
+    const tbody = App.h('tbody', {});
+    const render = () => {
+      App.clear(tbody);
+      if (!rules.length) {
+        tbody.append(App.h('tr', {}, App.h('td', { colspan: 3, class: 'empty' },
+          'Aucune règle pour l’instant.')));
+      }
+      const tries = [...rules].sort((a, b) => a.pattern.localeCompare(b.pattern, 'fr'));
+      for (const r of tries) {
+        tbody.append(App.h('tr', {},
+          App.h('td', {}, App.h('code', {}, r.pattern)),
+          App.h('td', {}, App.h('span', { class: 'pill accent' }, r.valeur)),
+          App.h('td', { class: 'right' }, App.settings.boutonRetirer(
+            `Supprimer la règle « ${r.pattern} »`, async () => {
+              try {
+                await App.api.del(`/api/rules/${r.id}`);
+                rules.splice(rules.indexOf(r), 1);
+                render();
+                App.settings.signaler('Règle supprimée');
+              } catch (e) { App.toast(e.message, 'error'); }
+            }))));
+      }
+    };
+    render();
+
+    const motif = App.input('pattern', { placeholder: 'Le libellé contient… (ex : NETFLIX)' });
+    const valeur = App.settings.selectCategorie(settings, 'Salaire');
+    const ajouter = async () => {
+      const p = motif.value.trim();
+      if (!p) { motif.focus(); return; }
+      const estRevenu = (settings.categories_revenus || []).includes(valeur.value);
+      const cible = estRevenu ? 'type_revenu' : 'categorie_depense';
+      try {
+        const res = await App.api.post('/api/rules', { pattern: p, cible_type: cible, valeur: valeur.value });
+        rules.push({ id: res.id, pattern: p, cible_type: cible, valeur: valeur.value, priorite: 100 });
+        motif.value = '';
+        render();
+        App.settings.signaler('Règle ajoutée');
+      } catch (e) { App.toast(e.message, 'error'); }
+    };
+
+    const resultat = App.h('span', { class: 'reglages-aide' });
+    const appliquer = App.h('button', { type: 'button', class: 'btn' },
+      'Reclasser les transactions non catégorisées');
+    appliquer.addEventListener('click', async () => {
+      appliquer.disabled = true;
+      try {
+        const res = await App.api.post('/api/rules/apply', { seulement_non_categorise: true });
+        resultat.textContent = `${res.modifiees} transaction(s) reclassée(s).`;
+        if (res.modifiees) App.settings.aRafraichir = true;
+      } catch (e) { App.toast(e.message, 'error'); }
+      appliquer.disabled = false;
+    });
+
+    return App.h('div', {},
+      App.settings.bloc(null,
+        App.settings.ligneAjout([motif, App.h('span', { class: 'fleche' }, '→'), valeur],
+          'Ajouter', ajouter),
+        App.h('p', { class: 'reglages-aide' },
+          'Sans tenir compte des majuscules ni des accents. Le remboursement d’un prêt '
+          + 'est reconnu à son montant, sans règle.')),
+      App.settings.bloc(`${rules.length} règle(s)`,
+        App.h('div', { class: 'table-wrap scroll-y' },
+          App.h('table', { class: 'table reglages-table' },
+            App.h('thead', {}, App.h('tr', {},
+              App.h('th', {}, 'Si le libellé contient'),
+              App.h('th', {}, 'Alors'),
+              App.h('th', { style: 'width:40px' }))),
+            tbody)),
+        App.h('div', { class: 'reglages-ajout' }, appliquer, resultat)));
+  },
+
+  /* ---------- objectifs ---------- */
+  panelObjectifs(settings) {
+    return App.h('div', {},
+      App.settings.bloc('Répartition cible', App.settings.panelRepartition(settings)),
+      App.settings.bloc('Épargne de précaution', App.settings.panelPrecaution(settings)));
+  },
+
+  /* Une poche par ligne : nom, pourcentage, types, et rien d'autre en vue.
+     Les types d'actifs — une vingtaine de cases par poche, toutes dépliées —
+     se rangent derrière un bouton qui dit combien sont cochés. */
+  panelRepartition(settings) {
+    let poches = JSON.parse(JSON.stringify(settings.repartition_cible || []));
+    if (!Array.isArray(poches)) {
+      poches = Object.entries(poches).map(([k, v]) => ({ label: k, types: [k], pct: v }));
+    }
+    const tousTypes = (App.state.meta.asset_types || []).map((t) => t.type);
+    const hote = App.h('div', { class: 'poches' });
+    const total = App.h('div', { class: 'poches-total' });
+    const enregistrer = () => App.settings.save({ repartition_cible: poches }, 'Répartition enregistrée');
+
+    const majTotal = () => {
+      const t = poches.reduce((s, p) => s + (parseFloat(p.pct) || 0), 0);
+      const juste = Math.abs(t - 100) < 0.01;
+      App.clear(total);
+      total.append(
+        App.h('div', { class: 'poches-barre' },
+          App.h('span', { style: `width:${Math.min(100, t)}%`, class: juste ? 'ok' : '' })),
+        App.h('span', { class: juste ? 'ok-txt' : 'alerte-txt' },
+          `Total ${App.fmt.num(t, 1)} %`
+          + (juste ? '' : (t < 100 ? ` — il manque ${App.fmt.num(100 - t, 1)} %`
+            : ` — ${App.fmt.num(t - 100, 1)} % de trop`))));
+    };
+
+    const render = () => {
+      App.clear(hote);
+      if (!poches.length) {
+        hote.append(App.h('p', { class: 'muted' }, 'Aucune poche : la vue d’ensemble ne montre pas d’écart à la cible.'));
+      }
+      const nomsProduits = (App.state.assets || []).map((a) => (a.label || '').trim().toLowerCase());
+      poches.forEach((p, i) => {
+        const panneau = App.h('div', { class: 'poche-types', hidden: true });
+        const resume = App.h('button', { type: 'button', class: 'btn small poche-resume' });
+        const avertir = App.h('div', { class: 'poche-alerte' });
+        const majResume = () => {
+          const n = (p.types || []).length;
+          resume.textContent = n ? `${n} type${n > 1 ? 's' : ''} ▾` : 'Choisir les types ▾';
+          const nom = (p.label || '').trim().toLowerCase();
+          const reconnu = tousTypes.some((t) => t.toLowerCase() === nom) || nomsProduits.includes(nom);
+          avertir.textContent = !n && !reconnu
+            ? 'Aucun type coché : cette poche restera à 0 %.' : '';
+        };
+        for (const t of tousTypes) {
+          const cb = App.h('input', { type: 'checkbox', value: t });
+          cb.checked = (p.types || []).includes(t);
+          cb.addEventListener('change', () => {
+            p.types = Array.from(panneau.querySelectorAll('input:checked')).map((c) => c.value);
+            majResume();
+            enregistrer();
+          });
+          panneau.append(App.h('label', { class: 'checkline' }, cb, t));
+        }
+        resume.addEventListener('click', () => { panneau.hidden = !panneau.hidden; });
+        majResume();
+
+        const nom = App.input('l', { value: p.label || '', 'aria-label': 'Nom de la poche' });
+        nom.addEventListener('input', () => { p.label = nom.value; majResume(); });
+        nom.addEventListener('change', enregistrer);
+        const pct = App.input('p', {
+          type: 'number', step: '0.5', min: '0', max: '100', value: p.pct ?? 0,
+          'aria-label': 'Part visée en pourcentage',
+        });
+        pct.addEventListener('input', () => { p.pct = parseFloat(pct.value) || 0; majTotal(); });
+        pct.addEventListener('change', enregistrer);
+
+        hote.append(App.h('div', { class: 'poche' },
+          App.h('div', { class: 'poche-ligne' },
+            nom,
+            App.h('span', { class: 'poche-pct' }, pct, '%'),
+            resume,
+            App.settings.boutonRetirer('Retirer cette poche', () => {
+              poches.splice(i, 1); render(); majTotal(); enregistrer();
+            })),
+          avertir, panneau));
+      });
+    };
+    render(); majTotal();
+
+    const ajouter = App.h('button', { type: 'button', class: 'btn' }, '+ Ajouter une poche');
+    ajouter.addEventListener('click', () => {
+      poches.push({ label: 'Nouvelle poche', types: [], pct: 0 });
+      render(); majTotal();
+      const champs = hote.querySelectorAll('.poche-ligne input[name="l"]');
+      if (champs.length) { champs[champs.length - 1].focus(); champs[champs.length - 1].select(); }
+    });
+
+    return App.h('div', {}, hote, total, App.h('div', { class: 'reglages-ajout' }, ajouter));
+  },
+
+  /* Le seuil vivait en deux endroits ; un seul réglage, lu par les deux. */
+  panelPrecaution(settings) {
+    const mois = App.input('mois', {
+      type: 'number', min: 1, max: 24, step: '1', class: 'champ-court',
+      value: settings.mois_precaution_cible ?? 4, 'aria-label': 'Nombre de mois',
+    });
+    mois.addEventListener('change', () => {
+      const v = Math.min(24, Math.max(1, parseInt(mois.value, 10) || 4));
+      mois.value = v;
+      App.settings.save({ mois_precaution_cible: v }, 'Cible enregistrée');
+    });
+    return App.settings.ligneReglage('Mois de dépenses couverts par vos livrets',
+      App.h('span', { class: 'champ-unite' }, mois, 'mois'),
+      'En dessous, la couverture d’urgence passe en alerte.');
+  },
+
+  /* ---------- patrimoine ---------- */
+  panelPatrimoine(settings) {
+    return App.h('div', {},
+      App.settings.bloc('Types d’actifs personnalisés', App.settings.panelAssetTypes(settings)),
+      App.settings.bloc('Versement des intérêts', App.settings.panelTaux(settings)));
+  },
+
   panelAssetTypes(settings) {
     const customs = (settings.types_actifs_custom || []).map(
       (c) => (typeof c === 'string' ? { type: c, famille: 'Autre' } : c));
-    const list = App.h('div', { class: 'actions' });
+    const liste = App.h('div', { class: 'etiquettes' });
     const render = () => {
-      App.clear(list);
-      if (!customs.length) list.append(App.h('span', { class: 'muted' }, 'Aucun type personnalisé.'));
+      App.clear(liste);
+      if (!customs.length) liste.append(App.h('span', { class: 'muted' }, 'Aucun.'));
       customs.forEach((c, i) => {
-        list.append(App.h('span', { class: 'pill accent' }, `${c.type} (${c.famille})`, ' ',
-          App.h('a', {
-            href: '#', style: 'color:var(--red);text-decoration:none',
-            onclick: async (e) => {
-              e.preventDefault();
-              customs.splice(i, 1);
-              render();
-              await App.settings.save({ types_actifs_custom: customs }, 'Type supprimé');
-            },
-          }, '×')));
+        liste.append(App.h('span', { class: 'etiquette' }, c.type,
+          App.h('span', { class: 'etiquette-sous' }, c.famille),
+          App.settings.boutonRetirer(`Supprimer « ${c.type} »`, async () => {
+            customs.splice(i, 1);
+            render();
+            await App.settings.save({ types_actifs_custom: customs }, 'Type supprimé');
+          })));
       });
     };
     render();
@@ -918,25 +654,353 @@ App.settings = {
     const typeIn = App.input('type', { placeholder: 'ex : Forêt, Montre, Parts de SARL' });
     const familleIn = App.select('famille',
       ['Liquidités', 'Épargne réglementée', 'Marchés financiers', 'Immobilier',
-        'Crypto', 'Biens', 'Autre'], 'Autre');
-    const add = async () => {
+        'Crypto', 'Biens', 'Autre'], 'Autre', { 'aria-label': 'Famille' });
+    const ajouter = async () => {
       const t = typeIn.value.trim();
-      if (!t) return App.toast('Nom du type requis', 'error');
+      if (!t) { typeIn.focus(); return; }
       customs.push({ type: t, famille: familleIn.value });
       typeIn.value = '';
       render();
       await App.settings.save({ types_actifs_custom: customs }, 'Type ajouté');
     };
+    return App.h('div', {}, liste,
+      App.settings.ligneAjout([typeIn, familleIn], 'Ajouter', ajouter),
+      App.h('p', { class: 'reglages-aide' },
+        'La famille ne sert qu’à regrouper l’affichage.'));
+  },
+
+  panelTaux(settings) {
+    const courant = String(settings.date_credit_interets || '12-31');
+    const [mm, jj] = courant.split('-');
+    const jour = App.input('jour', {
+      type: 'number', min: 1, max: 31, value: Number(jj) || 31, class: 'champ-court',
+      'aria-label': 'Jour',
+    });
+    const mois = App.select('mois', [
+      ['01', 'janvier'], ['02', 'février'], ['03', 'mars'], ['04', 'avril'],
+      ['05', 'mai'], ['06', 'juin'], ['07', 'juillet'], ['08', 'août'],
+      ['09', 'septembre'], ['10', 'octobre'], ['11', 'novembre'], ['12', 'décembre'],
+    ], mm || '12', { 'aria-label': 'Mois' });
+    const enregistrer = async () => {
+      const j = Math.min(31, Math.max(1, parseInt(jour.value, 10) || 31));
+      jour.value = j;
+      await App.settings.save({ date_credit_interets: `${mois.value}-${String(j).padStart(2, '0')}` },
+        'Date enregistrée');
+    };
+    jour.addEventListener('change', enregistrer);
+    mois.addEventListener('change', enregistrer);
+    return App.settings.ligneReglage('Intérêts des livrets crédités le',
+      App.h('span', { class: 'champ-unite' }, jour, mois),
+      'Le 31 décembre pour tous les livrets réglementés. Avant cette date, '
+      + 'un livret affiche son capital et les intérêts à venir à côté.');
+  },
+
+  /* ---------- cours de marché ----------
+
+     Il n'y a plus de bouton « Enregistrer ». C'était la seule rubrique qui en
+     gardait un, au milieu de réglages qui s'écrivaient seuls — rien à l'écran
+     ne disait lesquels attendaient le clic. La raison était juste (activer
+     les cours fait sortir des données) ; elle est servie autrement : c'est
+     l'ACTIVATION, et elle seule, qui se confirme. */
+  panelMarket(settings, status) {
+    const etat = App.h('div', { class: 'cours-etat' });
+    const peindreEtat = (s) => {
+      App.clear(etat);
+      const pastille = (txt, cls) => App.h('span', { class: `pill ${cls || ''}` }, txt);
+      // `append` natif écrit « null » en toutes lettres : on filtre.
+      etat.append(...[
+        s.active ? pastille('Activés', 'ok') : pastille('Désactivés'),
+        App.h('span', { class: 'reglages-aide' },
+          s.dernier_refresh ? `Mis à jour le ${App.fmt.dateTime(s.dernier_refresh)}` : 'Jamais mis à jour'),
+        App.h('span', { class: 'reglages-aide' }, `${s.nb_cours_en_cache} cours en cache`),
+        s.tickers_non_mappes.length
+          ? pastille(`${s.tickers_non_mappes.length} ligne(s) sans symbole`, 'warn') : null,
+      ].filter(Boolean));
+    };
+    peindreEtat(status);
+
+    const rafraichirEtat = async () => {
+      try { peindreEtat(await App.api.get('/api/market/status')); } catch (e) { /* ignore */ }
+    };
+
+    // --- activation, confirmee sur place
+    const actif = App.h('input', { type: 'checkbox' });
+    actif.checked = !!settings.market_enabled;
+    const avertissement = App.h('div', { class: 'callout', hidden: true },
+      App.h('p', {}, App.h('strong', {}, 'Des données vont sortir de votre machine. '),
+        'À chaque rafraîchissement, les symboles de vos titres et votre clé API sont '
+        + 'envoyés au fournisseur. Vos montants et quantités, jamais.'),
+      App.h('div', { class: 'actions' },
+        App.h('button', {
+          type: 'button', class: 'btn',
+          onclick: () => { actif.checked = false; avertissement.hidden = true; },
+        }, 'Annuler'),
+        App.h('button', {
+          type: 'button', class: 'btn primary',
+          onclick: async () => {
+            avertissement.hidden = true;
+            if (await App.settings.save({ market_enabled: true }, 'Cours activés')) {
+              settings.market_enabled = true;
+              majDetails();
+              rafraichirEtat();
+            } else { actif.checked = false; }
+          },
+        }, 'Activer')));
+    actif.addEventListener('change', async () => {
+      if (actif.checked) { avertissement.hidden = false; return; }
+      avertissement.hidden = true;
+      await App.settings.save({ market_enabled: false }, 'Cours désactivés');
+      settings.market_enabled = false;
+      majDetails();
+      rafraichirEtat();
+    });
+
+    // --- fournisseur et cle : la cle n'apparait que si le fournisseur en veut
+    const fournisseur = App.select('market_provider', [
+      ['twelvedata', 'Twelve Data'],
+      ['yahoo', 'Yahoo Finance'],
+    ], settings.market_provider || 'twelvedata');
+
+    let cleEnPlace = !!settings.market_api_key_configuree;
+    const cle = App.input('market_api_key', { type: 'password', value: '', autocomplete: 'off' });
+    const etatCle = App.h('div', { class: 'reglage-aide' });
+    const peindreCle = () => {
+      cle.placeholder = cleEnPlace ? 'Remplacer la clé enregistrée' : 'Coller la clé API';
+      App.clear(etatCle);
+      if (cleEnPlace) {
+        const oublier = App.h('button', { type: 'button', class: 'lien-discret' }, 'Oublier la clé');
+        oublier.addEventListener('click', () => App.settings.confirmerSurPlace(oublier, 'Confirmer ?', async () => {
+          if (await App.settings.save({ market_api_key: '' }, 'Clé oubliée')) {
+            cleEnPlace = false;
+            peindreCle();
+            rafraichirEtat();
+          }
+        }));
+        etatCle.append('Une clé est enregistrée. ', oublier);
+      } else {
+        etatCle.append('Gratuite sur twelvedata.com.');
+      }
+    };
+    peindreCle();
+    // Un champ vide n'est jamais envoyé : il effacerait la clé en place.
+    cle.addEventListener('change', async () => {
+      const v = cle.value.trim();
+      if (!v) return;
+      if (await App.settings.save({ market_api_key: v }, 'Clé enregistrée')) {
+        cleEnPlace = true;
+        cle.value = '';
+        peindreCle();
+        rafraichirEtat();
+      }
+    });
+    const ligneCle = App.h('div', {},
+      App.h('div', { class: 'reglage' },
+        App.h('div', { class: 'reglage-texte' },
+          App.h('div', { class: 'reglage-libelle' }, 'Clé API'), etatCle),
+        App.h('div', { class: 'reglage-commande' }, cle)));
+
+    const details = App.h('div', {});
+    const majDetails = () => {
+      details.hidden = !actif.checked;
+      ligneCle.hidden = fournisseur.value !== 'twelvedata';
+    };
+    fournisseur.addEventListener('change', async () => {
+      majDetails();
+      await App.settings.save({ market_provider: fournisseur.value }, 'Fournisseur enregistré');
+    });
+
+    details.append(
+      App.settings.ligneReglage('Fournisseur', fournisseur,
+        'Twelve Data demande une clé gratuite. Yahoo n’en demande pas, mais son API n’est pas officielle.'),
+      ligneCle,
+      App.settings.blocSymboles());
+    majDetails();
 
     return App.h('div', {},
-      App.h('p', { class: 'hint' },
-        'Un type personnalisé n’impose aucun champ : libellé, date, valeur et historique suffisent. '
-        + 'La famille sert uniquement à regrouper l’affichage.'),
-      App.h('div', { style: 'margin:12px 0' }, list),
-      App.h('div', { class: 'form-grid' },
-        App.field('Nom du type', typeIn),
-        App.field('Famille de regroupement', familleIn)),
-      App.h('div', { class: 'actions', style: 'margin-top:12px' },
-        App.h('button', { class: 'btn primary', onclick: add }, 'Ajouter')));
+      etat,
+      App.settings.ligneReglage('Récupérer les cours en ligne', App.settings.interrupteur(actif),
+        'Désactivé, aucune donnée ne quitte votre ordinateur.'),
+      avertissement,
+      details);
+  },
+
+  /* Rarement utile : la recherche depuis la fiche d'un actif remplit cette
+     table toute seule. Repliée, mais à portée pour corriger. */
+  blocSymboles() {
+    const sym = App.input('sym', { placeholder: 'Symbole ou ISIN, ex : CW8' });
+    const place = App.input('exch', { placeholder: 'Place (facultatif)' });
+    const sortie = App.h('div', {});
+    const tester = async () => {
+      App.clear(sortie);
+      sortie.append(App.h('span', { class: 'reglages-aide' }, 'Test en cours…'));
+      try {
+        const res = await App.api.post('/api/market/test', {
+          symbol: sym.value.trim(), exchange: place.value.trim(),
+        });
+        App.clear(sortie);
+        sortie.append(res.ok
+          ? App.h('span', { class: 'pill ok' },
+            `${res.symbole} : ${App.fmt.num(res.price, 4)} ${res.currency}`
+            + (res.exchange ? ` · ${res.exchange}` : '') + ` · ${App.fmt.date(res.date)}`)
+          : App.h('span', { class: 'pill warn' }, `${res.symbole} : ${res.erreur}`));
+      } catch (e) {
+        App.clear(sortie);
+        sortie.append(App.h('span', { class: 'pill warn' }, e.message));
+      }
+    };
+
+    const tbody = App.h('tbody', {});
+    let charge = false;
+    const charger = async () => {
+      if (charge) return;
+      charge = true;
+      let data;
+      try { data = await App.api.get('/api/securities'); } catch (e) { return App.toast(e.message, 'error'); }
+      const parTicker = Object.fromEntries(data.securities.map((s) => [s.ticker, s]));
+      const tickers = [...new Set([
+        ...data.tickers_utilises.map((t) => t.ticker),
+        ...data.securities.map((s) => s.ticker),
+      ])].sort();
+      App.clear(tbody);
+      if (!tickers.length) {
+        tbody.append(App.h('tr', {}, App.h('td', { colspan: 6, class: 'empty' },
+          'Aucun titre dans vos mouvements.')));
+        return;
+      }
+      for (const ticker of tickers) {
+        const sec = parTicker[ticker] || {};
+        const label = App.input('l', { value: sec.label || '', placeholder: 'nom affiché' });
+        const symbol = App.input('s', { value: sec.symbol || '', placeholder: 'symbole' });
+        const exchange = App.input('e', { value: sec.exchange || '', placeholder: 'place' });
+        const currency = App.input('c', { value: sec.currency || 'EUR', class: 'champ-court' });
+        const bench = App.input('b', { value: sec.benchmark_symbol || '', placeholder: 'indice' });
+        const pastille = App.h('span', { class: `pill ${sec.symbol ? 'ok' : 'warn'}` },
+          sec.symbol ? 'associé' : 'à faire');
+        for (const input of [label, symbol, exchange, currency, bench]) {
+          input.addEventListener('change', async () => {
+            try {
+              await App.api.post('/api/securities', {
+                ticker,
+                label: label.value.trim(),
+                symbol: symbol.value.trim(),
+                exchange: exchange.value.trim(),
+                currency: currency.value.trim().toUpperCase() || 'EUR',
+                benchmark_symbol: bench.value.trim(),
+              });
+              pastille.className = `pill ${symbol.value.trim() ? 'ok' : 'warn'}`;
+              pastille.textContent = symbol.value.trim() ? 'associé' : 'à faire';
+              App.settings.signaler('Correspondance enregistrée');
+            } catch (e) { App.toast(e.message, 'error'); }
+          });
+        }
+        tbody.append(App.h('tr', {},
+          App.h('td', {}, App.h('code', {}, ticker), App.h('div', {}, pastille)),
+          App.h('td', {}, label), App.h('td', {}, symbol), App.h('td', {}, exchange),
+          App.h('td', {}, currency), App.h('td', {}, bench)));
+      }
+    };
+
+    const note = App.note('Symboles et correspondances',
+      App.h('p', { class: 'reglages-aide' },
+        'Remplie automatiquement par la recherche depuis la fiche d’un actif. '
+        + 'À corriger seulement si un cours ne remonte pas.'),
+      App.settings.ligneAjout([sym, place], 'Tester', tester),
+      sortie,
+      App.h('div', { class: 'table-wrap scroll-y', style: 'margin-top:10px' },
+        App.h('table', { class: 'table reglages-table' },
+          App.h('thead', {}, App.h('tr', {},
+            App.h('th', {}, 'Ticker / ISIN'), App.h('th', {}, 'Nom affiché'),
+            App.h('th', {}, 'Symbole'), App.h('th', {}, 'Place'),
+            App.h('th', {}, 'Devise'), App.h('th', {}, 'Indice'))),
+          tbody)));
+    note.addEventListener('toggle', () => { if (note.open) charger(); });
+    return note;
+  },
+
+  /* ---------- sauvegardes ---------- */
+  panelBackups() {
+    const tbody = App.h('tbody', {});
+    const entete = App.h('span', { class: 'reglages-aide' });
+
+    const octets = (n) => (n < 1024 ? `${n} o`
+      : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} Ko`
+        : `${(n / 1024 / 1024).toFixed(1)} Mo`);
+
+    const recharger = async () => {
+      let data;
+      try { data = await App.api.get('/api/backups'); } catch (e) { return App.toast(e.message, 'error'); }
+      entete.textContent = data.sauvegardes.length
+        ? `${data.sauvegardes.length} sauvegarde(s), ${octets(data.taille_totale)} · `
+          + `les ${data.maximum} plus récentes sont gardées`
+        : 'Aucune sauvegarde pour le moment.';
+      App.clear(tbody);
+      for (const s of data.sauvegardes) {
+        // Restaurer remplace TOUTES les données : le second clic porte la
+        // conséquence dans son libellé, pas seulement « Confirmer ».
+        const restaurer = App.h('button', { type: 'button', class: 'btn small' }, 'Restaurer');
+        restaurer.addEventListener('click', () => App.settings.confirmerSurPlace(
+          restaurer, 'Remplacer mes données ?', async () => {
+            restaurer.disabled = true;
+            try {
+              const res = await App.api.post(`/api/backups/${s.id}/restore`, {});
+              App.toast(`${res.lignes} ligne(s) restaurée(s). Une copie de sécurité a été prise juste avant.`, 'success');
+              App.settings.aRafraichir = true;
+              await recharger();
+            } catch (e) { App.toast(e.message, 'error'); restaurer.disabled = false; }
+          }));
+        const supprimer = App.h('button', {
+          type: 'button', class: 'icon-btn retirer', title: 'Supprimer cette sauvegarde',
+          'aria-label': 'Supprimer cette sauvegarde',
+        }, '×');
+        supprimer.addEventListener('click', () => App.settings.confirmerSurPlace(
+          supprimer, 'Supprimer ?', async () => {
+            try {
+              await App.api.del(`/api/backups/${s.id}`);
+              App.settings.signaler('Sauvegarde supprimée');
+              await recharger();
+            } catch (e) { App.toast(e.message, 'error'); }
+          }));
+        tbody.append(App.h('tr', {},
+          App.h('td', { class: 'nowrap' }, App.fmt.dateTime(s.date)),
+          App.h('td', { class: 'right num' },
+            s.patrimoine_net === null ? '—' : App.fmt.eur(s.patrimoine_net)),
+          App.h('td', { class: 'right num' }, octets(s.taille)),
+          App.h('td', { class: 'right nowrap' }, restaurer, ' ', supprimer)));
+      }
+    };
+
+    const sauvegarder = App.h('button', { type: 'button', class: 'btn primary' }, 'Sauvegarder maintenant');
+    sauvegarder.addEventListener('click', async () => {
+      sauvegarder.classList.add('busy');
+      sauvegarder.disabled = true;
+      try {
+        const res = await App.api.post('/api/backups', {});
+        App.settings.signaler(res.inchange ? 'Rien n’a changé depuis la dernière' : 'Sauvegarde créée');
+        await recharger();
+      } catch (e) { App.toast(e.message, 'error'); }
+      sauvegarder.classList.remove('busy');
+      sauvegarder.disabled = false;
+    });
+    const dossier = App.h('button', { type: 'button', class: 'btn' }, 'Ouvrir le dossier');
+    dossier.addEventListener('click', async () => {
+      try { await App.api.post('/api/backups/open', {}); } catch (e) { App.toast(e.message, 'error'); }
+    });
+
+    recharger();
+
+    return App.h('div', {},
+      App.h('div', { class: 'reglages-ajout' }, sauvegarder, dossier),
+      App.h('p', { class: 'reglages-aide' },
+        'Ni la clé API ni le cache des cours n’y figurent. Restaurer prend d’abord '
+        + 'une copie de sécurité de vos données actuelles.'),
+      App.settings.bloc(null, entete,
+        App.h('div', { class: 'table-wrap scroll-y', style: 'margin-top:8px' },
+          App.h('table', { class: 'table reglages-table' },
+            App.h('thead', {}, App.h('tr', {},
+              App.h('th', {}, 'Date'),
+              App.h('th', { class: 'right' }, 'Patrimoine net'),
+              App.h('th', { class: 'right' }, 'Taille'),
+              App.h('th', {}))),
+            tbody))));
   },
 };

@@ -153,7 +153,7 @@ navigation, sa barre la plus foncée tomberait trop bas en contraste.
 
 Thème clair et sombre via `[data-theme]`, posé sur `<html>` avant le premier
 rendu pour éviter tout flash. Par défaut il suit le réglage du système ;
-*Paramètres → Données et apparence* propose trois crans (Système, Clair,
+*Paramètres → Affichage* propose trois crans (Système, Clair,
 Sombre), mémorisés localement. Le bouton de la barre du haut cachait son état
 sous une icône, il a été retiré. Les montants sont en police monospace
 tabulaire, conformément aux tokens.
@@ -268,7 +268,7 @@ mécanismes décidaient à la place de l'utilisateur :
   durablement en mode dégradé, sans que rien ne le signale.
 
 Le mode complet est le défaut partout, et le mode économe un choix assumé,
-depuis *Paramètres → Apparence*. Une machine qui peine, c'est à son propriétaire
+depuis *Paramètres → Affichage*. Une machine qui peine, c'est à son propriétaire
 de le constater.
 
 `prefers-reduced-motion` reste prioritaire : c'est une préférence système
@@ -684,13 +684,41 @@ peut être minuscule et la part dépassait 100 %.
 Les observations remontent aussi une hausse de prix ou un arrêt d'abonnement
 de moins de quatre mois. Plus anciens, ils sont connus.
 
-**Paramètres** (icône engrenage) : trois sections. *Classement des dépenses*
-(catégories, rôles, règles), *Objectifs* (répartition cible, épargne de
-précaution, crédit des intérêts) et *Données et apparence* (thème, animations,
-cours de marché, sauvegardes, types personnalisés). Dans les cours, le test de
-symbole et la table des correspondances se replient sous « Avancé » : la
-recherche depuis la fiche remplit la table toute seule. Durée du cache et
-rafraîchissement au lancement gardent leurs valeurs par défaut, sans champ.
+**Paramètres** (icône engrenage) : une colonne de sept rubriques, une idée
+chacune — *Affichage*, *Catégories*, *Règles*, *Objectifs*, *Patrimoine*,
+*Cours de marché*, *Sauvegardes*. Il y avait trois onglets de 1 100 à 1 600 px
+de haut, dont un empilait le thème, les cours, les sauvegardes et les types
+d'actifs. La colonne reste en place, seul le panneau défile ; la dernière
+rubrique ouverte est retenue.
+
+Trois règles tiennent l'ensemble :
+
+- **Tout s'enregistre à la modification.** Les cours gardaient seuls un bouton
+  « Enregistrer », au milieu de réglages qui s'écrivaient d'eux-mêmes. C'est
+  désormais l'*activation* des cours, et elle seule, qui se confirme sur place :
+  elle fait sortir des données de la machine.
+- **Une phrase par rubrique.** Les six notes repliables expliquaient ce que les
+  libellés doivent dire seuls.
+- **Un geste destructeur se confirme sur place**, par un second clic sur le
+  bouton qui a changé de libellé. `App.confirm` remplace la modale courante :
+  supprimer une sauvegarde vous faisait sortir des paramètres.
+
+**Un rôle par catégorie, et un seul** : Dépense, Charge fixe, Épargne ou
+Virement interne. C'étaient trois cases indépendantes. Or le reste à vivre vaut
+`revenus − charges fixes − épargne` : une catégorie cochée à la fois charge
+fixe et épargne était soustraite deux fois. Une donnée ancienne qui cumule
+plusieurs rôles est signalée, et lue sous le plus neutre jusqu'à ce qu'on
+choisisse. Le budget se grise sur l'épargne et les virements, qui ne sont
+jamais comptés comme consommés.
+
+**Règles** : « si le libellé contient… alors… ». La colonne *Cible* n'était lue
+par rien au moment de classer ; elle se déduit de la catégorie. La colonne
+*Priorité* affichait 100 ou 200 sans qu'aucun écran permette de la changer.
+
+**Cours de marché** : la clé API n'apparaît que sous Twelve Data — Yahoo n'en
+demande pas. Le test de symbole et la table des correspondances restent repliés
+et ne se chargent qu'à l'ouverture. Durée du cache et rafraîchissement au
+lancement gardent leurs valeurs par défaut, sans champ.
 
 Une poche de répartition sans type coché le dit : elle ne compte que le type
 qui porte son nom, ou reste à 0 % si aucun ne le porte. « Livret A » ne désigne
@@ -885,8 +913,8 @@ revenus du mois — compter une mensualité soldée gonflerait le ratio sans rai
 Le seuil de 35 % est la référence bancaire courante.
 
 `reste_a_vivre_mois` retranche des revenus les charges fixes et l'épargne. Les
-catégories considérées comme fixes se cochent dans *Paramètres → Classement des
-dépenses*, sur le même modèle que les virements internes.
+catégories considérées comme fixes se choisissent dans *Paramètres →
+Catégories*, un rôle par catégorie.
 
 
 ## Relire le patrimoine en dollars
