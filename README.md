@@ -33,8 +33,12 @@ Les fichiers sont dans [la dernière version publiée](../../releases/latest).
 ### Windows
 
 `Wealfy-<version>-Setup.exe` installe l'application, avec raccourcis et
-désinstallation propre. `Wealfy-<version>-portable.exe` fonctionne seul, y
-compris depuis une clé USB.
+désinstallation propre. `Wealfy-<version>-portable.zip` se décompresse où l'on
+veut, y compris sur une clé USB : on lance `Wealfy.exe` dans le dossier.
+
+L'application n'est plus un exe en un seul fichier : celui-ci se décompressait à
+chaque lancement dans un dossier temporaire, ce que les antivirus (Avast
+notamment) prenaient pour un logiciel malveillant.
 
 SmartScreen peut afficher un avertissement au premier lancement : l'application
 n'est pas signée par un certificat d'éditeur. « Informations complémentaires »
@@ -109,7 +113,7 @@ copies écrivant dans la même base SQLite finiraient par se marcher dessus.
 | Mode de lancement | Emplacement de la base |
 |---|---|
 | Windows, installé | `%LOCALAPPDATA%\Patrimoine\patrimoine.db` |
-| Windows, exe posé dans un dossier inscriptible | `patrimoine.db` à côté de l'exe |
+| Windows, dossier portable inscriptible | `patrimoine.db` à côté de `Wealfy.exe` |
 | macOS | `~/Bibliothèque/Application Support/Wealfy/patrimoine.db` |
 | Linux | `~/.local/share/wealfy/patrimoine.db` |
 | `python run.py` | `patrimoine.db` à la racine du projet |

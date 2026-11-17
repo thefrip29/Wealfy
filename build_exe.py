@@ -9,7 +9,7 @@ comme l'installateur reposent sur des outils fournis par chaque systeme. Un
 binaire macOS ne peut donc PAS etre fabrique depuis Windows — c'est le role de
 l'integration continue, qui lance ce meme script sur un runner de chaque bord.
 
-  Windows -> dist/Wealfy.exe (--onefile) puis dist/Setup_Wealfy.exe (Inno Setup)
+  Windows -> dist/Wealfy/ (--onedir) puis dist/Setup_Wealfy.exe (Inno Setup)
   macOS   -> dist/Wealfy.app (--onedir)  puis dist/Wealfy-<version>-<arch>.dmg
 
 Le dessin de l'icone est commun ; seul le format d'ecriture change (.ico et
@@ -253,7 +253,15 @@ def _donnees_embarquees():
 def construire_windows():
     command = [
         sys.executable, "-m", "PyInstaller",
-        "--noconfirm", "--clean", "--onefile",
+        # `--onedir` et non `--onefile`. Un exe en un seul fichier se
+        # decompresse a chaque lancement dans un dossier temporaire, puis
+        # execute ce qu'il vient d'y ecrire : c'est exactement le comportement
+        # d'un logiciel malveillant, et Avast bloquait Wealfy sur ce seul motif.
+        # Un dossier d'application ordinaire ne fait rien de tel.
+        #
+        # `--noupx` : un binaire compresse par UPX est l'autre signal que les
+        # antivirus retiennent contre PyInstaller.
+        "--noconfirm", "--clean", "--onedir", "--noupx",
         # Plus de fenetre console noire derriere l'application.
         "--noconsole",
         "--name", APP_NAME,
@@ -410,7 +418,7 @@ def build_installer():
     if not iscc:
         print("\nInno Setup introuvable : l'installateur n'a pas ete construit.")
         print("  winget install JRSoftware.InnoSetup")
-        print(f"L'executable seul reste disponible : dist/{APP_NAME}.exe")
+        print(f"L'application seule reste disponible : dist/{APP_NAME}/")
         return None
 
     subprocess.run([iscc, f"/DMyAppVersion={VERSION}", ISS_PATH],
@@ -430,10 +438,10 @@ def main():
         ecrire_ico(image)
         build_version_file()
         construire_windows()
-        exe = os.path.join(ROOT, "dist", f"{APP_NAME}.exe")
+        exe = os.path.join(ROOT, "dist", APP_NAME, f"{APP_NAME}.exe")
         if not os.path.exists(exe):
             raise SystemExit(f"Executable introuvable : {exe}")
-        print(f"Executable : {exe} ({os.path.getsize(exe) / (1024 * 1024):.1f} Mo)")
+        print(f"Application : {os.path.dirname(exe)}")
         if not sans_installateur:
             build_installer()
 
