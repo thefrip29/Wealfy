@@ -64,7 +64,7 @@ jobs:
         shell: bash
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then
-            bash ci/smoke.sh ./dist/Wealfy.exe
+            bash ci/smoke.sh ./dist/Wealfy/Wealfy.exe
           else
             bash ci/smoke.sh ./dist/Wealfy.app/Contents/MacOS/Wealfy
           fi
@@ -76,7 +76,9 @@ jobs:
           VERSION=$(python -c "import app.version; print(app.version.VERSION)")
           mkdir -p out
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp "dist/Wealfy.exe" "out/Wealfy-$VERSION-portable.exe"
+            # La version portable est le dossier de l'application, zippe :
+            # un exe en un seul fichier se faisait bloquer par les antivirus.
+            (cd dist && 7z a -tzip "../out/Wealfy-$VERSION-portable.zip" Wealfy >/dev/null)
             if [ -f "dist/Setup_Wealfy.exe" ]; then
               cp "dist/Setup_Wealfy.exe" "out/Wealfy-$VERSION-Setup.exe"
             else
@@ -125,8 +127,8 @@ jobs:
           body: |
             ## Windows
 
-            `Wealfy-*-Setup.exe` pour installer, `Wealfy-*-portable.exe` pour
-            lancer sans installation.
+            `Wealfy-*-Setup.exe` pour installer, `Wealfy-*-portable.zip` pour
+            lancer sans installation (decompresser, puis lancer Wealfy.exe).
 
             SmartScreen affiche un avertissement au premier lancement,
             l'application n'etant pas signee. « Informations complementaires »

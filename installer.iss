@@ -53,7 +53,16 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; \
   GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; Tout le dossier de l'application : l'exe et ses bibliotheques (_internal).
+; Il n'y a plus d'exe unique qui se decompresse au lancement — c'est ce
+; comportement que les antivirus prenaient pour un logiciel malveillant.
+Source: "dist\{#MyAppName}\*"; DestDir: "{app}"; \
+  Flags: ignoreversion recursesubdirs createallsubdirs
+
+[InstallDelete]
+; L'ancien exe en un seul fichier etait autonome : le remplacer par celui du
+; dossier suffit, mais un reste de l'ancienne version ne doit pas y trainer.
+Type: filesandordirs; Name: "{app}\_internal"
 
 [Icons]
 Name: "{group}\{#MyAppName}";           Filename: "{app}\{#MyAppExeName}"

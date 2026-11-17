@@ -7,7 +7,7 @@
 # lui-meme.
 #
 #   bash ci/smoke.sh python run.py                          # avant construction
-#   bash ci/smoke.sh ./dist/Wealfy.exe                      # Windows
+#   bash ci/smoke.sh ./dist/Wealfy/Wealfy.exe               # Windows
 #   bash ci/smoke.sh ./dist/Wealfy.app/Contents/MacOS/Wealfy  # macOS
 #
 # Sur macOS on invoque le binaire INTERIEUR au bundle plutot que `open -a` :
