@@ -27,7 +27,7 @@ jobs:
         include:
           - os: windows-latest
             label: windows-x64
-          - os: macos-14
+          - os: macos-15
             label: macos-arm64
 
     steps:
