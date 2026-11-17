@@ -51,6 +51,34 @@ const eurFmt0 = new Intl.NumberFormat('fr-FR', {
 });
 const numFmt = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 });
 
+/* ---------- devise d'affichage ----------
+
+   Les donnees restent en euros de bout en bout : la base, l'API, les calculs.
+   Seule la LECTURE change, et la conversion se fait au tout dernier moment,
+   ici. Rien n'est jamais enregistre en dollars, si bien qu'un taux qui bouge
+   ne reecrit pas l'histoire.
+
+   Le taux vient du cache des cours, pose par le rafraichissement. Sans lui,
+   `taux` vaut null et l'interface propose l'euro seul plutot que de convertir
+   avec un chiffre invente. */
+App.devise = { code: 'EUR', taux: 1, date: null };
+App.CLE_DEVISE = 'patrimoine.devise';
+
+const formatsDevise = {};
+function formatDevise(code, compact) {
+  const cle = `${code}|${compact ? 0 : 2}`;
+  if (!formatsDevise[cle]) {
+    formatsDevise[cle] = new Intl.NumberFormat('fr-FR', {
+      style: 'currency', currency: code, maximumFractionDigits: compact ? 0 : 2,
+      // « $ » plutot que « $US » : le francais desambigue les dollars, mais une
+      // seule devise etrangere est proposee et le symbole suit le nombre comme
+      // l'euro le fait partout ailleurs.
+      currencyDisplay: 'narrowSymbol',
+    });
+  }
+  return formatsDevise[cle];
+}
+
 App.fmt = {
   eur(v, compact) {
     if (v === null || v === undefined || Number.isNaN(v)) return '—';
@@ -59,6 +87,18 @@ App.fmt = {
   num(v, digits) {
     if (v === null || v === undefined || Number.isNaN(v)) return '—';
     return new Intl.NumberFormat('fr-FR', { maximumFractionDigits: digits ?? 2 }).format(v);
+  },
+  /* Un montant relu dans la devise d'affichage. Identique a `eur` tant que
+     celle-ci est l'euro, ce qui est le cas partout sauf dans Patrimoine. */
+  montant(v, compact) {
+    if (v === null || v === undefined || Number.isNaN(v)) return '—';
+    const d = App.devise;
+    if (d.code === 'EUR' || !d.taux) return App.fmt.eur(v, compact);
+    return formatDevise(d.code, compact).format(v * d.taux);
+  },
+  montantSigne(v) {
+    if (v === null || v === undefined) return '—';
+    return (v > 0 ? '+' : '') + App.fmt.montant(v);
   },
   pct(v, digits) {
     if (v === null || v === undefined || Number.isNaN(v)) return '—';
@@ -150,9 +190,16 @@ App.esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
 App.clear = (node) => { while (node && node.firstChild) node.removeChild(node.firstChild); };
 
 /* ---------- toasts ---------- */
-App.toast = function (message, kind = 'info', ms = 3600) {
+/* `action` : { libelle, faire } — un seul bouton, qui ferme le toast. */
+App.toast = function (message, kind = 'info', ms = 3600, action = null) {
   const host = App.el('#toast-host');
   const node = App.h('div', { class: `toast ${kind}` }, message);
+  if (action) {
+    node.append(App.h('button', {
+      class: 'toast-action',
+      onclick: () => { node.remove(); action.faire(); },
+    }, action.libelle));
+  }
   host.append(node);
   setTimeout(() => {
     node.classList.add('leaving');
@@ -282,12 +329,15 @@ App.field = function (label, input, opts = {}) {
    dans les réglages, « Ouvert le 12/03/2020 » sur une fiche, ou « Échéances
    payées : 24 / 240 » sur un prêt. Rien de tout cela n'est un montant.
 
-   La marque est déduite du symbole monétaire, que seul `App.fmt.eur` produit.
-   Un pourcentage ou une date n'en portent pas, et ne sont donc pas masqués. */
+   La marque est déduite du symbole monétaire, que seuls `App.fmt.eur` et
+   `App.fmt.montant` produisent. Un pourcentage ou une date n'en portent pas,
+   et ne sont donc pas masqués. Les deux symboles comptent : lu en dollars, le
+   patrimoine doit se masquer comme il se masque en euros. */
 App.metricList = function (rows) {
   const list = App.h('div', { class: 'metric-list' });
   for (const [label, valeur] of rows) {
-    const monetaire = typeof valeur === 'string' && valeur.includes('€');
+    const monetaire = typeof valeur === 'string'
+      && (valeur.includes('€') || valeur.includes('$'));
     list.append(App.h('div', { class: 'metric-row' },
       App.h('span', { class: 'm-label' }, label),
       App.h('span', { class: `m-value${monetaire ? ' montant' : ''}` }, valeur)));
@@ -297,6 +347,32 @@ App.metricList = function (rows) {
 
 /* Explication repliée : présente pour qui la cherche, silencieuse sinon.
    Réservée au pédagogique — un avertissement reste toujours visible. */
+/* Menu d'actions d'une ligne de tableau : un bouton « ⋯ », une liste à la
+   demande. `actions` : [[libellé, fonction], ...] ; les `null` sont ignorés.
+   Un clic ailleurs ou Échap le referme. */
+App.menuLigne = function (actions) {
+  const menu = App.h('details', { class: 'menu-ligne' },
+    App.h('summary', { title: 'Actions', 'aria-label': 'Actions' }, '\u22ef'));
+  const liste = App.h('div', { class: 'menu-liste', role: 'menu' });
+  for (const a of actions.filter(Boolean)) {
+    liste.append(App.h('button', {
+      role: 'menuitem',
+      onclick: () => { menu.open = false; a[1](); },
+    }, a[0]));
+  }
+  menu.append(liste);
+  return menu;
+};
+document.addEventListener('click', (e) => {
+  for (const m of document.querySelectorAll('details.menu-ligne[open]')) {
+    if (!m.contains(e.target)) m.open = false;
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  for (const m of document.querySelectorAll('details.menu-ligne[open]')) m.open = false;
+});
+
 App.note = function (summary, ...children) {
   return App.h('details', { class: 'note' },
     App.h('summary', {}, summary), ...children);
@@ -719,7 +795,31 @@ App.themeChoisi = function () {
     const v = localStorage.getItem(App.CLE_THEME);
     if (App.THEMES.includes(v)) return v;
   } catch (e) { /* ignore */ }
-  return 'systeme';
+  // Clair par défaut : voir le script en tête d'index.html.
+  return 'clair';
+};
+
+/* Un montant qui défile jusqu'à sa valeur, depuis celle qu'il affichait.
+
+   Au premier affichage il part de zéro ; ensuite, d'un mois à l'autre, il
+   part du chiffre précédent : on voit le patrimoine monter ou descendre au
+   lieu d'un chiffre remplacé. Courbe qui freine à l'arrivée, 900 ms, comme
+   le déroulement des blocs. Mouvement réduit : la valeur finale, d'emblée. */
+App.compter = function (el, valeur, format) {
+  const depart = Number(el.dataset.valeur);
+  el.dataset.valeur = String(valeur);
+  const reduit = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduit || !Number.isFinite(valeur)) { el.textContent = format(valeur); return; }
+  const de = Number.isFinite(depart) ? depart : 0;
+  const duree = 900;
+  const t0 = performance.now();
+  const pas = (t) => {
+    const p = Math.min(1, (t - t0) / duree);
+    const e = 1 - Math.pow(1 - p, 4);
+    el.textContent = format(p < 1 ? de + (valeur - de) * e : valeur);
+    if (p < 1 && el.isConnected) requestAnimationFrame(pas);
+  };
+  requestAnimationFrame(pas);
 };
 
 App.systemeEnSombre = () => window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -735,19 +835,6 @@ App.setTheme = function (choix, memoriser = true) {
     try { localStorage.setItem(App.CLE_THEME, choix); } catch (e) { /* ignore */ }
   }
   App.readPalette();
-
-  const btn = App.el('#toggle-theme');
-  if (btn) {
-    const etats = {
-      systeme: ['&#9681;', 'Thème : système'],      // cercle mi-plein
-      clair: ['&#9788;', 'Thème : clair'],          // soleil
-      sombre: ['&#9789;', 'Thème : sombre'],        // lune
-    };
-    const [icone, titre] = etats[choix] || etats.systeme;
-    btn.innerHTML = icone;
-    btn.title = `${titre} (cliquer pour changer)`;
-    btn.dataset.choix = choix;
-  }
 };
 
 /* Suit l'OS en direct, mais seulement tant que le choix est « système ». Sans
@@ -772,8 +859,15 @@ App.setPrivacy = function (on) {
   if (btn) {
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
     btn.title = on ? 'Afficher les montants' : 'Masquer les montants';
-    btn.innerHTML = on ? '&#128065;' : '&#128584;';
+    // Icônes au trait plutôt qu'emoji : un emoji arrive en couleur, dans le
+    // style du système, et jure avec le reste de la barre.
+    btn.innerHTML = on ? App.ICONES.oeilBarre : App.ICONES.oeil;
   }
+};
+
+App.ICONES = {
+  oeil: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+  oeilBarre: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/><path d="M4 4l16 16"/></svg>',
 };
 
 App.privacyOn = () => document.body.classList.contains('privacy');
@@ -835,6 +929,15 @@ App.chart = function (canvasId, config) {
     },
   };
   config.options = App.deepMerge(defaults, config.options || {});
+  // Parts de camembert arrondies et légèrement séparées, comme les anneaux
+  // d'Apple ; barres aux coins adoucis. Un réglage explicite l'emporte.
+  for (const ds of (config.data && config.data.datasets) || []) {
+    if (config.type === 'doughnut' && (config.data.datasets[0].data || []).length > 1) {
+      ds.borderRadius ??= 6;
+      ds.spacing ??= 2;
+    }
+    if (config.type === 'bar' && ds.type !== 'line') ds.borderRadius = Math.max(ds.borderRadius || 0, 6);
+  }
   App.state.charts[canvasId] = new Chart(canvas, config);
   return App.state.charts[canvasId];
 };

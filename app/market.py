@@ -33,6 +33,11 @@ INSEE_SDMX = "https://bdm.insee.fr/series/sdmx/data/SERIES_BDM"
 YAHOO_BASE = "https://query2.finance.yahoo.com"
 
 MARKET_ASSET_TYPES = {"PEA", "CTO", "AssuranceVie", "PER"}
+
+# Les devises dans lesquelles le patrimoine peut être RELU à l'écran. Les
+# données restent en euros de bout en bout — seule la présentation change, et
+# la conversion se fait au dernier moment, côté navigateur.
+DEVISES_AFFICHAGE = ("USD",)
 CRYPTO_ASSET_TYPES = {"Crypto"}
 RATE_ASSET_TYPES = {"Livret", "LDDS", "LEP", "LivretJeune", "PEL", "CEL", "DepotTerme"}
 INDEXED_ASSET_TYPES = {"Immobilier", "SCPI"}
@@ -236,8 +241,32 @@ class YahooFinance(Provider):
             raise MarketError("Aucun cours renvoye pour ce symbole")
         return results[0]
 
+    # Twelve Data nomme une valeur d'Euronext sans suffixe (« DCAM »), Yahoo
+    # la veut avec celui de sa place (« DCAM.PA ») et repond 404 sans lui. Une
+    # ligne mappee du temps de Twelve Data restait donc sans cours, et tout le
+    # compte retombait sur sa valeur saisie. La place se lit dans l'ISIN.
+    _SUFFIXES_EURONEXT = {"FR": ".PA", "NL": ".AS", "BE": ".BR", "PT": ".LS", "IE": ".PA"}
+
+    @classmethod
+    def _symboles(cls, item):
+        symbole = item["symbol"]
+        yield symbole
+        if "." in symbole or "euronext" not in (item.get("exchange") or "").casefold():
+            return
+        premier = cls._SUFFIXES_EURONEXT.get((item.get("isin") or "")[:2].upper(), ".PA")
+        for suffixe in dict.fromkeys([premier, ".PA", ".AS", ".BR"]):
+            yield symbole + suffixe
+
     def _quote_one(self, item):
-        result = self._chart(item["symbol"])
+        erreur = None
+        for symbole in self._symboles(item):
+            try:
+                result = self._chart(symbole)
+                break
+            except MarketError as exc:
+                erreur = erreur or exc
+        else:
+            raise erreur
         meta = result.get("meta") or {}
         price = meta.get("regularMarketPrice")
         if price in (None, ""):
@@ -451,6 +480,63 @@ def build_provider(name=None, api_key=None):
 # Cache
 # ==========================================================================
 
+def rafraichir_taux(provider, codes=None):
+    """Releve le taux du moment pour chaque devise d'affichage. SORT SUR LE RESEAU.
+
+    C'est la requete la moins bavarde de toute l'application : elle envoie une
+    paire de devises et rien d'autre. Ni symbole detenu, ni quantite, ni
+    montant — a la difference d'un rafraichissement de cours, dont les symboles
+    interroges renseignent sur la composition du portefeuille.
+    """
+    sortie = []
+    for code in (codes or DEVISES_AFFICHAGE):
+        try:
+            taux = provider.fx("EUR", code)
+        except Exception:                       # pragma: no cover - reseau
+            taux = None
+        if taux:
+            store_quote(f"FX:EUR{code}", provider.name, date.today(), taux, code)
+        sortie.append(taux_affichage(code))
+    return sortie
+
+
+def taux_affichage(code):
+    """Le taux euro -> `code` en cache, avec sa date. Aucun appel réseau.
+
+    `None` en `taux` veut dire « pas encore relevé » : l'euro reste alors la
+    seule devise proposée, et l'interface le dit plutôt que de convertir avec
+    un taux inventé.
+    """
+    code = (code or "EUR").upper()
+    if code == "EUR":
+        return {"code": "EUR", "taux": 1.0, "date": None}
+    rows = query(
+        "SELECT price, date, fetched_at FROM quotes WHERE symbol = ? "
+        "ORDER BY date DESC LIMIT 1",
+        (f"FX:EUR{code}",),
+    )
+    for row in rows:
+        return {"code": code, "taux": float(row["price"]), "date": row["date"],
+                "releve_a": row["fetched_at"], "direct": True}
+
+    # A defaut, l'INVERSE du taux deja en cache. La conversion des titres cotes
+    # en devise etrangere releve `FX:{code}EUR` depuis toujours : le chiffre est
+    # donc la, a l'envers, et attendre un rafraichissement pour le meme
+    # renseignement rendait la lecture en dollars indisponible sans raison.
+    rows = query(
+        "SELECT price, date, fetched_at FROM quotes WHERE symbol = ? "
+        "ORDER BY date DESC LIMIT 1",
+        (f"FX:{code}EUR",),
+    )
+    for row in rows:
+        inverse = float(row["price"])
+        if inverse > 0:
+            return {"code": code, "taux": round(1 / inverse, 6), "date": row["date"],
+                    "releve_a": row["fetched_at"], "direct": False}
+    return {"code": code, "taux": None, "date": None,
+            "releve_a": None, "direct": False}
+
+
 def store_quote(symbol, source, quote_date, price, currency="EUR"):
     execute(
         "INSERT INTO quotes(symbol, source, date, price, currency, fetched_at) "
@@ -582,7 +668,8 @@ def refresh_quotes(provider=None, crypto_provider=None):
         if not sec or not sec.get("symbol"):
             non_mappes.append(ticker)
             continue
-        entry = {"cle": ticker, "symbol": sec["symbol"], "exchange": sec.get("exchange")}
+        entry = {"cle": ticker, "symbol": sec["symbol"], "exchange": sec.get("exchange"),
+                 "isin": sec.get("isin")}
         if sec.get("kind") == "crypto" or asset_type in CRYPTO_ASSET_TYPES:
             coin_items.append(entry)
         else:
@@ -625,6 +712,19 @@ def refresh_quotes(provider=None, crypto_provider=None):
     for cle, quote in found.items():
         store_quote(cle, provider.name, quote.get("date") or date.today(),
                     quote.get("price_eur", quote["price"]), "EUR")
+
+    # --- taux d'affichage, de l'euro vers les devises proposées à l'écran
+    #
+    # Relevé ICI et nulle part ailleurs. `POST /api/market/refresh` est la
+    # seule route de toute l'application qui sorte sur le réseau, et cette
+    # propriété vaut mieux qu'un taux de change toujours frais : la lecture du
+    # patrimoine en dollars se contente du dernier taux connu, avec sa date
+    # affichée à côté.
+    # La garde `items or coin_items` n'est pas un detail : sans elle, un
+    # portefeuille fait de seuls supports non cotes declencherait un appel
+    # reseau pour rien, alors qu'il n'a aucun cours a demander.
+    if items or coin_items:
+        rafraichir_taux(provider)
 
     for ticker in non_mappes:
         errors.append({"cle": ticker,

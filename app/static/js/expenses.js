@@ -4,20 +4,33 @@ App.tabs.expenses = {
 
   async load() {
     const month = App.state.month;
-    const [flows, txs, imports] = await Promise.all([
+    const [flows, txs, imports, abos] = await Promise.all([
       App.api.get(`/api/month?month=${month}`),
       App.api.get(`/api/transactions?month=${month}`),
       App.api.get('/api/imports'),
+      // Les abonnements ne dependent pas du mois affiche : ils se lisent sur
+      // deux ans. Charges ici pour ne pas ajouter un aller-retour a l'ouverture
+      // de l'onglet.
+      App.api.get('/api/subscriptions').catch(() => null),
     ]);
     App.tabs.expenses.cache = { transactions: txs, month };
     App.el('#ex-month-label').textContent = App.fmt.month(month);
     App.tabs.expenses.renderLastImport(imports);
     App.tabs.expenses.renderKpis(flows);
     App.tabs.expenses.renderBudgets(flows);
+    App.tabs.expenses.renderAbonnements(abos);
     App.tabs.expenses.fillCategoryFilter();
+    // Arrivée depuis le camembert ou un budget : la catégorie est filtrée
+    // d'emblée, la recherche vidée pour ne pas masquer ce qu'on vient voir.
+    if (App.tabs.expenses.filtreAPoser) {
+      App.tabs.expenses.poserFiltre(App.tabs.expenses.filtreAPoser);
+      App.tabs.expenses.filtreAPoser = null;
+    }
     App.tabs.expenses.renderTable();
-    App.tabs.expenses.renderImports(imports);
+    App.tabs.expenses.imports = imports;
   },
+
+  imports: [],
 
   renderLastImport(imports) {
     const host = App.el('#ex-last-import');
@@ -27,8 +40,8 @@ App.tabs.expenses = {
       return;
     }
     const last = imports[0];
-    host.textContent = `Dernier : ${last.source}, ${last.nombre_lignes} ligne(s) `
-      + `jusqu’au ${App.fmt.date(last.periode_fin)} · ${imports.length} import(s) au total`;
+    host.textContent = `Dernier relevé : ${last.source}, jusqu’au `
+      + `${App.fmt.date(last.periode_fin)} · journal des ${imports.length} import(s)`;
   },
 
   renderKpis(f) {
@@ -46,6 +59,75 @@ App.tabs.expenses = {
       kpi('Épargne', App.fmt.eur(f.epargne),
         f.taux_epargne === null ? null : `taux ${App.fmt.ratio(f.taux_epargne)}`),
     );
+  },
+
+  /* ---------- les prelevements qui reviennent ----------
+
+     Un abonnement ne se declare pas, il se reconnait : le meme marchand, un
+     ecart regulier, un montant qui ne bouge pas. Il faut les trois — un
+     marchand frequente revient et coute lui aussi, sans etre un abonnement.
+
+     Ce que la carte apporte n'est pas la liste, que vous connaissez, mais les
+     trois choses qu'on ne voit pas : le total a l'annee, les prix qui ont
+     augmente sans prevenir, et ce qui se preleve encore alors qu'on croyait
+     avoir resilie. */
+  renderAbonnements(res) {
+    const carte = App.el('#ex-abos-card');
+    if (!res || !res.abonnements || !res.abonnements.length) {
+      carte.hidden = true;
+      return;
+    }
+    carte.hidden = false;
+    App.el('#ex-abos-sub').textContent = res.nb
+      ? `${res.nb} actif(s) · ${App.fmt.eur(res.cout_mensuel)} par mois · `
+        + `${App.fmt.eur(res.cout_annuel)} par an`
+      : 'aucun actif';
+
+    const host = App.el('#ex-abos');
+    App.clear(host);
+
+    if (res.augmentations && res.augmentations.length) {
+      host.append(App.h('p', { class: 'hint alerte' },
+        `⚠ ${res.augmentations.length} prix a augmenté : `
+        + res.augmentations.map((a) => `${a.libelle} +${App.fmt.eur(a.augmentation.hausse)}`).join(', ')));
+    }
+
+    const corps = App.h('tbody', {});
+    res.abonnements.forEach((a) => {
+      const hausse = a.augmentation;
+      corps.append(App.h('tr', { class: a.actif ? '' : 'eteint' },
+        App.h('td', {},
+          App.h('div', { class: 'ell', title: a.libelle }, a.libelle),
+          App.h('div', { class: 'a-meta' },
+            `${a.nb} prélèvement(s) · dernier le ${App.fmt.date(a.dernier)}`)),
+        App.h('td', {}, a.periodicite),
+        App.h('td', { class: 'right num' }, App.fmt.eur(a.montant)),
+        App.h('td', { class: 'right num' }, App.fmt.eur(a.cout_annuel)),
+        App.h('td', { class: 'nowrap' }, a.prochain ? App.fmt.date(a.prochain) : '—'),
+        App.h('td', {},
+          !a.actif
+            ? App.h('span', {
+              class: 'pill warn',
+              title: `Rien depuis ${a.jours_depuis} jours. Résilié, ou oublié ?`,
+            }, 'plus prélevé')
+            : hausse
+              ? App.h('span', {
+                class: 'pill warn',
+                title: `Passé de ${App.fmt.eur(hausse.avant)} à ${App.fmt.eur(hausse.apres)}`,
+              }, `+${hausse.pct} %`)
+              : null)));
+    });
+
+    host.append(App.h('div', { class: 'table-wrap' },
+      App.h('table', { class: 'table' },
+        App.h('thead', {}, App.h('tr', {},
+          App.h('th', {}, 'Libellé'),
+          App.h('th', { style: 'width:110px' }, 'Rythme'),
+          App.h('th', { class: 'right', style: 'width:100px' }, 'Montant'),
+          App.h('th', { class: 'right', style: 'width:110px' }, 'À l’année'),
+          App.h('th', { style: 'width:104px' }, 'Prochain'),
+          App.h('th', { style: 'width:110px' }, ''))),
+        corps)));
   },
 
   /* Consomme sur prevu, par categorie budgetee.
@@ -74,7 +156,10 @@ App.tabs.expenses = {
       const reel = depense[cat] || 0;
       const part = prevu > 0 ? (100 * reel) / prevu : 0;
       const depasse = reel > prevu;
-      host.append(App.h('div', { class: 'rep-row' },
+      host.append(App.h('button', {
+        class: 'rep-row cliquable', title: 'Voir les transactions',
+        onclick: () => { App.tabs.expenses.poserFiltre(cat); App.tabs.expenses.renderTable(); },
+      },
         App.h('div', { class: 'rep-head' },
           App.h('span', {}, cat),
           App.h('span', {},
@@ -89,6 +174,17 @@ App.tabs.expenses = {
             style: `width:${Math.min(100, part)}%`,
           }))));
     }
+  },
+
+  filtreAPoser: null,
+
+  poserFiltre(categorie) {
+    const sel = App.el('#ex-filter-cat');
+    if (![...sel.options].some((o) => o.value === categorie)) {
+      sel.append(App.h('option', { value: categorie }, categorie));
+    }
+    sel.value = categorie;
+    App.el('#ex-search').value = '';
   },
 
   /* Le filtre gagne « À classer » en tête : c'est le geste principal après un
@@ -159,9 +255,13 @@ App.tabs.expenses = {
       const enregistrer = async () => {
         if (sel.value === t.category) { afficher(); return; }
         try {
-          await App.api.put(`/api/transactions/${t.id}`, { category: sel.value });
+          const res = await App.api.put(`/api/transactions/${t.id}`, { category: sel.value });
           t.category = sel.value;
-          App.toast('Catégorie mise à jour', 'success');
+          if (res.regle_proposee) {
+            App.tabs.expenses.proposerRegle(res.regle_proposee, sel.value);
+          } else {
+            App.toast('Catégorie mise à jour', 'success');
+          }
           await App.refreshOthers();
         } catch (e) { App.toast(e.message, 'error'); }
         afficher();
@@ -173,6 +273,25 @@ App.tabs.expenses = {
     };
     afficher();
     return cell;
+  },
+
+  /* Une correction à la main vaut souvent pour tout un marchand. Le toast
+     propose d'en faire une règle, comme le bandeau d'import le fait : la
+     question ne reviendra pas au prochain relevé. */
+  proposerRegle(racine, categorie) {
+    App.toast(`Catégorie mise à jour. Toujours « ${categorie} » pour ${racine} ?`,
+      'success', 8000, {
+        libelle: 'Créer la règle',
+        faire: async () => {
+          try {
+            await App.api.post('/api/rules', { pattern: racine, valeur: categorie });
+            const res = await App.api.post('/api/rules/apply', { seulement_non_categorise: true });
+            App.toast(`Règle créée${res.modifiees ? `, ${res.modifiees} autre(s) ligne(s) classée(s)` : ''}`,
+              'success');
+            await App.refreshAll();
+          } catch (e) { App.toast(e.message, 'error'); }
+        },
+      });
   },
 
   /* Barre d'actions groupées, visible dès la première ligne cochée. */
@@ -230,7 +349,7 @@ App.tabs.expenses = {
       toutCocher.checked = false;
       App.tabs.expenses.renderBulk();
       const vide = App.tabs.expenses.cache.transactions.length === 0;
-      tbody.append(App.h('tr', {}, App.h('td', { colspan: 7 },
+      tbody.append(App.h('tr', {}, App.h('td', { colspan: 6 },
         App.h('div', { class: 'empty-cta' },
           App.h('p', {}, vide
             ? `Aucune transaction en ${App.fmt.month(App.state.month)}.`
@@ -267,12 +386,13 @@ App.tabs.expenses = {
       tbody.append(App.h('tr', {},
         App.h('td', { class: 'center' }, coche),
         App.h('td', { class: 'nowrap' }, App.fmt.date(t.date)),
-        App.h('td', {}, App.h('div', { class: 'ell', title: t.description }, t.description)),
+        // Le rattachement à un produit ou un prêt avait sa colonne, vide la
+        // plupart du temps. Il passe sous le libellé, quand il existe.
+        App.h('td', {},
+          App.h('div', { class: 'ell', title: t.description }, t.description),
+          link ? App.h('div', { class: 'a-meta' }, `→ ${link}`) : null),
         App.tabs.expenses.celluleCategorie(t),
         App.h('td', { class: `right num ${t.amount < 0 ? 'neg' : 'pos'}` }, App.fmt.eur(t.amount)),
-        App.h('td', {}, link
-          ? App.h('span', { class: 'pill accent' }, link)
-          : App.h('span', { class: 'muted' }, '—')),
         App.h('td', { class: 'right' },
           App.h('button', {
             class: 'icon-btn', title: 'Modifier',
@@ -297,8 +417,27 @@ App.tabs.expenses = {
      Il s'affichait dans cet onglet mais son code vivait dans
      `App.tabs.history`, qui ne le rendait pas : c'est `expenses.load()`
      qui appelait la fonction de l'autre module. Le code rejoint l'ecran. */
-  renderImports(imports) {
-    const tbody = App.el('#hi-imports tbody');
+  /* Le journal des imports, dans une modale. Il était replié en bas du
+     tableau des transactions, sous deux cents lignes. */
+  openJournal() {
+    const tbody = App.h('tbody', {});
+    App.tabs.expenses.renderImports(App.tabs.expenses.imports, tbody);
+    App.modal.open({
+      title: 'Journal des imports',
+      wide: true,
+      body: App.h('div', { class: 'table-wrap scroll-y' },
+        App.h('table', { class: 'table', id: 'hi-imports' },
+          App.h('thead', {}, App.h('tr', {},
+            App.h('th', {}, 'Date d’import'), App.h('th', {}, 'Source'),
+            App.h('th', {}, 'Période couverte'),
+            App.h('th', { class: 'right' }, 'Lignes'),
+            App.h('th', { style: 'width:150px' }))),
+          tbody)),
+      footer: [App.h('button', { class: 'btn', onclick: () => App.modal.close() }, 'Fermer')],
+    });
+  },
+
+  renderImports(imports, tbody) {
     App.clear(tbody);
     if (!imports.length) {
       tbody.append(App.h('tr', {}, App.h('td', { colspan: 5, class: 'empty' },

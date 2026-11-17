@@ -41,7 +41,7 @@ def get_asset_detail(aid):
     if asset["type"] in ("PEA", "CTO", "Crypto", "AssuranceVie", "PER"):
         payload["marche"] = services.market_asset_detail(aid, at, ctx)
     if asset["type"] in ("Immobilier", "SCPI", "Vehicule"):
-        payload["immobilier"] = services.real_estate_detail(aid, at)
+        payload["immobilier"] = services.real_estate_detail(aid, at, ctx)
     payload["transactions"] = services.transactions_between(
         "1900-01-01", at, asset_id=aid
     )
@@ -60,13 +60,17 @@ def create_asset():
     d = as_date(data.get("date_acquisition"), date.today().isoformat())
     aid = new_id()
     actuelle = as_float(data.get("valeur_actuelle"), None)
+    # Sans montant investi, on le pose egal au montant declare : la plus-value
+    # demarre a zero plutot qu'au montant entier. Un livret declare aujourd'hui
+    # avec 3 000 EUR valait sinon 0, puisque ses interets partent de l'investi.
+    investi = as_float(data.get("valeur_acquisition"), None)
+    if investi is None:
+        investi = actuelle or 0.0
     execute(
         "INSERT INTO assets(id, type, label, date_acquisition, valeur_acquisition, "
         "valeur_actuelle, metadata) VALUES (?,?,?,?,?,?,?)",
         (
-            aid, atype, label, d,
-            as_float(data.get("valeur_acquisition"), 0.0) or 0.0,
-            actuelle,
+            aid, atype, label, d, investi, actuelle,
             json.dumps(data.get("metadata") or {}, ensure_ascii=False),
         ),
     )
@@ -84,7 +88,7 @@ def create_asset():
             "INSERT INTO asset_movements(id, asset_id, date, montant, type, note) "
             "VALUES (?,?,?,?,'valorisation',?)",
             (new_id(), aid, aujourdhui, round(actuelle, 2),
-             "Solde declare a la creation"),
+             services.NOTE_SOLDE_DECLARE),
         )
     return jsonify(row_to_dict(query("SELECT * FROM assets WHERE id = ?", (aid,), one=True))), 201
 
@@ -157,8 +161,11 @@ def update_asset(aid):
         fields.append("metadata = ?")
         args.append(json.dumps(data["metadata"] or {}, ensure_ascii=False))
     if "archived" in data:
+        # Clore, c'est dater : le produit compte jusqu'a ce jour, plus apres.
         fields.append("archived = ?")
         args.append(1 if data["archived"] else 0)
+        fields.append("date_cloture = ?")
+        args.append(date.today().isoformat() if data["archived"] else None)
     if not fields:
         return fail("Rien a modifier.")
     args.append(aid)

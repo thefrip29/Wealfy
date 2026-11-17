@@ -62,13 +62,13 @@
 <style>
   :root {
     /* Reprise de tokens.css */
-    --bg-page: #F4F7F5;
+    --bg-page: #EEF1F7;
 
     /* Couleurs de MARQUE : constantes, identiques dans les deux thèmes. Elles
        viennent du logo (logo-symbole.svg), pas de la palette d'interface. */
     --olive:  #7D9440;
     --bronze: #DD8C10;
-    --lueur:  hsl(78 40% 42% / .16);
+    --lueur:  rgba(143, 193, 255, .45);
 
     /* Reprise des durées de app.css */
     --ease:      cubic-bezier(.22, .61, .36, 1);
@@ -104,12 +104,8 @@
        l'application. Les deux valeurs doivent rester d'accord (FONDU_SORTIE). */
     --t-fondu: 320ms;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg-page: #08090A;
-      --lueur:   hsl(78 40% 42% / .12);
-    }
-  }
+  /* Toujours clair : l'application s'ouvre en verre clair par défaut, un
+     écran de lancement sombre la ferait précéder d'un éclair noir. */
 
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }

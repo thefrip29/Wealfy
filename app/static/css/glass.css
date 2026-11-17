@@ -1,0 +1,445 @@
+/* ==========================================================================
+   Verre clair — la matière de l'interface
+
+   Chargée APRÈS app.css, cette feuille ne change que l'apparence : la mise en
+   page, les animations d'entrée et le carrousel restent ceux d'app.css. La
+   retirer de index.html suffit à revenir aux surfaces opaques.
+
+   LA RECETTE DU VERRE
+   Trois couches, comme les matériaux d'Apple :
+     1. un fond translucide, qui laisse passer le fond pastel en mouvement ;
+     2. un flou saturé de ce qui passe dessous (`backdrop-filter`), qui en fait
+        une matière et non une vitre ;
+     3. un reflet : un filet clair en haut du bord, une ombre longue et douce
+        dessous. Le verre se détache par la lumière, pas par un trait.
+
+   Le flou ne s'applique qu'aux surfaces, jamais aux conteneurs listés dans
+   `RANGEES` (app.js) : ceux-là ne doivent rien peindre, sous peine de voir
+   leur décor rester figé pendant les transitions.
+
+   LE MOUVEMENT
+   Les durées restent celles d'app.css (`--t-fast`, `--t`, `--t-slow`). Une
+   seule courbe s'ajoute, `--spring`, réservée aux gestes : la pilule
+   d'onglet qui glisse, un bouton qu'on enfonce, une modale qui s'ouvre. Elle
+   dépasse sa cible d'un rien puis revient, ce qui donne le rebond des
+   interfaces d'Apple. Le survol et la pression passent par les propriétés
+   `translate` et `scale`, distinctes de `transform` : les animations d'entrée
+   écrivent `transform` jusqu'à la fin (`fill-mode: both`) et écraseraient
+   sinon tout déplacement au survol.
+   ========================================================================== */
+
+:root {
+  --glass-bg:        rgba(255, 255, 255, .58);
+  --glass-bg-strong: rgba(255, 255, 255, .80);
+  --glass-bg-soft:   rgba(255, 255, 255, .42);
+  --glass-border:    rgba(255, 255, 255, .72);
+  --glass-edge:      rgba(60, 60, 67, .08);
+  --glass-highlight: rgba(255, 255, 255, .95);
+  --glass-blur:      saturate(180%) blur(26px);
+  --glass-shadow:    0 1px 1px rgba(16, 24, 40, .03),
+                     0 10px 32px -8px rgba(31, 45, 90, .14);
+  --glass-shadow-up: 0 1px 1px rgba(16, 24, 40, .04),
+                     0 22px 48px -12px rgba(31, 45, 90, .24);
+  --glass-sheen: linear-gradient(160deg, rgba(255, 255, 255, .55) 0%,
+                                         rgba(255, 255, 255, .12) 42%,
+                                         rgba(255, 255, 255, 0) 60%);
+
+  --spring: cubic-bezier(.34, 1.36, .64, 1);
+  --t-spring: 520ms;
+
+  --radius: var(--radius-lg);
+  --radius-s: var(--radius-md);
+}
+
+[data-theme="dark"] {
+  --glass-bg:        rgba(38, 38, 44, .52);
+  --glass-bg-strong: rgba(34, 34, 40, .82);
+  --glass-bg-soft:   rgba(44, 44, 52, .40);
+  --glass-border:    rgba(255, 255, 255, .10);
+  --glass-edge:      rgba(0, 0, 0, .30);
+  --glass-highlight: rgba(255, 255, 255, .16);
+  --glass-shadow:    0 1px 1px rgba(0, 0, 0, .25),
+                     0 12px 36px -10px rgba(0, 0, 0, .55);
+  --glass-shadow-up: 0 1px 1px rgba(0, 0, 0, .30),
+                     0 24px 56px -12px rgba(0, 0, 0, .70);
+  --glass-sheen: linear-gradient(160deg, rgba(255, 255, 255, .10) 0%,
+                                         rgba(255, 255, 255, .02) 45%,
+                                         rgba(255, 255, 255, 0) 60%);
+}
+
+/* ---------- fond : la lumière que le verre attrape ---------- */
+
+body {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.003em;
+}
+/* Un voile très doux sur toute la page : sous les masses pastel, il évite
+   qu'un coin vide reste d'un gris plat. */
+html, body {
+  background:
+    radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--lava-1) 22%, transparent), transparent 60%),
+    radial-gradient(100% 70% at 100% 100%, color-mix(in srgb, var(--lava-3) 18%, transparent), transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+}
+.lava .blob { mix-blend-mode: normal; }
+[data-fond="court"] .lava { opacity: .8; }
+
+code, textarea { font-family: var(--font-code); }
+
+/* ---------- la recette, appliquée aux surfaces ---------- */
+
+.card, .kpi, .alertes, .modal, .toast, .calendrier, .menu-liste,
+.choice, .bulk-bar:not([hidden]) {
+  background-color: var(--glass-bg);
+  background-image: var(--glass-sheen);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: inset 0 1px 0 var(--glass-highlight),
+              inset 0 0 0 1px var(--glass-edge),
+              var(--glass-shadow);
+}
+
+.card { border-radius: var(--radius-lg); }
+.kpi  { border-radius: var(--radius-lg); }
+
+/* Le survol soulève : quelques pixels et une ombre plus longue, avec le
+   rebond. Les cartes de graphique ne bougent pas — un graphique qui se
+   déplace sous le pointeur se lit mal. */
+.kpi, .choice {
+  transition: translate var(--t-spring) var(--spring),
+              box-shadow var(--t) var(--ease),
+              background-color var(--t) var(--ease),
+              border-color var(--t) var(--ease);
+}
+.kpi:hover, .choice:hover {
+  translate: 0 -3px;
+  border-color: var(--glass-border);
+  box-shadow: inset 0 1px 0 var(--glass-highlight),
+              inset 0 0 0 1px var(--glass-edge),
+              var(--glass-shadow-up);
+}
+.choice:hover { background-color: var(--glass-bg-strong); }
+.choice:active { scale: .985; translate: 0 -1px; }
+
+.card { transition: box-shadow var(--t-slow) var(--ease); }
+.card:hover {
+  box-shadow: inset 0 1px 0 var(--glass-highlight),
+              inset 0 0 0 1px var(--glass-edge),
+              var(--glass-shadow-up);
+}
+
+/* ---------- barre du haut : une capsule de verre qui flotte ---------- */
+
+.topbar {
+  /* La barre est claire : le texte « sur la marque » redevient le texte de
+     la page. Redéfinir la variable ICI suffit à retourner toutes les
+     couleurs de la barre, qui en dérivent par `color-mix`. */
+  --text-on-brand: var(--text-primary);
+  position: sticky; top: 12px;
+  margin: 12px auto 0;
+  width: min(1256px, calc(100% - 24px));
+  height: 56px; padding: 0 10px 0 18px;
+  border-radius: 20px;
+  background-color: var(--bg-nav);
+  background-image: var(--glass-sheen);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: inset 0 1px 0 var(--glass-highlight),
+              inset 0 0 0 1px var(--glass-edge),
+              var(--glass-shadow);
+}
+.brand-name { color: var(--text); }
+
+/* Onglets : une pilule de verre glisse sous l'onglet actif, avec le rebond.
+   C'est le même élément unique qu'avant (App.placeIndicator le mesure et le
+   place), habillé en capsule au lieu d'un trait. */
+.tabs { gap: 4px; }
+.tab {
+  z-index: 1; height: 34px; border-radius: 999px;
+  padding: 0 14px; font-size: var(--fs-sm);
+  color: var(--muted);
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--text); font-weight: 600; }
+.tab-indicator {
+  top: calc(50% - 17px); bottom: auto; height: 34px;
+  border-radius: 999px;
+  background: var(--nav-indicator);
+  box-shadow: inset 0 1px 0 var(--glass-highlight),
+              0 1px 2px rgba(16, 24, 40, .08),
+              0 6px 16px -6px rgba(31, 45, 90, .25);
+  transition: transform var(--t-spring) var(--spring),
+              width var(--t-spring) var(--spring);
+}
+
+.month-picker {
+  border-radius: 999px; padding: 3px;
+  background: var(--bg-surface-alt);
+}
+.month-picker:focus-within { background: color-mix(in srgb, var(--text) 10%, transparent); }
+.month-picker input { font-family: var(--font-sans); font-size: var(--fs-sm); font-weight: 500; }
+.icon-btn { border-radius: 999px; }
+.topbar .icon-btn { width: 32px; height: 32px; color: var(--text-2); }
+.ico {
+  width: 18px; height: 18px; display: block;
+  fill: none; stroke: currentColor; stroke-width: 1.7;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* ---------- héros : le chiffre, en grand, sans cadre ---------- */
+
+.hero { border-bottom: 0; padding-bottom: var(--space-3); }
+.hero-label {
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs); font-weight: 600;
+  letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted);
+}
+.hero-value {
+  font-weight: 650; letter-spacing: -.035em;
+  font-size: 46px; line-height: 1.05;
+}
+.hero-stat .s-value { font-weight: 600; letter-spacing: -.02em; }
+.kpi .value { font-weight: 650; font-size: 23px; letter-spacing: -.025em; }
+.kpi .label { font-weight: 500; }
+
+/* ---------- boutons : capsules ---------- */
+
+.btn {
+  border-radius: 999px;
+  padding: 7px 16px;
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-edge);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), 0 1px 2px rgba(16, 24, 40, .06);
+  font-weight: 500;
+  transition: translate var(--t-spring) var(--spring),
+              scale var(--t-spring) var(--spring),
+              background var(--t-fast) var(--ease),
+              border-color var(--t-fast) var(--ease),
+              color var(--t-fast) var(--ease),
+              box-shadow var(--t) var(--ease);
+}
+.btn:hover { translate: 0 -1px; border-color: var(--glass-edge); color: var(--accent); }
+.btn:active { scale: .96; translate: 0; transform: none; }
+.btn.primary {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--action-surface) 82%, white),
+                                      var(--action-surface));
+  border-color: transparent;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28),
+              0 6px 16px -6px color-mix(in srgb, var(--action-surface) 70%, transparent);
+}
+.btn.primary:hover {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--action-surface-hover) 82%, white),
+                                      var(--action-surface-hover));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28),
+              0 10px 22px -8px color-mix(in srgb, var(--action-surface) 80%, transparent);
+}
+.btn.danger { background: var(--glass-bg-strong); }
+.btn.small { padding: 4px 12px; }
+.btn.big { padding: 10px 20px; }
+
+/* ---------- champs ---------- */
+
+input[type=text], input[type=number],
+input[type=search], input[type=password], select, textarea {
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-surface) 72%, transparent);
+  border: 1px solid var(--border);
+  box-shadow: inset 0 1px 2px rgba(16, 24, 40, .04);
+}
+input:hover, select:hover, textarea:hover { border-color: var(--border-strong); }
+input:focus, select:focus, textarea:focus {
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--focus-ring) 22%, transparent);
+}
+input[type=search] { border-radius: 999px; padding-left: 14px; }
+
+/* ---------- pastilles, sélecteurs, onglets internes ---------- */
+
+.pill { border-radius: 999px; border-color: transparent; padding: 2px 9px; }
+.pill:not(.accent):not(.warn):not(.ok):not(.live) { background: var(--bg-surface-alt); }
+
+.segmente {
+  border-radius: 999px; padding: 2px; gap: 2px;
+  background: var(--bg-surface-alt); border: 0;
+}
+.segmente-cran { border-radius: 999px; transition: background var(--t) var(--ease), color var(--t-fast) var(--ease), box-shadow var(--t) var(--ease); }
+.segmente-cran.actif {
+  background: var(--glass-bg-strong);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), 0 1px 3px rgba(16, 24, 40, .14);
+}
+
+.tabs-inline { border-bottom: 0; gap: 4px; padding: 3px; width: max-content; max-width: 100%;
+  background: var(--bg-surface-alt); border-radius: 999px; }
+.tabs-inline button { border-radius: 999px; padding: 6px 14px; }
+.tabs-inline button::after { display: none; }
+.tabs-inline button.active {
+  color: var(--text); font-weight: 600;
+  background: var(--glass-bg-strong);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), 0 1px 3px rgba(16, 24, 40, .14);
+}
+
+/* ---------- tableaux : posés dans le verre, sans fond propre ---------- */
+
+.table th {
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+  text-transform: none;
+}
+/* Une en-tête collante, elle, doit masquer ce qui défile dessous. */
+.scroll-y .table th, .modal .table th {
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+.table tbody tr:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.table tr.annee td { background: color-mix(in srgb, var(--text) 4%, transparent); }
+
+/* ---------- observations ---------- */
+
+.alertes { border-left-width: 1px; border-radius: var(--radius-lg); }
+.alertes.urgent { border-left-width: 1px; }
+.alertes > summary::before { background: var(--action-surface); color: #fff; }
+.alertes.urgent > summary::before { background: var(--alerte); }
+
+/* ---------- modale : une feuille de verre qui jaillit ---------- */
+
+.modal-backdrop {
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  backdrop-filter: blur(10px) saturate(140%);
+}
+.modal {
+  background-color: var(--glass-bg-strong);
+  border-radius: 26px;
+  box-shadow: inset 0 1px 0 var(--glass-highlight),
+              inset 0 0 0 1px var(--glass-edge),
+              0 40px 90px -20px rgba(31, 45, 90, .38);
+  animation: verre-jaillit var(--t-spring) var(--spring) both;
+}
+[data-theme="dark"] .modal {
+  box-shadow: inset 0 1px 0 var(--glass-highlight),
+              inset 0 0 0 1px var(--glass-edge),
+              0 40px 90px -20px rgba(0, 0, 0, .8);
+}
+.modal-head, .modal-foot { border-color: var(--line); }
+@keyframes verre-jaillit {
+  from { opacity: 0; transform: translateY(14px) scale(.94); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ---------- petites surfaces flottantes ---------- */
+
+.toast {
+  border-radius: 16px; border-left-width: 1px;
+  background-color: var(--glass-bg-strong);
+  animation: toast-jaillit var(--t-spring) var(--spring) both;
+}
+.toast.success { box-shadow: inset 3px 0 0 var(--gain), inset 0 1px 0 var(--glass-highlight), var(--glass-shadow); }
+.toast.error   { box-shadow: inset 3px 0 0 var(--perte), inset 0 1px 0 var(--glass-highlight), var(--glass-shadow); }
+@keyframes toast-jaillit {
+  from { opacity: 0; transform: translateY(16px) scale(.92); }
+  to   { opacity: 1; transform: none; }
+}
+.toast-action { border-radius: 999px; }
+
+.calendrier, .menu-liste {
+  border-radius: 16px;
+  background-color: var(--glass-bg-strong);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), var(--glass-shadow-up);
+}
+.menu-liste { animation: menu-jaillit var(--t) var(--spring) both; transform-origin: top right; }
+@keyframes menu-jaillit {
+  from { opacity: 0; transform: scale(.9) translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+.menu-liste button, .cal-case { border-radius: 9px; }
+.menu-ligne > summary { border-radius: 999px; }
+
+.choice { border-radius: var(--radius-md); }
+.callout { border-radius: var(--radius-md); }
+.zoom-btn { border-radius: 999px; }
+
+/* ---------- barres de répartition : des tubes de verre ---------- */
+
+.rep-bars { background: var(--bg-surface-alt); }
+.rep-real {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--action-surface) 70%, white),
+                                     var(--action-surface));
+  box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--action-surface) 60%, transparent);
+}
+.rep-real.depasse {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--perte) 65%, white), var(--perte));
+  box-shadow: none;
+}
+
+/* ---------- économe et mouvement réduit ----------
+   Le flou du verre est statique : il ne coûte que lorsque le fond bouge. En
+   mode économe le fond est figé, le verre reste. Mouvement réduit : plus de
+   rebond, plus de soulèvement. */
+@media (prefers-reduced-motion: reduce) {
+  .kpi:hover, .choice:hover, .btn:hover { translate: none; }
+  .modal, .toast, .menu-liste { animation-duration: 1ms; }
+}
+
+@media (max-width: 900px) {
+  .topbar { height: auto; border-radius: 18px; padding: 10px 12px; }
+  .tab { height: 32px; }
+  .tab-indicator { top: calc(50% - 16px); height: 32px; }
+}
+@media (max-width: 620px) {
+  .hero-value { font-size: 34px; }
+}
+
+/* ---------- fluidité ----------
+   Le verre floute ce qui passe dessous, et ce flou se recalcule à chaque
+   image où le dessous bouge. Deux choses le faisaient bouger tout le temps :
+
+   1. Les entrées et le carrousel animaient `filter: blur()` sur les cartes.
+      Un filtre sur une surface de verre coupe son `backdrop-filter` : la
+      carte arrivait mate, puis le verre s'allumait d'un coup en fin
+      d'animation. Les entrées ne glissent plus que par `transform` et
+      `opacity`, que le GPU compose sans repeindre.
+   2. Le fond « lave » dérivait sans fin sous une quinzaine de surfaces
+      floutées : autant de flous recalculés soixante fois par seconde. Il est
+      figé ; ses couleurs restent, vues à travers le verre. */
+@keyframes reveal {
+  from { opacity: 0; transform: translateY(18px) scale(.985); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes carousel-in-right {
+  from { transform: translateX(var(--slide-dist, 100%)); }
+  to   { transform: none; }
+}
+@keyframes carousel-in-left {
+  from { transform: translateX(calc(var(--slide-dist, 100%) * -1)); }
+  to   { transform: none; }
+}
+@keyframes carousel-out-left {
+  from { transform: none; }
+  to   { transform: translateX(calc(var(--slide-dist, 100%) * -1)); }
+}
+@keyframes carousel-out-right {
+  from { transform: none; }
+  to   { transform: translateX(var(--slide-dist, 100%)); }
+}
+:root { --t-reveal: 620ms; --reveal-step: 45ms; }
+.panel.revealing .reveal-item { will-change: transform, opacity; }
+.lava .blob { animation-play-state: paused; will-change: auto; }
+
+/* ---------- libellés sur une ligne ----------
+   Une capsule qui passe à la ligne devient un ovale à deux étages. Un
+   libellé trop long pour sa place se coupe d'une ellipse plutôt que de
+   déborder de sa capsule. */
+.btn, .tab, .pill, .tabs-inline button, .segmente button {
+  white-space: nowrap;
+}
+.btn {
+  max-width: 100%; min-width: 0; vertical-align: middle;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.pill { max-width: 100%; }

@@ -23,77 +23,6 @@ App.tabs.overview = {
     App.tabs.overview.renderFlux(data.depenses_serie);
     App.tabs.overview.renderCategories(data.mois);
     App.tabs.overview.renderRepartition(data.repartition, data.metrics);
-    App.tabs.overview.renderMois(data);
-  },
-
-  /* Ce que le mois laisse une fois les charges fixes et l'épargne mises de
-     côté : le reste à vivre.
-
-     `services.metrics()` produit vingt-deux grandeurs ; l'interface en
-     affichait sept. Celle-ci a sa propre section dans `docs/interface.md` et
-     n'apparaissait sur aucun écran — alors que la colonne « Charge fixe » du
-     tableau des rôles n'a pas d'autre raison d'être que de l'alimenter. On
-     cochait donc des catégories pour nourrir un chiffre que personne ne
-     montrait.
-
-     Rien n'est calculé ici : tout arrive déjà dans `/api/overview`. */
-  renderMois(data) {
-    const host = App.el('#ov-mois');
-    const label = App.el('#ov-mois-label');
-    App.clear(host);
-    if (label) label.textContent = App.fmt.month(data.mois.mois);
-
-    const m = data.metrics;
-    const fixes = m.charges_fixes_mois || 0;
-    const configurees = ((App.state.meta || {}).categories_charges_fixes || []).length;
-
-    // Deux situations que le même zéro ne sépare pas, et qui n'appellent pas la
-    // même phrase : le réglage n'a jamais été fait, ou il l'est mais ce mois-ci
-    // ne porte rien. Inviter à configurer ce qui l'est déjà ferait chercher un
-    // écran qu'on a sous les yeux.
-    if (!configurees) {
-      host.append(
-        App.h('p', { class: 'muted' },
-          'Marquez vos catégories de charges fixes — loyer, assurances, '
-          + 'abonnements — pour connaître ce qui vous reste une fois le '
-          + 'récurrent et l’épargne mis de côté.'),
-        App.h('div', { class: 'actions', style: 'margin-top:12px' },
-          App.h('button', {
-            class: 'btn',
-            onclick: () => App.settings.open('classement'),
-          }, 'Choisir mes charges fixes')));
-      return;
-    }
-
-    // Sans revenu sur le mois, le reste à vivre serait un négatif sans objet :
-    // il se compte SUR des revenus.
-    if (!m.revenus_mois) {
-      host.append(App.h('p', { class: 'muted' },
-        `Aucun revenu enregistré en ${App.fmt.month(data.mois.mois)}. `
-        + 'Le reste à vivre se compte sur les revenus du mois.'));
-      return;
-    }
-
-    // Un chiffre domine, le reste descend d'un cran.
-    host.append(App.h('div', { class: 'reste' },
-      App.h('div', { class: 'reste-label' }, 'Reste à vivre'),
-      App.h('div', { class: 'reste-value' }, App.fmt.eur(m.reste_a_vivre_mois)),
-      App.h('div', { class: 'hero-meta' },
-        App.h('span', {}, 'une fois les charges fixes et l’épargne mises de côté'))));
-
-    const lignes = [
-      ['Revenus', App.fmt.eur(m.revenus_mois)],
-      ['Charges fixes', App.fmt.eur(fixes)
-        + (m.part_charges_fixes === null ? ''
-          : ` · ${App.fmt.pct(m.part_charges_fixes, 0)} des revenus`)],
-      ['Épargne', App.fmt.eur(m.epargne_mois)],
-    ];
-    if (m.mensualites_mois) {
-      lignes.push(['Mensualités de prêt', App.fmt.eur(m.mensualites_mois)
-        + (m.taux_endettement === null ? ''
-          : ` · ${App.fmt.pct(m.taux_endettement, 0)} des revenus`)]);
-    }
-    host.append(App.metricList(lignes));
   },
 
   /* Accueil d'une base vide.
@@ -154,7 +83,12 @@ App.tabs.overview = {
             class: 'btn small',
             onclick: () => App.settings.open(),
           }, 'Régler')
-          : null);
+          : (a.action === 'expenses'
+            ? App.h('button', {
+              class: 'btn small',
+              onclick: () => App.showTab('expenses'),
+            }, 'Voir')
+            : null));
 
       carte.append(App.h('div', { class: 'alerte' },
         App.h('span', {
@@ -189,7 +123,6 @@ App.tabs.overview = {
       }
       meta.append(App.h('span', {}, 'sur un mois'));
     }
-    meta.append(App.h('span', { class: 'sub' }, `arrêté au ${App.fmt.date(data.as_of)}`));
 
     const stat = (label, value, cls) => App.h('div', { class: 'hero-stat' },
       App.h('div', { class: 's-label' }, label),
@@ -198,7 +131,7 @@ App.tabs.overview = {
     host.append(
       App.h('div', { class: 'hero-main' },
         App.h('div', { class: 'hero-label' }, 'Patrimoine net'),
-        App.h('div', { class: 'hero-value' }, App.fmt.eur(m.patrimoine_net)),
+        App.tabs.overview.heroValeur(m.patrimoine_net),
         meta),
       App.h('div', { class: 'hero-side' },
         stat('Actifs', App.fmt.eur(m.total_actif, true)),
@@ -206,6 +139,15 @@ App.tabs.overview = {
           m.total_passif ? 'neg' : ''),
         stat('Épargne du mois', App.fmt.eur(data.mois.epargne, true),
           data.mois.epargne > 0 ? 'pos' : '')));
+  },
+
+  /* Le patrimoine net défile jusqu'à sa valeur. L'élément est gardé d'un
+     rendu à l'autre pour que le défilement parte du chiffre précédent. */
+  heroValeur(net) {
+    const el = App.tabs.overview.heroEl
+      || (App.tabs.overview.heroEl = App.h('div', { class: 'hero-value' }));
+    App.compter(el, net, (v) => App.fmt.eur(v));
+    return el;
   },
 
   /* ==================================================================
@@ -450,8 +392,8 @@ App.tabs.overview = {
       deltaClass = data.variation_depenses > 0 ? 'up' : 'down';
     }
 
-    // Le patrimoine net est déjà en héros : ces quatre cases le complètent
-    // au lieu de le répéter.
+    // Le patrimoine net est déjà en héros : ces cases le complètent au lieu
+    // de le répéter.
     host.append(
       App.tabs.overview.kpi('Dépensé ce mois', App.fmt.eur(cur.depenses), deltaText, deltaClass),
       // `nb_transactions` comptait TOUT le mois, dépenses comprises : sous
@@ -467,7 +409,10 @@ App.tabs.overview = {
       App.tabs.overview.kpi("Couverture d'urgence",
         m.mois_couverture_urgence === null ? '—' : `${App.fmt.num(m.mois_couverture_urgence, 1)} mois`,
         `${App.fmt.eur(m.solde_livrets, true)} de livrets`,
-        m.mois_couverture_urgence !== null && m.mois_couverture_urgence < 3 ? 'bad' : 'good'),
+        // Le même seuil que l'observation : la cible fixée dans les réglages.
+        m.mois_couverture_urgence !== null
+          && m.mois_couverture_urgence < (App.state.meta.mois_precaution_cible || 4)
+          ? 'bad' : 'good'),
     );
   },
 
@@ -570,6 +515,14 @@ App.tabs.overview = {
       },
       options: {
         cutout: '62%',
+        // Du graphique à la liste : une part mène aux transactions qui la
+        // composent, sur le même mois.
+        onClick: (_e, elements) => {
+          if (elements.length) App.voirCategorie(cats[elements[0].index].category);
+        },
+        onHover: (e, elements) => {
+          e.native.target.style.cursor = elements.length ? 'pointer' : '';
+        },
         plugins: {
           legend: { position: 'right' },
           tooltip: {
@@ -580,6 +533,108 @@ App.tabs.overview = {
         },
       },
     });
+  },
+
+  /* Les dépenses du mois en image, à garder ou à partager.
+
+     L'image est dessinée ici plutôt que copiée du canevas : celui-ci suit le
+     thème (fond sombre la nuit) et sa légende ne porte pas les montants.
+     Fond clair, montant et part de chaque catégorie, total en tête. Le
+     masquage des montants est respecté : seules les parts sont écrites. */
+  async exporterCategoriesPNG() {
+    const mois = (App.tabs.overview.dernier || {}).mois;
+    const cats = (mois && mois.par_categorie) || [];
+    if (!cats.length) return App.toast('Aucune dépense ce mois-ci.', 'info');
+    const total = cats.reduce((s, c) => s + c.montant, 0);
+    const masque = App.privacyOn();
+    const police = '-apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif';
+
+    const L = 1200, haut = 150, pas = 46;
+    const H = Math.max(620, haut + cats.length * pas + 60);
+    const k = 2;
+    const cv = document.createElement('canvas');
+    cv.width = L * k; cv.height = H * k;
+    const g = cv.getContext('2d');
+    g.scale(k, k);
+    g.fillStyle = '#FFFFFF';
+    g.fillRect(0, 0, L, H);
+
+    g.fillStyle = '#1D1D1F';
+    g.font = `600 30px ${police}`;
+    g.fillText('Dépenses par catégorie', 56, 70);
+    g.fillStyle = '#6E6E73';
+    g.font = `400 20px ${police}`;
+    const mot = App.fmt.month(mois.mois);
+    g.fillText(mot.charAt(0).toUpperCase() + mot.slice(1)
+      + (masque ? '' : `  ·  ${App.fmt.eur(total)}`), 56, 104);
+
+    // Anneau : mêmes couleurs, même ordre que le graphique de la page.
+    const cx = 300, cy = haut + (H - haut) / 2 - 10, R = 210, r = R * 0.62;
+    let a = -Math.PI / 2;
+    cats.forEach((c, i) => {
+      const b = a + (2 * Math.PI * c.montant) / total;
+      g.beginPath();
+      g.arc(cx, cy, R, a, b);
+      g.arc(cx, cy, r, b, a, true);
+      g.closePath();
+      g.fillStyle = App.chartColors[i % App.chartColors.length];
+      g.fill();
+      a = b;
+    });
+    g.textAlign = 'center';
+    g.fillStyle = '#1D1D1F';
+    g.font = `650 32px ${police}`;
+    g.fillText(masque ? `${cats.length}` : App.fmt.eur(total, true), cx, cy + 6);
+    g.fillStyle = '#6E6E73';
+    g.font = `400 17px ${police}`;
+    g.fillText(masque ? 'catégories' : 'dépensés', cx, cy + 34);
+
+    // Légende chiffrée.
+    // Centrée face à l'anneau tant qu'elle tient dans sa hauteur.
+    const x0 = 600, x1 = L - 56;
+    const y0 = Math.max(haut + 20, cy + 6 - ((cats.length - 1) * pas) / 2);
+    cats.forEach((c, i) => {
+      const y = y0 + i * pas;
+      g.fillStyle = App.chartColors[i % App.chartColors.length];
+      g.beginPath();
+      g.roundRect(x0, y - 15, 18, 18, 5);
+      g.fill();
+      g.textAlign = 'left';
+      g.fillStyle = '#1D1D1F';
+      g.font = `500 20px ${police}`;
+      g.fillText(c.category, x0 + 32, y);
+      g.textAlign = 'right';
+      g.fillStyle = '#6E6E73';
+      g.font = `400 18px ${police}`;
+      const part = App.fmt.pct(100 * c.montant / total, 1);
+      if (masque) {
+        g.fillText(part, x1, y);
+      } else {
+        g.fillText(part, x1 - 150, y);
+        g.fillStyle = '#1D1D1F';
+        g.font = `600 20px ${police}`;
+        g.fillText(App.fmt.eur(c.montant), x1, y);
+      }
+    });
+    g.textAlign = 'left';
+    g.fillStyle = '#A1A1A6';
+    g.font = `400 14px ${police}`;
+    g.fillText('Wealfy', 56, H - 28);
+
+    const bouton = App.el('#ov-cat-png');
+    bouton.classList.add('busy');
+    try {
+      const res = await App.api.post('/api/export/png', {
+        image: cv.toDataURL('image/png'),
+        nom: `depenses-${mois.mois}`,
+        montrer: true,
+      });
+      App.toast(`Image enregistrée : ${res.fichier} (Téléchargements)`, 'success', 5000);
+    } catch (e) {
+      App.toast(e.message, 'error');
+    } finally {
+      bouton.classList.remove('busy');
+    }
   },
 
   renderRepartition(rep, metrics) {
@@ -600,6 +655,17 @@ App.tabs.overview = {
         'Aucune poche définie. Configurez la répartition cible dans les paramètres.'));
       return;
     }
+    // La cible se compare aux versements du mois (« + Versements du mois »),
+    // pas au patrimoine détenu : c'est une stratégie de DCA.
+    if (!rep.base) {
+      host.append(App.h('p', { class: 'muted' },
+        `Aucun versement en ${App.fmt.month(rep.mois)}. `,
+        App.h('button', {
+          class: 'btn small',
+          onclick: () => App.tabs.wealth.openVersementsDuMois(rep.mois),
+        }, '+ Versements du mois')));
+      return;
+    }
     for (const b of rep.buckets) {
       const ecartClass = Math.abs(b.ecart_pct) < 5 ? 'ok' : 'warn';
       host.append(App.h('div', { class: 'rep-row' },
@@ -615,7 +681,7 @@ App.tabs.overview = {
           App.h('div', { class: 'rep-target', style: `left:${Math.min(100, b.cible_pct)}%` }))));
     }
     host.append(App.h('div', { class: 'rep-legend' },
-      App.h('span', {}, `Base : ${App.fmt.eur(rep.base)}`),
+      App.h('span', {}, `Versé en ${App.fmt.month(rep.mois)} : ${App.fmt.eur(rep.base)}`),
       rep.hors_poches ? App.h('span', {}, `Hors poches : ${App.fmt.eur(rep.hors_poches)}`) : null,
       App.h('span', {}, 'Trait vertical : la cible')));
   },

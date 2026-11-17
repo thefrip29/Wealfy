@@ -54,7 +54,7 @@ def _alerte(niveau, titre, detail, asset_id=None, action=None):
 
 
 def alertes(snapshot, metrics, repartition=None, marche=None, reglages=None,
-            at_date=None):
+            at_date=None, abonnements=None):
     """Liste des observations, de la plus urgente à la plus anodine."""
     cfg = _reglages(reglages)
     at_date = finance.parse_date(at_date) or date.today()
@@ -68,6 +68,7 @@ def alertes(snapshot, metrics, repartition=None, marche=None, reglages=None,
     out += _repartition(repartition)
     out += _livrets_sans_taux(snapshot)
     out += _cours(marche)
+    out += _abonnements(abonnements, at_date)
 
     ordre = {"attention": 0, "info": 1}
     return sorted(out, key=lambda a: ordre.get(a["niveau"], 2))
@@ -153,6 +154,43 @@ def _maturites(snapshot, at_date):
     return out
 
 
+# Au-dela, une hausse ou un arret est connu et n'a plus rien a signaler.
+FRAICHEUR_ABONNEMENT = 120
+
+
+def _abonnements(abonnements, at_date):
+    """Un prix qui monte sans prevenir, un prelevement qui s'arrete.
+
+    Les deux se calculaient deja pour l'onglet Depenses, ou il fallait aller
+    les chercher. Seuls les evenements recents remontent : une hausse vieille
+    d'un an est connue, la rappeler a chaque ouverture apprendrait a ne plus
+    lire les observations.
+    """
+    out = []
+    for a in abonnements or []:
+        hausse = a.get("augmentation")
+        if a.get("actif") and hausse:
+            depuis = finance.parse_date(hausse.get("depuis"))
+            if not depuis or (at_date - depuis).days > FRAICHEUR_ABONNEMENT:
+                continue
+            par_an = a["cout_annuel"] / a["montant"] if a.get("montant") else 0
+            out.append(_alerte(
+                "info", f"{a['libelle']} : prix en hausse de {_num(hausse['pct'])} %",
+                f"Passé de {_eur(hausse['avant'], True)} à {_eur(hausse['apres'], True)} "
+                f"le {depuis.strftime('%d/%m/%Y')}, soit "
+                f"{_eur(hausse['hausse'] * par_an, True)} de plus par an.",
+                None, "expenses"))
+        elif not a.get("actif") and (a.get("jours_depuis") or 0) <= FRAICHEUR_ABONNEMENT:
+            dernier = finance.parse_date(a.get("dernier"))
+            out.append(_alerte(
+                "info", f"{a['libelle']} n'est plus prélevé",
+                f"Prélèvement {a['periodicite']} de {_eur(a['montant'], True)}"
+                + (f", dernier le {dernier.strftime('%d/%m/%Y')}" if dernier else "")
+                + ". Résilié, ou simplement en retard ?",
+                None, "expenses"))
+    return out
+
+
 def _precaution(metrics, cfg):
     mois = metrics.get("mois_couverture_urgence")
     cible = cfg["mois_precaution_cible"]
@@ -184,11 +222,11 @@ def _endettement(metrics, cfg):
 def _concentration(snapshot, metrics, cfg):
     """Poids d'une seule ligne dans les actifs financiers."""
     out = []
-    crypto_pct = metrics.get("crypto_pct_patrimoine")
+    crypto_pct = metrics.get("crypto_pct_actifs")
     if crypto_pct is not None and crypto_pct > cfg["seuil_crypto"]:
         out.append(_alerte(
             "info", "Poids de la crypto au-dessus de votre seuil",
-            f"{_num(crypto_pct)} % du patrimoine net "
+            f"{_num(crypto_pct)} % de vos actifs "
             f"({_eur(metrics.get('crypto_montant'))}), pour un seuil fixé à "
             f"{_num(cfg['seuil_crypto'])} %.",
             None, "settings"))
@@ -275,9 +313,13 @@ def _cours(marche):
 
 # --- mise en forme --------------------------------------------------------
 
-def _eur(v):
+def _eur(v, centimes=False):
+    """Montant en euros. Aux centimes pour les petits montants : un
+    abonnement passe de 13,49 a 15,99, pas de 13 a 16."""
     if v is None:
         return "—"
+    if centimes:
+        return f"{v:,.2f} €".replace(",", " ").replace(".", ",")
     return f"{v:,.0f} €".replace(",", " ")
 
 

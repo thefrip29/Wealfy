@@ -202,6 +202,21 @@ def attendre_serveur(port, timeout=DEMARRAGE_TIMEOUT):
     return False
 
 
+def sauvegarde_au_lancement(app):
+    """Une sauvegarde a chaque ouverture, sans geste a faire.
+
+    `create_backup` ne reecrit rien si rien n'a change, et la rotation garde
+    les plus recentes : ouvrir l'application dix fois par jour ne remplit pas
+    le disque. Une erreur ne doit jamais empecher l'application de s'ouvrir.
+    """
+    try:
+        from app.backup import create_backup
+        with app.app_context():
+            create_backup()
+    except Exception as exc:  # noqa: BLE001 - jamais bloquant
+        journal("Sauvegarde au lancement", exc)
+
+
 def servir(app, port):
     """Lance waitress — serveur de production, contrairement a app.run()."""
     try:
@@ -395,6 +410,7 @@ def main():
         app.run(host=HOST, port=port, debug=True, use_reloader=True)
         return
 
+    threading.Thread(target=sauvegarde_au_lancement, args=(app,), daemon=True).start()
     threading.Thread(target=servir, args=(app, port), daemon=True).start()
 
     if "--no-browser" in sys.argv:

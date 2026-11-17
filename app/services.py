@@ -85,8 +85,9 @@ def shared_cache(cache=None):
         cache = {}
     if "assets" in cache:
         return cache
-    cache["assets"] = get_assets(False)
-    cache["assets_archived"] = get_assets(True)
+    # Tous les actifs, clos compris : un produit clos compte encore dans
+    # l'histoire, jusqu'a sa date de cloture (`present_le`).
+    cache["assets_all"] = get_assets(True)
     cache["movements"] = movements_by_asset()
     cache["liabilities"] = get_liabilities()
     cache["securities"] = market.securities_by_ticker()
@@ -97,6 +98,22 @@ def shared_cache(cache=None):
         for l in cache["liabilities"]
     }
     return cache
+
+
+def present_le(asset, at_date):
+    """Le produit existe-t-il a cette date ?
+
+    Ouvert a sa date d'acquisition, il compte jusqu'a la veille de sa cloture.
+    Retirer un produit clos de TOUTES les dates reecrivait le passe : la courbe,
+    l'archive et le gain de l'annee changeaient le jour ou on le fermait.
+    """
+    acq = finance.parse_date(asset["date_acquisition"])
+    if acq and acq > at_date:
+        return False
+    if asset.get("archived"):
+        fin = finance.parse_date(asset.get("date_cloture"))
+        return fin is not None and at_date < fin
+    return True
 
 
 # --- valorisation ---------------------------------------------------------
@@ -131,11 +148,78 @@ def market_context(at_date=None, cache=None):
     }
 
 
+NOTE_SOLDE_DECLARE = "Solde declare a la creation"
+
+
+def flux_de_valorisation(asset, movements):
+    """L'argent entre ou sorti d'un livret, lu sur ses valorisations.
+
+    Un livret ne fait pas de plus-value : ses interets sont calcules a part.
+    Quand on recale son solde sur le releve, l'ecart avec le solde precedent
+    est donc un depot ou un retrait, pas un gain. Le compter comme une
+    plus-value faisait passer 458 EUR verses sur un Livret A pour une
+    performance, et les laissait hors de l'epargne du mois.
+
+    L'ecart se mesure au solde juste avant : la valorisation precedente, plus
+    les interets credites et les mouvements depuis. Avant toute valorisation,
+    le montant declare, sans interets inventes (voir `finance.valeur_livret`).
+    Le solde pose a la creation n'est pas un flux : c'est le point de depart.
+    """
+    if asset["type"] not in market.RATE_ASSET_TYPES:
+        return []
+    # Memorise sur les donnees elles-memes : la meme cle ne peut pas donner
+    # un autre resultat, donc jamais de valeur perimee. Sans cela, l'archive
+    # rejouait ce calcul pour chaque mois et chaque livret.
+    cle = (asset["id"], asset["valeur_acquisition"], str(asset.get("metadata")),
+           asset["date_acquisition"], market.date_credit_interets(),
+           tuple((m.get("id"), m["date"], m["montant"], m["type"], m.get("note"),
+                  m.get("created_at")) for m in movements))
+    if cle in _FLUX_MEMO:
+        return _FLUX_MEMO[cle]
+    if len(_FLUX_MEMO) > 2048:
+        _FLUX_MEMO.clear()
+    _FLUX_MEMO[cle] = _flux_de_valorisation(asset, movements)
+    return _FLUX_MEMO[cle]
+
+
+_FLUX_MEMO = {}
+
+
+def _flux_de_valorisation(asset, movements):
+    ordre = sorted(movements, key=lambda m: (
+        finance.parse_date(m["date"]) or date.min, m.get("created_at") or ""))
+    out = []
+    for i, mv in enumerate(ordre):
+        if mv["type"] != "valorisation" or (mv.get("note") or "") == NOTE_SOLDE_DECLARE:
+            continue
+        d = finance.parse_date(mv["date"])
+        if d is None:
+            continue
+        avant = ordre[:i]
+        if any(m["type"] == "valorisation" for m in avant):
+            solde = market.rate_value(asset, avant, d)
+            if solde is None:
+                solde = finance.asset_value_at(asset, avant, d, use_manual_current=False)
+        else:
+            solde = float(asset["valeur_acquisition"] or 0) + sum(
+                float(m["montant"] or 0) for m in avant
+                if m["type"] in ("versement", "retrait", "frais"))
+        ecart = round(float(mv["montant"] or 0) - solde, 2)
+        if abs(ecart) >= 0.01:
+            out.append((d, ecart))
+    return out
+
+
 def asset_detail(asset, movements, at_date=None, ctx=None):
     at_date = finance.parse_date(at_date) or date.today()
     is_today = at_date >= date.today()
     saisie = finance.asset_value_at(asset, movements, at_date, use_manual_current=is_today)
     invested = finance.invested_amount(asset, movements, at_date)
+    # Sur un livret, ce qu'une valorisation ajoute ou retire est de l'argent
+    # verse ou repris : il entre dans le capital investi, pas dans la
+    # plus-value.
+    invested = round(invested + sum(
+        e for d, e in flux_de_valorisation(asset, movements) if d <= at_date), 2)
 
     # Valeur calculée, par ordre de préférence. Chaque source renvoie None si
     # elle ne peut pas produire un chiffre complet : on retombe alors sur la
@@ -194,9 +278,12 @@ def portfolio(at_date=None, include_archived=False, ctx=None, cache=None):
     # (et réutilisable par l'appelant, cf. monthly_archive).
     ctx = ctx if ctx is not None else market_context(at_date, cache)
     assets = []
-    for asset in cache["assets_archived" if include_archived else "assets"]:
-        acq = finance.parse_date(asset["date_acquisition"])
-        if acq and acq > at_date:
+    for asset in cache["assets_all"]:
+        if include_archived and asset["archived"]:
+            acq = finance.parse_date(asset["date_acquisition"])
+            if acq and acq > at_date:
+                continue
+        elif not present_le(asset, at_date):
             continue
         assets.append(asset_detail(asset, grouped.get(asset["id"], []), at_date, ctx))
 
@@ -214,7 +301,7 @@ def portfolio(at_date=None, include_archived=False, ctx=None, cache=None):
         # Permet a l'interface de proposer « N produit(s) cloture(s) » sans
         # second appel. Le cache porte deja les deux listes : la difference
         # suffit, aucune lecture de plus.
-        "nb_archives": len(cache["assets_archived"]) - len(cache["assets"]),
+        "nb_archives": sum(1 for a in cache["assets_all"] if a["archived"]),
         "liabilities": liabilities,
         "total_actif": total_actif,
         "total_passif": total_passif,
@@ -247,8 +334,12 @@ def gain_annuel(at_date=None, snap=None, cache=None):
         snap = portfolio(at_date, cache=cache)
     reference = date(at_date.year - 1, 12, 31)
     avant = portfolio(reference, cache=cache)
+    # Seuls les produits encore detenus comptent des deux cotes. Un produit
+    # clos dans l'annee emportait sinon sa plus-value du 31 decembre comme une
+    # perte : clore n'est ni gagner ni perdre, c'est sortir.
+    presents = {a["id"] for a in snap["assets"]}
     ecart = (sum(a["plus_value"] for a in snap["assets"])
-             - sum(a["plus_value"] for a in avant["assets"]))
+             - sum(a["plus_value"] for a in avant["assets"] if a["id"] in presents))
     return {
         "montant": round(ecart, 2),
         "depuis": finance.iso(date(at_date.year, 1, 1)),
@@ -256,36 +347,137 @@ def gain_annuel(at_date=None, snap=None, cache=None):
     }
 
 
+def fin_du_mois_precedent(at_date):
+    """Date d'arret du mois qui precede celui de `at_date`."""
+    d = finance.add_months(at_date.replace(day=1), -1)
+    return min(finance.month_bounds(d.year, d.month)[1], date.today())
+
+
+def decomposer_variation(apres, avant):
+    """D'ou vient l'ecart de patrimoine net entre deux photos.
+
+    Quatre parts, dont la somme tombe au centime sur la variation :
+
+    - **apports** : l'argent mis dans les produits ou repris (versements,
+      retraits, produit ouvert ou clos). Ce n'est pas un enrichissement, c'est
+      de l'epargne qui change de poche ;
+    - **performance** : ce que les placements ont rapporte ou perdu, interets
+      de livret compris. C'est l'ecart de plus-value des produits detenus des
+      deux cotes ;
+    - **immobilier** : la meme chose pour les biens, a part, parce qu'une
+      reevaluation par indice n'est pas un gain realisable ;
+    - **dettes** : le capital rembourse (positif), ou emprunte (negatif).
+
+    Un produit ouvert compte en entier comme apport, un produit clos en
+    entier comme retrait : clore n'est ni gagner ni perdre.
+    """
+    av = {a["id"]: a for a in avant["assets"]}
+    ap = {a["id"]: a for a in apres["assets"]}
+    apports = immobilier = 0.0
+    for aid, a in ap.items():
+        b = av.get(aid)
+        if b is None:
+            apports += a["valeur"]
+            continue
+        apports += a["investi"] - b["investi"]
+        if a["famille"] == "Immobilier":
+            immobilier += a["plus_value"] - b["plus_value"]
+    for aid, b in av.items():
+        if aid not in ap:
+            apports -= b["valeur"]
+    variation = round(apres["patrimoine_net"] - avant["patrimoine_net"], 2)
+    dettes = round(avant["total_passif"] - apres["total_passif"], 2)
+    apports, immobilier = round(apports, 2), round(immobilier, 2)
+    return {
+        "variation": variation,
+        "apports": apports,
+        # Par difference : la somme des quatre parts est exacte par
+        # construction, sans residu d'arrondi a expliquer.
+        "performance": round(variation - apports - immobilier - dettes, 2),
+        "immobilier": immobilier,
+        "dettes": dettes,
+    }
+
+
+def variation_du_mois(at_date, snap=None, cache=None):
+    """Decomposition de la variation du net sur le mois de `at_date`."""
+    cache = shared_cache(cache)
+    snap = snap or portfolio(at_date, cache=cache)
+    avant = portfolio(fin_du_mois_precedent(at_date), cache=cache)
+    return decomposer_variation(snap, avant)
+
+
 def net_worth_at(at_date):
     return portfolio(at_date)["patrimoine_net"]
 
 
-def repartition(at_date=None, snap=None):
-    """Répartition cible vs réelle sur les poches définies en paramètres."""
-    snap = snap or portfolio(at_date)
+def repartition(at_date=None):
+    """Répartition cible vs réelle des VERSEMENTS du mois, poche par poche.
+
+    La cible est une stratégie de DCA : chaque mois, tant sur le livret, tant
+    sur le PEA, tant en crypto. Elle se compare donc à ce qui a été versé ce
+    mois-là, pas au patrimoine détenu, où un livret rempli depuis des années
+    écrasait toute la répartition. Un mois saisi par « + Versements du mois »
+    ne compte que ces saisies ; sinon tous ses versements, nets des retraits
+    (un échange de crypto, retrait puis versement, s'annule).
+    """
+    at_date = finance.parse_date(at_date) or date.today()
+    debut, fin = finance.month_bounds(at_date.year, at_date.month)
     buckets = get_setting("repartition_cible", []) or []
     if isinstance(buckets, dict):  # ancien format {type: pct}
         buckets = [{"label": k, "types": [k], "pct": v} for k, v in buckets.items()]
 
-    covered, out = set(), []
+    declares = versements_declares(debut, fin)
+    verse = dict(declares)
+    if not declares:
+        for r in query("SELECT asset_id, type, montant FROM asset_movements "
+                       "WHERE type IN ('versement', 'retrait') AND date >= ? AND date <= ?",
+                       [finance.iso(debut), finance.iso(fin)]):
+            signe = 1 if r["type"] == "versement" else -1
+            verse[r["asset_id"]] = verse.get(r["asset_id"], 0) + signe * abs(float(r["montant"] or 0))
+    actifs = [a for a in get_assets(True) if a["type"] != "CompteCourant"]
+    if not declares:
+        # Comme l'epargne du mois : l'argent lu sur la valorisation d'un livret.
+        groupes = movements_by_asset()
+        for a in actifs:
+            if a["type"] in market.RATE_ASSET_TYPES:
+                for d, ecart in flux_de_valorisation(a, groupes.get(a["id"], [])):
+                    if debut <= d <= fin:
+                        verse[a["id"]] = verse.get(a["id"], 0) + ecart
+
+    # Une poche sans type coche se reconnait a son nom : celui d'un type
+    # (« PEA ») ou celui d'un de vos produits (« Livret A »). Elle ne cherchait
+    # que le type, et « Livret A » restait a 0 € — ce qui faussait aussi la
+    # part de toutes les autres poches.
+    def contenu(bucket):
+        types = set(bucket.get("types") or [])
+        if types:
+            return lambda a: a["type"] in types
+        nom = (bucket.get("label") or "").strip().casefold()
+        return lambda a: a["type"].casefold() == nom or (a.get("label") or "").strip().casefold() == nom
+
+    couverts, out = set(), []
     for bucket in buckets:
-        types = set(bucket.get("types") or [bucket.get("label")])
-        covered |= types
-        montant = round(sum(a["valeur"] for a in snap["assets"] if a["type"] in types), 2)
+        dedans = [a for a in actifs if contenu(bucket)(a)]
+        couverts |= {a["id"] for a in dedans}
+        montant = round(max(0.0, sum(verse.get(a["id"], 0) for a in dedans)), 2)
         out.append({
             "label": bucket.get("label"),
-            "types": sorted(types),
+            "types": sorted(set(bucket.get("types") or []) or {a["type"] for a in dedans}),
             "cible_pct": float(bucket.get("pct") or 0),
             "montant": montant,
         })
     base = round(sum(b["montant"] for b in out), 2)
     for bucket in out:
-        bucket["reel_pct"] = round(100 * bucket["montant"] / base, 2) if base else 0.0
-        bucket["ecart_pct"] = round(bucket["reel_pct"] - bucket["cible_pct"], 2)
         cible_montant = base * bucket["cible_pct"] / 100
-        bucket["ecart_montant"] = round(bucket["montant"] - cible_montant, 2)
-    hors = round(sum(a["valeur"] for a in snap["assets"] if a["type"] not in covered), 2)
-    return {"buckets": out, "base": base, "hors_poches": hors}
+        # Rien verse ce mois : pas d'ecart a constater, seulement un mois vide.
+        bucket["reel_pct"] = round(100 * bucket["montant"] / base, 2) if base else None
+        bucket["ecart_pct"] = (round(bucket["reel_pct"] - bucket["cible_pct"], 2)
+                               if base else None)
+        bucket["ecart_montant"] = round(bucket["montant"] - cible_montant, 2) if base else None
+    hors = round(max(0.0, sum(v for k, v in verse.items() if k not in couverts)), 2)
+    return {"mois": f"{at_date.year:04d}-{at_date.month:02d}", "base": base,
+            "buckets": out, "hors_poches": hors}
 
 
 # --- flux mensuels --------------------------------------------------------
@@ -341,14 +533,77 @@ def flows_cache(cache=None):
         par_mois[(t["date"] or "")[:7]].append(t)
     cache["tx_par_mois"] = par_mois
 
-    versements = defaultdict(float)
-    for r in query(
-            "SELECT m.montant, m.date, a.type FROM asset_movements m "
-            "JOIN assets a ON a.id = m.asset_id WHERE m.type = 'versement'"):
-        if r["type"] != "CompteCourant":
-            versements[(r["date"] or "")[:7]] += float(r["montant"] or 0)
-    cache["versements_par_mois"] = versements
+    cache["versements"] = _versements()
     return cache
+
+
+# Marque des versements saisis par « + Versements du mois ». Un mois qui en a
+# est DECLARE : ce que vous dites y avoir investi fait son epargne et sa
+# repartition, a l'exclusion de ce que l'app deduisait par ailleurs (achats
+# notes au fil de l'eau, ecart lu sur la valorisation d'un livret). Vous
+# saisissiez 1 180 EUR et en voyiez 1 086 : une valorisation d'octobre etait
+# lue comme un retrait de 244 EUR.
+NOTE_VERSEMENT_DU_MOIS = "Versement du mois"
+
+
+def versements_declares(debut, fin):
+    """{asset_id: montant} des versements du mois saisis par le bouton."""
+    out = defaultdict(float)
+    for r in query("SELECT asset_id, montant FROM asset_movements "
+                   "WHERE type = 'versement' AND note = ? AND date >= ? AND date <= ?",
+                   [NOTE_VERSEMENT_DU_MOIS, finance.iso(debut), finance.iso(fin)]):
+        out[r["asset_id"]] += abs(float(r["montant"] or 0))
+    return dict(out)
+
+
+def _versements(debut=None, fin=None):
+    """Argent net mis dans les actifs (hors compte courant), date par date.
+
+    Versements MOINS retraits : un echange de crypto passe par un retrait et
+    un versement du meme montant, et seule la moitie versee etait comptee :
+    50 EUR d'epargne fantome en septembre pour trois echanges. Un retrait
+    reel, lui, est de l'epargne reprise.
+
+    Les livrets y ajoutent l'argent lu sur leurs valorisations
+    (`flux_de_valorisation`).
+    """
+    sql = ("SELECT m.montant, m.date, a.type FROM asset_movements m "
+           "JOIN assets a ON a.id = m.asset_id "
+           "WHERE m.type IN ('versement', 'retrait')")
+    args = []
+    if debut is not None:
+        sql += " AND m.date >= ? AND m.date <= ?"
+        args = [finance.iso(debut), finance.iso(fin)]
+    out = [
+        (finance.parse_date(r["date"]), round(float(r["montant"] or 0), 2))
+        for r in query(sql, args)
+        if r["type"] != "CompteCourant" and r["date"]
+    ]
+    livrets = [a for a in get_assets(True) if a["type"] in market.RATE_ASSET_TYPES]
+    groupes = movements_by_asset() if livrets else {}
+    for asset in livrets:
+        for d, ecart in flux_de_valorisation(asset, groupes.get(asset["id"], [])):
+            if debut is None or debut <= d <= fin:
+                out.append((d, ecart))
+    return out
+
+
+def _deja_verse(t, versements, utilises, tolerance):
+    """Ce virement d'epargne est-il le meme argent qu'un versement saisi ?
+
+    Le virement vers le livret figure sur le releve, et le versement est saisi
+    sur le livret : meme montant, a quelques jours pres. Les additionner
+    comptait deux fois le meme euro. Chaque versement n'en couvre qu'un.
+    """
+    d = finance.parse_date(t["date"])
+    montant = round(-t["amount"], 2)
+    for i, (dv, mv) in enumerate(versements):
+        if i in utilises or mv != montant or d is None:
+            continue
+        if abs((dv - d).days) <= tolerance:
+            utilises.add(i)
+            return True
+    return False
 
 
 def month_flows(year, month, cache=None):
@@ -390,24 +645,25 @@ def month_flows(year, month, cache=None):
             revenus_par_categorie[t["category"]] += t["amount"]
 
     # Épargne du mois : versements réels sur les actifs (hors compte courant),
-    # plus les virements d'épargne saisis en transaction et non rattachés à un
-    # actif (évite le double comptage).
+    # plus les virements d'épargne du relevé qui ne correspondent à aucun
+    # d'eux — ni par rattachement, ni par montant et date.
+    tolerance = int(get_setting("transfert_jours_tolerance", 4) or 4)
+    marge = timedelta(days=tolerance)
     if cache is not None:
-        versements = cache["versements_par_mois"].get(cle, 0.0)
+        proches = [v for v in cache["versements"]
+                   if start - marge <= v[0] <= end + marge]
     else:
-        versements = 0.0
-        for r in query(
-            "SELECT m.montant, a.type FROM asset_movements m "
-            "JOIN assets a ON a.id = m.asset_id "
-            "WHERE m.type = 'versement' AND m.date >= ? AND m.date <= ?",
-            (finance.iso(start), finance.iso(end)),
-        ):
-            if r["type"] != "CompteCourant":
-                versements += float(r["montant"] or 0)
+        proches = _versements(start - marge, end + marge)
+    versements = sum(m for d, m in proches if start <= d <= end)
+    utilises = set()
     versements += sum(
         -t["amount"] for t in txs
         if t["amount"] < 0 and t["category"] in excluded and not t["asset_id"]
+        and not _deja_verse(t, proches, utilises, tolerance)
     )
+    declares = versements_declares(start, end)
+    if declares:
+        versements = sum(declares.values())
     versements = round(versements, 2)
 
     return {
@@ -548,13 +804,18 @@ def monthly_archive(limit=None):
     # du temps de rendu de l'onglet Historique.
     cache = shared_cache()
     out = []
+    precedent = None
     for key in keys:
         year, month = int(key[:4]), int(key[5:])
         flows = month_flows(year, month, cache)
         _, last_day = finance.month_bounds(year, month)
         as_of = min(last_day, date.today())
         snap = portfolio(as_of, cache=cache)
-        rep = repartition(as_of, snap)
+        if precedent is None:
+            precedent = portfolio(fin_du_mois_precedent(as_of), cache=cache)
+        rep = repartition(as_of)
+        variation = decomposer_variation(snap, precedent)
+        precedent = snap
         out.append({
             "mois": key,
             "depenses": flows["depenses"],
@@ -566,6 +827,9 @@ def monthly_archive(limit=None):
             "patrimoine_net": snap["patrimoine_net"],
             "total_actif": snap["total_actif"],
             "total_passif": snap["total_passif"],
+            "variation": variation,
+            # Montant par categorie, pour la vue categories x mois.
+            "categories": {c["category"]: c["montant"] for c in flows["par_categorie"]},
             "repartition": [
                 {"label": b["label"], "reel_pct": b["reel_pct"], "cible_pct": b["cible_pct"]}
                 for b in rep["buckets"]
@@ -665,7 +929,10 @@ def metrics(at_date=None):
             round(livrets / moyenne_depenses, 2) if moyenne_depenses > 0 else None
         ),
         "crypto_montant": crypto,
-        "crypto_pct_patrimoine": round(100 * crypto / net, 2) if net else None,
+        # Sur les actifs et non sur le net : avec un pret, le net peut etre
+        # minuscule ou negatif, et la part devenait 300 % ou moins de zero.
+        "crypto_pct_actifs": (
+            round(100 * crypto / snap["total_actif"], 2) if snap["total_actif"] > 0 else None),
         "immobilier_montant": immo,
         "taux_epargne_mois": flows["taux_epargne"],
         "epargne_mois": flows["epargne"],
@@ -673,6 +940,9 @@ def metrics(at_date=None):
         "depenses_mois": flows["depenses"],
         "mensualites_mois": mensualites,
         "taux_endettement": _taux(mensualites, revenu_ordinaire, 100),
+        # La base des deux ratios en pourcentage : ils se rapportent au revenu
+        # moyen des trois derniers mois revolus, pas a celui du mois affiche.
+        "revenu_moyen_3m": revenu_ordinaire,
         "charges_fixes_mois": charges_fixes,
         "reste_a_vivre_mois": round(revenus - charges_fixes - flows["epargne"], 2),
         "part_charges_fixes": _taux(charges_fixes, revenu_ordinaire, 100),
@@ -782,13 +1052,13 @@ def assets_series(months=12, reference=None):
         as_of = min(last_day, date.today())
         mois.append(f"{d.year:04d}-{d.month:02d}")
         presents = {a["id"]: a for a in portfolio(as_of, cache=cache)["assets"]}
-        for asset in cache["assets"]:
+        for asset in cache["assets_all"]:
             trouve = presents.get(asset["id"])
             valeurs.setdefault(asset["id"], []).append(
                 trouve["valeur"] if trouve else None)
 
     series = []
-    for asset in cache["assets"]:
+    for asset in cache["assets_all"]:
         suite = valeurs.get(asset["id"], [])
         if not any(v for v in suite):
             continue                      # jamais rien à montrer sur la période
@@ -798,6 +1068,50 @@ def assets_series(months=12, reference=None):
         })
     series.sort(key=lambda s: -(s["valeurs"][-1] or 0))
     return {"mois": mois, "series": series}
+
+
+# Un ecart ne se signale qu'au-dela de ces deux bornes : 50 % au-dessus de
+# l'habitude, et au moins 50 EUR. Sans la seconde, un cafe de plus suffisait.
+ECART_RELATIF = 1.5
+ECART_MINIMAL = 50.0
+
+
+def ecarts_du_mois(year, month, mois_reference=12):
+    """Les categories nettement au-dessus de leur habitude ce mois-ci.
+
+    L'habitude est la moyenne des douze mois precedents, comptee seulement
+    depuis le debut des donnees : avant le premier releve, une categorie
+    n'etait pas a zero, elle etait inconnue. C'est un constat chiffre, pas un
+    conseil, comme les observations.
+    """
+    cache = flows_cache()
+    courant = month_flows(year, month, cache)
+    debut, _ = data_range()
+    premier = date(debut.year, debut.month, 1)
+    historique = []
+    for i in range(1, mois_reference + 1):
+        d = finance.add_months(date(year, month, 1), -i)
+        if d < premier:
+            break
+        historique.append(month_flows(d.year, d.month, cache))
+    if len(historique) < 3:
+        return []          # trop peu de recul pour parler d'habitude
+    out = []
+    for c in courant["par_categorie"]:
+        moyenne = sum(
+            next((x["montant"] for x in h["par_categorie"]
+                  if x["category"] == c["category"]), 0.0)
+            for h in historique) / len(historique)
+        if (c["montant"] >= ECART_RELATIF * moyenne
+                and c["montant"] - moyenne >= ECART_MINIMAL):
+            out.append({
+                "category": c["category"],
+                "montant": c["montant"],
+                "habituel": round(moyenne, 2),
+                "ecart": round(c["montant"] - moyenne, 2),
+                "nb_mois": len(historique),
+            })
+    return sorted(out, key=lambda e: -e["ecart"])[:5]
 
 
 def expense_series(months=6, reference=None):
@@ -833,6 +1147,18 @@ def market_asset_detail(asset_id, at_date=None, ctx=None):
     detail = asset_detail(asset, movements, at_date, ctx)
     value = detail["valeur"]
     tri = finance.asset_xirr(asset, movements, value, at_date)
+    # Annualiser moins d'un an de detention extrapole un hasard : 19 % gagnes
+    # en deux mois deviennent 327 % par an. Le TRI ne se donne qu'a partir
+    # d'un an ; avant, la plus-value en pourcentage dit deja ce qui s'est passe.
+    dates = [finance.parse_date(m["date"]) for m in movements
+             if m["type"] in ("versement", "retrait")]
+    acq = finance.parse_date(asset["date_acquisition"])
+    if acq and float(asset["valeur_acquisition"] or 0) > 0:
+        dates.append(acq)
+    premier = min((d for d in dates if d), default=None)
+    moins_d_un_an = premier is not None and (at_date - premier).days < 365
+    if moins_d_un_an:
+        tri = None
     lignes = (
         market.line_values(movements, ctx["securities"], ctx["prices"], at_date)
         if ctx else finance.pru_par_ligne(movements)
@@ -843,21 +1169,28 @@ def market_asset_detail(asset_id, at_date=None, ctx=None):
         "lignes": lignes,
         "tri": tri,
         "tri_pct": round(tri * 100, 2) if tri is not None else None,
+        "tri_moins_d_un_an": moins_d_un_an,
         "valeur": value,
         "valeur_source": detail["valeur_source"],
         "valeur_saisie": detail["valeur_saisie"],
-        "investi": finance.invested_amount(asset, movements),
+        # Le meme capital investi que la liste : frais autonomes compris, et
+        # borne a la date affichee.
+        "investi": detail["investi"],
     }
 
 
-def real_estate_detail(asset_id, at_date=None):
+def real_estate_detail(asset_id, at_date=None, ctx=None):
     """Prêt lié, loyers, charges et rendement locatif net d'un bien."""
     asset = get_asset(asset_id)
     if not asset:
         return None
     at_date = finance.parse_date(at_date) or date.today()
     movements = get_movements(asset_id)
-    valeur = finance.asset_value_at(asset, movements, at_date)
+    # La valeur de la liste, réévaluation par indice comprise. La fiche
+    # calculait sur la valeur saisie : deux prix pour un même bien, et un
+    # rendement rapporté à celui qui n'était pas affiché.
+    ctx = ctx if ctx is not None else market_context(at_date)
+    valeur = asset_detail(asset, movements, at_date, ctx)["valeur"]
 
     liabs = []
     for liab in rows_to_list(

@@ -1,5 +1,15 @@
 /* ==========================================================================
-   Design tokens — palette « forêt & bronze »
+   Design tokens — « verre clair »
+
+   L'interface suit le langage d'Apple : surfaces de verre translucides posées
+   sur un fond pastel en mouvement, un seul accent bleu, des couleurs système
+   pour les gains, pertes et alertes. Le verre lui-même (flou, reflet, ombre)
+   est décrit dans glass.css ; ce fichier ne porte que les couleurs.
+
+   La palette d'origine « forêt & bronze » reste définie ci-dessous : elle
+   colore encore le logo et l'écran de lancement, qui sont la marque.
+
+   ---- Palette d'origine, conservée pour la marque ----
 
    Palette source fournie (6 couleurs) :
      black #08090A · lilac-ash #A7A2A9 · bright-snow #F4F7F5
@@ -88,77 +98,72 @@
   --neutral-800: hsl(210 8% 15%);
   --neutral-900: var(--black);
 
-  /* ---- Sémantiques ---- */
-  --gain:      var(--khaki-600);
-  --gain-bg:   var(--khaki-100);
-  --perte:     var(--brick-600);
-  --perte-bg:  var(--brick-100);
-  --alerte:    var(--bronze-700);
-  --alerte-bg: var(--bronze-100);
-  --info:      var(--khaki-700);
-  --info-bg:   var(--khaki-100);
+  /* ---- Sémantiques : couleurs système d'Apple, versions lisibles ----
+     Les teintes vives d'Apple (#34C759, #FF9500) tombent sous 3:1 en texte
+     sur fond clair. Les versions « accessibles » du même système servent au
+     texte ; les vives restent aux fonds teintés. */
+  --gain:      #248A3D;                      /* 4,6:1 sur blanc */
+  --gain-bg:   rgba(52, 199, 89, .14);
+  --perte:     #D70015;                      /* 5,4:1 */
+  --perte-bg:  rgba(255, 59, 48, .11);
+  --alerte:    #C93400;                      /* 5,0:1 */
+  --alerte-bg: rgba(255, 149, 0, .15);
+  --info:      #0066CC;
+  --info-bg:   rgba(0, 122, 255, .10);
 
-  /* ---- Classes d'actifs (graphiques) — voir note 3 ----
-     Volontairement HORS palette : dix teintes bien réparties sur la roue.
-     Sur un camembert, la question n'est pas l'harmonie avec la marque mais
-     de distinguer une part de sa voisine ; des nuances de kaki auraient été
-     indéchiffrables. */
-  --actif-1:  #2E6BE6;   /* bleu */
-  --actif-2:  #E07A1F;   /* orange */
-  --actif-3:  #12A15C;   /* vert */
-  --actif-4:  #8B5CF6;   /* violet */
-  --actif-5:  #DB2E7C;   /* rose */
-  --actif-6:  #0E93B8;   /* cyan */
-  --actif-7:  #A8801A;   /* or */
-  --actif-8:  #D6432F;   /* rouge */
-  --actif-9:  #64748B;   /* ardoise */
-  --actif-10: #6C9C1F;   /* citron vert */
+  /* ---- Classes d'actifs (graphiques) ----
+     Couleurs système d'Apple, foncées d'un cran quand la version d'origine
+     passait sous 3:1 sur le verre clair (orange, vert, cyan). Le jaune,
+     illisible sur blanc, laisse sa place au brun du système. */
+  --actif-1:  #007AFF;   /* bleu */
+  --actif-2:  #E8750A;   /* orange */
+  --actif-3:  #1FA34A;   /* vert */
+  --actif-4:  #AF52DE;   /* violet */
+  --actif-5:  #E5266A;   /* rose */
+  --actif-6:  #0A9BC7;   /* cyan */
+  --actif-7:  #A2845E;   /* brun */
+  --actif-8:  #E5342B;   /* rouge */
+  --actif-9:  #8E8E93;   /* gris */
+  --actif-10: #5856D6;   /* indigo */
 
   /* ---- Rôles — thème clair ---- */
-  --bg-page:        var(--bright-snow);
-  --bg-surface:     var(--neutral-0);
-  --bg-surface-alt: var(--neutral-100);
-  /* Anthracite neutre, sans teinte kaki : la barre appartient à la page, elle
-     ne porte pas la couleur de marque. L'accent reste sur l'onglet actif. */
-  --bg-nav:         hsl(210 8% 15%);
-  --border:         var(--neutral-200);
-  --border-strong:  var(--neutral-300);
-  --text-primary:   var(--black);
-  --text-secondary: var(--charcoal);          /* 6,4:1 sur bright-snow */
-  /* `lilac-ash` ne tient que 2,3:1 sur `bright-snow` : illisible pour du
-     texte. Il reste la couleur des bordures et des états désactivés
-     (--neutral-400), et le texte discret prend un gris assez foncé pour
-     franchir 4,5:1. */
-  --text-muted:     hsl(214 5% 45%);          /* 4,6:1 sur bright-snow */
-  --text-on-brand:  var(--bright-snow);
-  --nav-indicator:  var(--bronze-400);
-  /* `--action` habille le TEXTE, les bordures et les icônes.
-     `--action-surface` remplit les boutons pleins : il doit rester FONCÉ dans
-     les deux thèmes, puisqu'il porte du texte clair. Confondre les deux rendait
-     le bouton primaire illisible en thème sombre (1,56:1 mesuré). */
-  --action:              var(--khaki-700);
-  --action-hover:        var(--khaki-800);
-  --action-subtle:       var(--khaki-100);
-  --action-surface:      var(--khaki-800);   /* texte clair : 9,3:1 */
-  --action-surface-hover: var(--khaki-900);  /* 13,4:1 */
-  --on-action-surface:   var(--bright-snow);
-  --focus-ring:          var(--khaki-500);
-  --scrim:          hsl(210 11% 4% / .55);
+  --bg-page:        #EEF1F7;                 /* gris bleuté, sous le verre */
+  --bg-surface:     #FFFFFF;
+  --bg-surface-alt: rgba(118, 118, 128, .10);
+  --bg-nav:         rgba(255, 255, 255, .62);
+  --border:         rgba(60, 60, 67, .13);
+  --border-strong:  rgba(60, 60, 67, .24);
+  --text-primary:   #1D1D1F;
+  --text-secondary: #3A3A3F;
+  --text-muted:     #6E6E73;                 /* 4,7:1 sur le fond */
+  --text-on-brand:  #FFFFFF;
+  --nav-indicator:  rgba(255, 255, 255, .92);
+  /* `--action` habille le TEXTE, les bordures et les icônes ;
+     `--action-surface` remplit les boutons pleins, sous un libellé blanc. Le
+     bleu #007AFF n'y tient que 4,0:1 : le bouton prend le bleu d'apple.com, un
+     cran plus profond, qui passe 4,5:1. */
+  --action:              #0066CC;
+  --action-hover:        #004F9E;
+  --action-subtle:       rgba(0, 122, 255, .11);
+  --action-surface:      #0071E3;            /* texte blanc : 4,6:1 */
+  --action-surface-hover: #0062C4;
+  --on-action-surface:   #FFFFFF;
+  --focus-ring:          #0A84FF;
+  --scrim:          rgba(232, 236, 244, .42);
 
-  /* Fond animé (« lampe à lave ») */
-  --lava-1: var(--khaki-400);
-  --lava-2: var(--bronze-400);
-  --lava-3: var(--khaki-600);
-  --lava-4: var(--bronze-200);
-  /* Assez de matière pour que le déplacement se lise. Trop flou et trop pâle,
-     une masse en mouvement passe pour un fond fixe. */
-  --lava-opacity: .30;
-  --lava-blur: 56px;
+  /* Fond en mouvement : quatre masses pastel que le verre floute. Sans
+     couleur derrière, le verre ne montre rien ; trop vives, elles le salissent. */
+  --lava-1: #8FC1FF;                         /* bleu ciel */
+  --lava-2: #C9B6FF;                         /* lilas */
+  --lava-3: #FFC3A6;                         /* pêche */
+  --lava-4: #A6E8D2;                         /* menthe */
+  --lava-opacity: .62;
+  --lava-blur: 72px;
 
-  /* ---- Rayons ---- */
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  /* ---- Rayons : généreux, comme les fenêtres et les cartes d'Apple ---- */
+  --radius-sm: 10px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
   --radius-xl: 22px; /* icône applicative */
 
   /* ---- Espacements ---- */
@@ -170,10 +175,17 @@
   --space-6: 32px;
   --space-7: 48px;
 
-  /* ---- Typographie ---- */
-  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace; /* montants, ISIN, tableaux */
-  /* Police d'AFFICHAGE — voir la note en fin de fichier. Réservée à l'identité
+  /* ---- Typographie ----
+     La police du système : SF Pro sur Mac, Segoe UI Variable sous Windows.
+     Les montants gardent leurs chiffres tabulaires (alignés en colonne) mais
+     quittent la chasse fixe, comme dans les applications d'Apple.
+     `--font-code` garde une chasse fixe pour les ISIN et les motifs. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text",
+               "Segoe UI", system-ui, sans-serif;
+  --font-mono: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable Display",
+               "Segoe UI", system-ui, sans-serif;
+  --font-code: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+  /* Police d'AFFICHAGE  /* Police d'AFFICHAGE — voir la note en fin de fichier. Réservée à l'identité
      et aux intitulés décoratifs ; jamais un montant, jamais un tableau. */
   --font-display: "Geist Pixel", var(--font-sans);
   /* Forme du pixel : 0 = carré net, 100 = rond. Le seul réglage de la police. */
@@ -188,63 +200,58 @@
 }
 
 /* ==========================================================================
-   Thème sombre — le noir de la palette prend le fond.
-   Les couleurs sémantiques remontent en luminosité : sur #08090A, le vert
-   d'origine (11 %) et le rouge foncé seraient illisibles.
+   Thème sombre — verre fumé
+   Mêmes formes, surfaces sombres translucides, couleurs système d'Apple dans
+   leur version pour fond sombre.
    ========================================================================== */
 
 [data-theme="dark"] {
-  --bg-page:        var(--black);
-  --bg-surface:     hsl(210 9% 8%);
-  --bg-surface-alt: hsl(210 8% 12%);
-  /* Un cran au-dessus du fond de page (4 %) : la barre se détache sans
-     tirer sur le kaki. */
-  --bg-nav:         hsl(210 9% 9%);
-  --border:         hsl(214 5% 19%);
-  --border-strong:  hsl(214 5% 30%);
-  --text-primary:   var(--bright-snow);
-  --text-secondary: hsl(240 5% 72%);
-  --text-muted:     hsl(283 4% 52%);
-  --text-on-brand:  var(--bright-snow);
-  --nav-indicator:  var(--bronze-400);
-  --action:              var(--khaki-300);
-  --action-hover:        var(--khaki-200);
-  --action-subtle:       hsl(70 35% 13%);
-  /* Foncé ici aussi : le bouton porte du texte clair. Il ressort quand même
-     de la carte (3,6:1). Le survol assombrit encore, dans les deux thèmes. */
-  --action-surface:      var(--khaki-600);   /* texte clair : 4,8:1 */
-  --action-surface-hover: var(--khaki-700);  /* 6,5:1 */
-  --on-action-surface:   var(--bright-snow);
-  --focus-ring:          var(--khaki-300);
-  --scrim:          hsl(210 11% 2% / .68);
+  --bg-page:        #0B0D13;
+  --bg-surface:     #1C1C1E;
+  --bg-surface-alt: rgba(118, 118, 128, .22);
+  --bg-nav:         rgba(30, 30, 34, .58);
+  --border:         rgba(255, 255, 255, .10);
+  --border-strong:  rgba(255, 255, 255, .19);
+  --text-primary:   #F5F5F7;
+  --text-secondary: #D1D1D6;
+  --text-muted:     #98989F;
+  --text-on-brand:  #FFFFFF;
+  --nav-indicator:  rgba(255, 255, 255, .16);
+  --action:              #4DA3FF;
+  --action-hover:        #7BBBFF;
+  --action-subtle:       rgba(10, 132, 255, .20);
+  --action-surface:      #0071E3;
+  --action-surface-hover: #0A84FF;
+  --on-action-surface:   #FFFFFF;
+  --focus-ring:          #4DA3FF;
+  --scrim:          rgba(5, 6, 10, .45);
 
-  --gain:      var(--khaki-300);
-  --gain-bg:   hsl(70 40% 12%);
-  --perte:     var(--brick-300);
-  --perte-bg:  hsl(8 45% 13%);
-  --alerte:    var(--bronze-400);
-  --alerte-bg: hsl(35 55% 12%);
-  --info:      var(--khaki-200);
-  --info-bg:   hsl(70 35% 13%);
+  --gain:      #30D158;
+  --gain-bg:   rgba(48, 209, 88, .16);
+  --perte:     #FF6961;
+  --perte-bg:  rgba(255, 69, 58, .16);
+  --alerte:    #FFB340;
+  --alerte-bg: rgba(255, 159, 10, .16);
+  --info:      #4DA3FF;
+  --info-bg:   rgba(10, 132, 255, .18);
 
-  /* Mêmes teintes, remontées en luminosité pour le fond sombre. */
-  --actif-1:  #7BA6FF;
-  --actif-2:  #F3A44D;
-  --actif-3:  #4ED894;
-  --actif-4:  #B79BFB;
-  --actif-5:  #F27CAE;
-  --actif-6:  #4FC9E3;
-  --actif-7:  #E0C05A;
-  --actif-8:  #F2806E;
-  --actif-9:  #A3ABB8;
-  --actif-10: #B4DC5E;
+  --actif-1:  #0A84FF;
+  --actif-2:  #FF9F0A;
+  --actif-3:  #30D158;
+  --actif-4:  #BF5AF2;
+  --actif-5:  #FF375F;
+  --actif-6:  #64D2FF;
+  --actif-7:  #C7A77B;
+  --actif-8:  #FF453A;
+  --actif-9:  #98989D;
+  --actif-10: #7D7AFF;
 
-  --lava-1: var(--khaki-600);
-  --lava-2: var(--bronze-700);
-  --lava-3: var(--khaki-800);
-  --lava-4: hsl(35 60% 30%);
-  --lava-opacity: .44;
-  --lava-blur: 64px;
+  --lava-1: #1D4ED8;
+  --lava-2: #6D28D9;
+  --lava-3: #9A3412;
+  --lava-4: #047857;
+  --lava-opacity: .50;
+  --lava-blur: 80px;
 }
 
 /* ==========================================================================

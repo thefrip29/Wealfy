@@ -6,6 +6,9 @@
 <title>Wealfy</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+<!-- La matiere : verre translucide. Retirer cette ligne rend les surfaces
+     opaques sans rien changer d'autre. -->
+<link rel="stylesheet" href="{{ url_for('static', filename='css/glass.css') }}">
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/icon.svg') }}">
 <script>
   /* Thème posé AVANT le premier rendu, pour éviter le flash blanc.
@@ -22,9 +25,11 @@
   (function () {
     var choix = null;
     try { choix = localStorage.getItem('wealfy.theme'); } catch (e) { /* ignore */ }
+    // Clair par defaut : le verre clair est l'apparence de reference. Le
+    // suivi du systeme reste un choix, dans les reglages.
     var sombre = choix === 'sombre' ? true
-      : choix === 'clair' ? false
-      : window.matchMedia('(prefers-color-scheme: dark)').matches;
+      : choix === 'systeme' ? window.matchMedia('(prefers-color-scheme: dark)').matches
+      : false;
     document.documentElement.setAttribute('data-theme', sombre ? 'dark' : 'light');
   })();
 
@@ -106,9 +111,8 @@
       <button class="icon-btn" id="month-next" title="Mois suivant">&#8250;</button>
     </div>
     <button class="icon-btn" id="toggle-privacy"
-            title="Masquer les montants" aria-pressed="true">&#128065;</button>
-    <button class="icon-btn" id="toggle-theme" title="Thème clair / sombre">&#9789;</button>
-    <button class="icon-btn" id="open-settings" title="Paramètres">&#9881;</button>
+            title="Masquer les montants" aria-pressed="true"></button>
+    <button class="icon-btn" id="open-settings" title="Paramètres" aria-label="Paramètres"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M21.2 12h-2.4M5.2 12H2.8M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7M18.5 18.5l-1.7-1.7M7.2 7.2L5.5 5.5"/><circle cx="12" cy="12" r="6.6"/></svg></button>
   </div>
 </header>
 
@@ -163,40 +167,32 @@
         <button class="zoom-btn" data-zoom="categories" title="Agrandir" aria-label="Agrandir"></button>
         <div class="chart-wrap"><canvas id="chart-categories"></canvas></div>
         <div class="card-extra" id="extra-categories"></div>
+        <div class="card-pied">
+          <button class="btn small" id="ov-cat-png"
+                  title="Enregistre l’image dans Téléchargements">Exporter en PNG</button>
+        </div>
       </div>
     </div>
 
-    <div class="grid-2">
-      <div class="card">
-        <h3>Répartition cible vs réelle</h3>
-        <div id="ov-repartition" class="repartition"></div>
-        <p class="sub" id="ov-frais" style="margin:12px 0 0"></p>
-      </div>
-
-      <!-- Le reste à vivre était calculé, documenté, et affiché nulle part. La
-           colonne « Charge fixe » des réglages n'existe que pour l'alimenter :
-           on cochait des catégories pour nourrir un chiffre invisible. -->
-      <div class="card">
-        <h3>Mon mois <span class="sub" id="ov-mois-label"></span></h3>
-        <div id="ov-mois"></div>
-      </div>
+    <div class="card">
+      <h3>Versements du mois vs cible</h3>
+      <div id="ov-repartition" class="repartition"></div>
+      <p class="sub" id="ov-frais" style="margin:12px 0 0"></p>
     </div>
   </section>
 
   <!-- ============ DÉPENSES ============ -->
   <section class="panel" id="tab-expenses">
-    <!-- Point d'entrée principal de l'onglet : ajouter un relevé. -->
-    <div class="card banner">
-      <div class="banner-text">
-        <h3>Relevés bancaires</h3>
-        <p class="sub" id="ex-last-import">Aucun relevé importé pour le moment.</p>
-      </div>
-      <div class="actions">
-        <button class="btn primary big" id="ex-import">+ Ajouter un relevé</button>
-      </div>
-    </div>
-
     <div class="kpi-grid" id="ex-kpis"></div>
+
+    <!-- Les prelevements recurrents, deduits des seules transactions. Masquee
+         tant qu'aucun n'est reconnu : une carte vide ne dit rien. -->
+    <div class="card" id="ex-abos-card" hidden>
+      <div class="card-head">
+        <h3>Abonnements <span class="sub" id="ex-abos-sub"></span></h3>
+      </div>
+      <div id="ex-abos"></div>
+    </div>
 
     <!-- Le patrimoine avait ses cibles avec l'ecart affiche ; les depenses
          n'avaient rien. Vide et masquee tant qu'aucun budget n'est fixe. -->
@@ -209,13 +205,19 @@
 
     <div class="card">
       <div class="card-head">
-        <h3>Transactions <span class="sub" id="ex-month-label"></span></h3>
+        <div>
+          <h3>Transactions <span class="sub" id="ex-month-label"></span></h3>
+          <!-- Le dernier releve, en une ligne ; un clic ouvre le journal. Il
+               occupait une carte entiere en tete d'onglet. -->
+          <button class="lien-discret" id="ex-last-import">Aucun relevé importé pour le moment.</button>
+        </div>
         <div class="actions">
           <input type="search" id="ex-search"
                  placeholder="Rechercher…  (/)"
                  title="Libellé, catégorie, montant ou produit rattaché">
           <select id="ex-filter-cat"><option value="">Toutes catégories</option></select>
           <button class="btn" id="ex-add">+ Transaction</button>
+          <button class="btn primary" id="ex-import">+ Ajouter un relevé</button>
         </div>
       </div>
       <!-- Barre d'actions groupees : elle n'apparait qu'a partir de la premiere
@@ -234,45 +236,17 @@
               <th>Libellé</th>
               <th style="width:190px">Catégorie</th>
               <th style="width:130px" class="right">Montant</th>
-              <th style="width:150px">Rattachement</th>
               <th style="width:44px"></th>
             </tr>
           </thead>
           <tbody></tbody>
         </table>
       </div>
-
-      <!-- Le journal est ici, où les imports se font — plutôt que dans
-           l'Historique, qui n'a pas à recueillir ce qui ne rentre ailleurs. -->
-      <details class="note" id="ex-imports">
-        <summary>Journal des imports</summary>
-        <div class="table-wrap scroll-y">
-          <table class="table" id="hi-imports">
-            <thead>
-              <tr>
-                <th>Date d'import</th><th>Source</th><th>Période couverte</th>
-                <th class="right">Lignes</th><th style="width:150px"></th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </details>
     </div>
   </section>
 
   <!-- ============ PATRIMOINE ============ -->
   <section class="panel" id="tab-wealth">
-    <!-- Point d'entrée pour la saisie initiale du patrimoine. -->
-    <div class="card banner">
-      <div class="banner-text">
-        <h3>Mon patrimoine</h3>
-      </div>
-      <div class="actions">
-        <button class="btn primary big" id="we-add">+ Ajouter</button>
-      </div>
-    </div>
-
     <div class="kpi-grid" id="we-kpis"></div>
 
     <div class="card">
@@ -281,6 +255,13 @@
         <div class="actions">
           <span id="we-market-state"></span>
           <button class="btn" id="we-refresh-quotes">Rafraîchir les cours</button>
+          <!-- Relire le patrimoine en dollars. Masque tant qu'aucun taux n'a ete
+               releve : convertir avec un taux invente serait pire que ne pas
+               convertir du tout. -->
+          <div class="segmente" id="we-devise" hidden></div>
+          <button class="btn" id="we-versements"
+                  title="Ce que vous avez mis sur chaque support le mois écoulé">+ Versements du mois</button>
+          <button class="btn primary" id="we-add">+ Ajouter</button>
         </div>
       </div>
       <div id="we-assets"></div>
@@ -310,25 +291,13 @@
   <section class="panel" id="tab-history">
     <div class="card">
       <div class="card-head">
-        <h3>Archive mensuelle</h3>
+        <h3>Archive</h3>
+        <div class="actions">
+          <!-- Deux lectures du meme passe : par mois, ou par categorie. -->
+          <div class="segmente" id="hi-vue"></div>
+        </div>
       </div>
-      <div class="table-wrap">
-        <table class="table" id="hi-archive">
-          <thead>
-            <tr>
-              <th>Mois</th>
-              <th class="right">Revenus</th>
-              <th class="right">Dépenses</th>
-              <th class="right">Solde</th>
-              <th class="right">Épargne</th>
-              <th class="right">Taux d'épargne</th>
-              <th class="right">Patrimoine net</th>
-              <th>Répartition atteinte</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
+      <div id="hi-contenu"></div>
     </div>
 
   </section>

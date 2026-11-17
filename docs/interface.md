@@ -9,6 +9,41 @@ Comment l'application se présente et se manipule.
 
 ## Interface
 
+### Verre clair
+
+Depuis novembre 2026, l'interface suit le langage d'Apple : des surfaces de
+verre translucides posées sur un fond pastel en mouvement. Les couleurs sont
+dans `tokens.css` ; le verre (flou, reflet, ombre) dans `glass.css`, chargée
+après `app.css`. Retirer cette ligne de `index.html` rend les surfaces
+opaques sans rien changer d'autre.
+
+- **Couleurs.** Un seul accent, le bleu d'Apple. Le bouton plein prend celui
+  d'apple.com (`#0071E3`, 4,6:1 sous un libellé blanc), un cran plus profond
+  que `#007AFF`, qui n'y tient que 4,0:1. Gains, pertes et alertes reprennent
+  les couleurs système dans leur version lisible en texte.
+- **Le verre.** Fond translucide, flou saturé de ce qui passe dessous, filet
+  clair en haut du bord et ombre longue. Il habille cartes, indicateurs,
+  observations, modales, menus, calendrier et toasts, jamais les conteneurs
+  de `RANGEES`, qui ne doivent rien peindre.
+- **La barre du haut** flotte en capsule. Une pilule de verre glisse sous
+  l'onglet actif : le même élément unique qu'avant, habillé autrement.
+- **Le mouvement.** Les durées restent celles d'`app.css`. Une seule courbe
+  s'ajoute, `--spring`, réservée aux gestes : la pilule d'onglet, un bouton
+  qu'on enfonce, une modale qui jaillit. Le survol soulève les indicateurs de
+  quelques pixels. Ces gestes passent par les propriétés `translate` et
+  `scale` : les animations d'entrée écrivent `transform` jusqu'à leur fin et
+  écraseraient tout déplacement qui passerait par lui. Le patrimoine net
+  défile jusqu'à sa valeur, en partant de la précédente (`App.compter`).
+- **Typographie.** La police du système (SF Pro, Segoe UI Variable). Les
+  montants gardent leurs chiffres tabulaires mais quittent la chasse fixe ;
+  les ISIN et les motifs la gardent (`--font-code`).
+- **Thème.** Clair par défaut. Le sombre devient un verre fumé, le suivi du
+  système reste un choix dans les réglages. L'écran de lancement est toujours
+  clair, pour ne pas précéder l'application d'un éclair noir.
+
+Ce qui suit décrit l'identité précédente, « kaki & bronze ». Elle colore
+encore le logo et l'écran de lancement ; le reste de l'interface l'a quittée.
+
 **`app/static/css/tokens.css` fait autorité sur l'identité visuelle.** `app.css`
 n'écrit **aucune couleur en dur** — il ne consomme que des *rôles*
 (`--bg-page`, `--action`, `--gain`…). Remplacer ce seul fichier suffit à changer
@@ -70,6 +105,11 @@ Le survol assombrit encore, dans les deux thèmes.
 
 ### Fond animé
 
+> Depuis le verre clair, le fond est **figé** : quinze surfaces floutées
+> au-dessus d'un fond qui bouge, c'étaient quinze flous recalculés à chaque
+> image. Ses couleurs restent, vues à travers le verre. Ce qui suit décrit le
+> mouvement d'origine, toujours dans `app.css`.
+
 Un fond « lampe à lave » dérive derrière la page : quatre masses kaki et bronze,
 floutées, en **mouvement continu**.
 
@@ -112,9 +152,11 @@ applicative reste posée sur fond clair — sur le kaki profond de la barre de
 navigation, sa barre la plus foncée tomberait trop bas en contraste.
 
 Thème clair et sombre via `[data-theme]`, posé sur `<html>` avant le premier
-rendu pour éviter tout flash. Par défaut il suit le réglage du système ; le
-bouton ☾ du bandeau force un choix, mémorisé localement. Les montants sont en
-police monospace tabulaire, conformément aux tokens.
+rendu pour éviter tout flash. Par défaut il suit le réglage du système ;
+*Paramètres → Affichage* propose trois crans (Système, Clair,
+Sombre), mémorisés localement. Le bouton de la barre du haut cachait son état
+sous une icône, il a été retiré. Les montants sont en police monospace
+tabulaire, conformément aux tokens.
 
 ### Trois règles de mise en page
 
@@ -146,8 +188,15 @@ fondu-échelle, notifications qui glissent.
 L'**arrivée du contenu** — au démarrage comme au changement d'onglet — se fait
 en cascade du haut vers le bas : chaque bloc monte de 28 px en se dépliant
 légèrement depuis son bord supérieur (`transform-origin: top`), comme une bande
-qu'on abaisse. `--t-reveal` 1050 ms par bloc, `--reveal-step` 95 ms de décalage,
-soit environ 1,9 s pour que la page entière se soit posée.
+qu'on abaisse. `--t-reveal` 620 ms par bloc, `--reveal-step` 45 ms de décalage,
+soit environ 1 s pour que la page entière se soit posée.
+
+**Ni flou, ni rejeu.** Les entrées et le carrousel animaient aussi un
+`filter: blur()` : sur une carte en verre, un filtre coupe le
+`backdrop-filter`, et la carte arrivait mate avant que le verre ne s'allume
+d'un coup. Ils n'animent plus que `transform` et `opacity` (`glass.css`). Et un
+enregistrement ne rejoue plus l'entrée : `App.refresh` redessine l'onglet sur
+place au lieu de le masquer le temps de la requête.
 
 Les **rangées s'ouvrent cellule par cellule** : la ligne d'indicateurs ne
 débarque pas d'un bloc au milieu de la cascade, ses quatre cases se succèdent.
@@ -219,7 +268,7 @@ mécanismes décidaient à la place de l'utilisateur :
   durablement en mode dégradé, sans que rien ne le signale.
 
 Le mode complet est le défaut partout, et le mode économe un choix assumé,
-depuis *Paramètres → Apparence*. Une machine qui peine, c'est à son propriétaire
+depuis *Paramètres → Affichage*. Une machine qui peine, c'est à son propriétaire
 de le constater.
 
 `prefers-reduced-motion` reste prioritaire : c'est une préférence système
@@ -326,9 +375,64 @@ La première avait sa propre section dans ce fichier et n'apparaissait sur aucun
 raison d'être** que de l'alimenter. On cochait donc des catégories pour nourrir
 un chiffre que personne ne montrait.
 
-Une carte *Mon mois* les affiche, dans la rangée qui n'avait qu'une carte et
-laissait un vide. Le reste à vivre domine, le reste descend d'un cran. **Rien
-n'est calculé en plus** : tout arrivait déjà dans `/api/overview`.
+Le reste à vivre a été la cinquième case de la rangée d'indicateurs, puis en
+est **retiré** (novembre 2026) : la Vue d'ensemble garde quatre cases. Les
+grandeurs restent calculées dans `/api/overview`, et le taux d'endettement
+continue d'alimenter les observations.
+
+Les deux pourcentages du détail se rapportent au **revenu moyen des trois mois
+révolus** (`revenu_moyen_3m`), pas aux revenus du mois : le libellé le dit. Ils
+s'affichaient « des revenus » juste sous un montant de revenus qui n'était pas
+leur base.
+
+### Mes versements du mois
+
+L'onglet *Patrimoine* porte, dans l'en-tête de la carte Actifs, un bouton
+**+ Versements du mois**. Le salaire
+d'octobre tombe fin octobre et s'investit début novembre : la fenêtre propose
+donc par défaut le **mois écoulé**, une ligne par livret ou placement ouvert,
+et date les versements du **dernier jour de ce mois** pour qu'ils comptent dans
+son épargne. Ce qui y est déjà versé s'affiche sous le nom du support.
+
+Chaque ligne d'un compte a sa propre case : on alimente souvent bitcoin ET
+ether le même mois.
+
+**Un mois saisi par ce bouton fait foi.** Son épargne et sa carte *Versements
+du mois vs cible* (Vue d'ensemble, ex-« Répartition cible vs réelle ») ne
+comptent que ces saisies : ni les achats notés au fil du mois, ni l'écart lu
+sur la valorisation d'un livret ne s'y ajoutent. Un mois sans saisie garde le
+calcul d'avant (versements nets des retraits). La cible se compare aux
+versements du mois — c'est une stratégie de DCA —, plus au patrimoine
+détenu. Une poche sans type coché se reconnaît au nom d'un type ou d'un
+produit (« Livret A »).
+
+Sur un compte à lignes (PEA, assurance vie, crypto), le versement nomme sa
+ligne, et une ligne cotée demande la quantité achetée : sans elles, il créait
+une ligne « (sans ticker) » et le compte perdait sa valorisation. Tout est
+enregistré d'un coup, ou rien (`POST /api/versements-du-mois`).
+
+Si le virement correspondant apparaît sur le relevé du mois suivant plus de
+quatre jours après, rattachez-le au produit : sinon il serait compté une
+seconde fois comme épargne.
+
+### D'où vient la variation du mois
+
+Le héros donnait la variation du patrimoine net, ▲ ou ▼. Un mois à +2 000 €
+peut pourtant n'être que de l'épargne versée, sans que les placements aient
+rien rapporté. `services.decomposer_variation` la découpe en quatre parts.
+Elles ne s'affichent plus sous le héros (retirées en novembre 2026, avec la
+date d'arrêt) ; l'archive de l'Historique les garde :
+
+| Part | Ce qu'elle compte |
+|---|---|
+| Apports | Versements et retraits. Un produit ouvert compte en entier, un produit clos aussi, en négatif. |
+| Performance | L'écart de plus-value des produits détenus aux deux dates, intérêts de livret compris. |
+| Immobilier | La même chose pour les biens, à part : une réévaluation par indice n'est pas un gain réalisable. |
+| Dettes | Le capital remboursé, ou emprunté. |
+
+La performance se calcule par différence : la somme des quatre parts tombe au
+centime sur la variation, sans résidu d'arrondi. L'archive de l'Historique
+porte la même décomposition, mois par mois.
 
 Deux états vides distincts, parce que **le même zéro recouvre deux situations**
 qui n'appellent pas la même phrase : aucune catégorie marquée charge fixe (le
@@ -336,6 +440,42 @@ réglage n'a jamais été fait, on y emmène), ou aucun revenu sur le mois (le r
 à vivre se compte SUR des revenus). Inviter à configurer ce qui l'est déjà
 ferait chercher un écran qu'on a sous les yeux — d'où `categories_charges_fixes`
 dans `/api/meta`, qui sépare les deux cas.
+
+### Le détecteur d'abonnements
+
+Une carte de l'onglet **Dépenses**, masquée tant qu'aucun prélèvement récurrent
+n'est reconnu. Rien à déclarer : tout se déduit des transactions déjà
+importées (`app/abonnements.py`, `GET /api/subscriptions`, deux ans d'historique).
+
+**Trois signes, et il les faut tous les trois.** Le même marchand revient
+(même racine que le regroupement d'import), l'écart entre deux prélèvements
+est régulier, et le montant ne bouge pas. Le troisième est le plus sûr : un
+restaurant n'additionne jamais deux fois la même note au centime près.
+
+Le risque n'est pas de manquer un abonnement, c'est d'en inventer. Quarante-six
+courses Grab dans un mois reviennent et coûtent, sans être un abonnement ; une
+facture d'électricité au réel est mensuelle sans être à prix fixe. Les deux
+sont écartées, et les tests le vérifient. Les virements entre vos propres
+comptes le sont aussi : un versement mensuel sur un livret est parfaitement
+régulier et parfaitement stable, donc indiscernable d'un abonnement par les
+seuls chiffres — mais cet argent reste chez vous.
+
+Périodicités reconnues : hebdomadaire, mensuelle, bimestrielle, trimestrielle,
+semestrielle, annuelle. La tolérance mensuelle est large à dessein : un
+prélèvement « le 15 » produit des écarts de 28 à 31 jours, qu'un jour ouvré
+décale encore.
+
+**Ce que la carte apporte** n'est pas la liste, que vous connaissez déjà, mais
+les trois choses qu'on ne voit pas :
+
+| | |
+|---|---|
+| Le coût à l'année | Chaque rythme est annualisé, et le total ne compte que les abonnements actifs. |
+| Les hausses de prix | Le dernier montant est comparé au précédent qui en diffère ; l'écart s'affiche en pourcentage. |
+| Ce qui se prélève encore | Rien depuis plus d'une période et demie : la rangée s'éteint et porte « plus prélevé ». Résilié, ou oublié ? |
+
+Les plus chers à l'année passent devant : c'est là qu'une décision rapporte le
+plus. Rien n'est modifié dans vos données : la carte observe, elle n'écrit pas.
 
 ### Des budgets de dépenses
 
@@ -359,10 +499,17 @@ existaient depuis toujours. **Aucun écran ne permettait de s'en servir** : la
 case « Voir archivés » montrait un ensemble impossible à remplir, elle a été
 retirée, et la capacité est restée morte.
 
-La fiche d'un actif porte maintenant **Clôturer** — le mot d'un livret fermé,
+La fiche d'un actif porte maintenant **Clôturer**, le mot d'un livret fermé,
 pas celui d'un classeur. Un produit clôturé sort du patrimoine sans perdre son
 passé : supprimer l'actif effacerait ses mouvements, le clôturer ne fait que le
 retirer de la photo du jour.
+
+**Clore, c'est dater.** La colonne `assets.date_cloture` reçoit le jour de la
+clôture, et `services.present_le` fait compter le produit jusqu'à la veille.
+Sans elle, un produit clos disparaissait de **toutes** les dates : la courbe,
+l'archive et le patrimoine des mois passés changeaient le jour où on le
+fermait. Les produits clos avant l'apparition de la colonne sont datés à la
+migration par leur dernier mouvement.
 
 On les retrouve sous la liste, dans un bloc à part qui **dit qu'ils ne comptent
 pas dans les totaux** — sans quoi on chercherait une erreur d'addition. Ils ne
@@ -446,17 +593,26 @@ paramètre `date`. Reculer d'un mois montre le patrimoine tel qu'il était.
 *Historique* est multi-mois par nature : le sélecteur y est masqué. Un contrôle
 qui ne commande rien ne doit pas rester à l'écran.
 
-**Dépenses** — un bandeau en tête d'onglet rappelle le dernier relevé importé et
-porte le bouton **« + Ajouter un relevé »**, qui ouvre une zone de dépôt :
-le fichier y est lâché ou choisi, puis analysé sans second clic (voir
-[donnees.md](donnees.md)). En dessous : transactions du mois,
-catégorie modifiable directement dans la liste, ajout manuel, tendance 6 mois.
-Un mois vide propose directement l'import plutôt qu'un tableau nu.
+**Dépenses** : le bouton **« + Ajouter un relevé »** est dans l'en-tête des
+transactions, à côté de « + Transaction ». Il ouvre une zone de dépôt : le
+fichier y est lâché ou choisi, puis analysé sans second clic (voir
+[donnees.md](donnees.md)). Sous le titre, une ligne rappelle le dernier relevé ;
+un clic ouvre le journal des imports. Les deux occupaient une carte en tête
+d'onglet et un repli en bas du tableau. Un mois vide propose directement
+l'import plutôt qu'un tableau nu.
 
-**Patrimoine** — **un seul bouton « + Ajouter »**, et trois portes derrière : un
-produit d'épargne ou de placement (la grille de déclaration, plusieurs à la fois
-si besoin), un prêt, ou autre chose. En dessous : actifs groupés par famille,
-passifs avec capital restant dû.
+La carte **Inhabituel ce mois-ci** a été retirée de l'onglet (novembre 2026) ;
+`/api/ecarts` reste disponible. Un clic sur un budget, sur le camembert de la synthèse ou sur une
+cellule de l'Historique ouvre les transactions filtrées.
+
+Classer une ligne à la main propose d'en faire une règle pour tout le
+marchand, comme le bandeau d'import. La question ne revient pas au relevé
+suivant.
+
+**Patrimoine** : **un seul bouton « + Ajouter »**, dans l'en-tête des actifs, et
+trois portes derrière : un produit d'épargne ou de placement (directement la
+grille de déclaration, un produit ou dix), un prêt, ou autre chose. En dessous :
+actifs groupés par famille, passifs avec capital restant dû.
 
 ### Le tableau des transactions
 
@@ -502,12 +658,71 @@ est passé dans *Dépenses*, là où les imports se font ; son code y est passé
 aussi, alors qu'il vivait dans le module de l'Historique sans y être rendu. Un
 import peut être annulé : ses transactions sont supprimées avec lui.
 
-**Paramètres** (icône engrenage) — quatre sections dont le contenu correspond au
-titre : *Classement des dépenses* (catégories, rôles, règles),
-*Objectifs* (répartition cible, crédit des intérêts), *Cours de marché*,
-et *Général* (types d'actifs personnalisés, sauvegardes). « Types d'actifs
-personnalisés » était logé sous *Cours de marché*, avec lesquels il n'a rien à
-voir.
+L'archive se lit de deux façons. **Mois** : une ligne par mois, regroupées par
+année avec leur total (le taux d'épargne de l'année se recalcule sur les
+totaux, pas en moyenne des taux mensuels). L'année en cours est dépliée. Une
+colonne *Variation* donne l'écart de patrimoine net, sa décomposition en
+infobulle. **Catégories** : les douze derniers mois en colonnes, une ligne par
+catégorie de dépense, le mois le plus lourd de chaque ligne en avant. On y voit
+d'un coup d'œil quelle dépense a dérivé.
+
+### Des chiffres qui se recoupent
+
+Chaque écran recalcule ses chiffres à la volée, ce qui les garde à jour et les
+laisse aussi diverger. `tests/test_coherence.py` pose les égalités qui doivent
+tenir : catégories qui somment aux dépenses, archive égale à la synthèse du
+même mois, dernier point de la courbe égal au héros, une seule valeur et un
+seul capital investi par actif (liste, fiche, trajectoire, fiche immobilière),
+passé inchangé par une clôture.
+
+Deux écarts corrigés en chemin méritent d'être nommés. Un virement d'épargne
+du relevé et le versement saisi sur le livret comptaient **deux fois** le même
+euro ; ils sont rapprochés par montant à quelques jours près. Et la part de
+crypto se mesure sur le **total des actifs** : avec un prêt, le patrimoine net
+peut être minuscule et la part dépassait 100 %.
+
+Les observations remontent aussi une hausse de prix ou un arrêt d'abonnement
+de moins de quatre mois. Plus anciens, ils sont connus.
+
+**Paramètres** (icône engrenage) : une colonne de sept rubriques, une idée
+chacune — *Affichage*, *Catégories*, *Règles*, *Objectifs*, *Patrimoine*,
+*Cours de marché*, *Sauvegardes*. Il y avait trois onglets de 1 100 à 1 600 px
+de haut, dont un empilait le thème, les cours, les sauvegardes et les types
+d'actifs. La colonne reste en place, seul le panneau défile ; la dernière
+rubrique ouverte est retenue.
+
+Trois règles tiennent l'ensemble :
+
+- **Tout s'enregistre à la modification.** Les cours gardaient seuls un bouton
+  « Enregistrer », au milieu de réglages qui s'écrivaient d'eux-mêmes. C'est
+  désormais l'*activation* des cours, et elle seule, qui se confirme sur place :
+  elle fait sortir des données de la machine.
+- **Une phrase par rubrique.** Les six notes repliables expliquaient ce que les
+  libellés doivent dire seuls.
+- **Un geste destructeur se confirme sur place**, par un second clic sur le
+  bouton qui a changé de libellé. `App.confirm` remplace la modale courante :
+  supprimer une sauvegarde vous faisait sortir des paramètres.
+
+**Un rôle par catégorie, et un seul** : Dépense, Charge fixe, Épargne ou
+Virement interne. C'étaient trois cases indépendantes. Or le reste à vivre vaut
+`revenus − charges fixes − épargne` : une catégorie cochée à la fois charge
+fixe et épargne était soustraite deux fois. Une donnée ancienne qui cumule
+plusieurs rôles est signalée, et lue sous le plus neutre jusqu'à ce qu'on
+choisisse. Le budget se grise sur l'épargne et les virements, qui ne sont
+jamais comptés comme consommés.
+
+**Règles** : « si le libellé contient… alors… ». La colonne *Cible* n'était lue
+par rien au moment de classer ; elle se déduit de la catégorie. La colonne
+*Priorité* affichait 100 ou 200 sans qu'aucun écran permette de la changer.
+
+**Cours de marché** : la clé API n'apparaît que sous Twelve Data — Yahoo n'en
+demande pas. Le test de symbole et la table des correspondances restent repliés
+et ne se chargent qu'à l'ouverture. Durée du cache et rafraîchissement au
+lancement gardent leurs valeurs par défaut, sans champ.
+
+Une poche de répartition sans type coché le dit : elle ne compte que le type
+qui porte son nom, ou reste à 0 % si aucun ne le porte. « Livret A » ne désigne
+aucun type, « Livret » oui.
 
 ### Un seul modèle d'enregistrement
 
@@ -518,9 +733,10 @@ répartition cible, date de crédit, frais et cours attendaient un bouton
 retouchée puis abandonnée était perdue en silence.
 
 Tout s'enregistre maintenant à la modification, et la modale le dit en une
-ligne. **Une seule exception, annoncée sur place** : la section *Cours de
-marché* garde son bouton, parce que l'activer fait sortir des données de la
-machine. Un réglage à conséquence se confirme.
+ligne. Un témoin « ✓ Enregistré » s'allume à côté de cette ligne, au lieu d'un
+toast par case cochée. **Une seule exception** : la section *Cours de marché*
+garde son bouton, parce que l'activer fait sortir des données de la machine. Un
+réglage à conséquence se confirme.
 
 Les champs à saisie libre (frais, poches) s'écrivent à la **sortie du champ** et
 non à la frappe : sinon « 1 » serait enregistré avant « 120 ».
@@ -697,9 +913,56 @@ revenus du mois — compter une mensualité soldée gonflerait le ratio sans rai
 Le seuil de 35 % est la référence bancaire courante.
 
 `reste_a_vivre_mois` retranche des revenus les charges fixes et l'épargne. Les
-catégories considérées comme fixes se cochent dans *Paramètres → Classement des
-dépenses*, sur le même modèle que les virements internes.
+catégories considérées comme fixes se choisissent dans *Paramètres →
+Catégories*, un rôle par catégorie.
 
+
+## Relire le patrimoine en dollars
+
+Un sélecteur à deux crans, **EUR / USD**, en tête de l'onglet Patrimoine.
+
+**Les données restent en euros de bout en bout** : la base, l'API, les calculs,
+et les trois autres onglets. Seule la LECTURE de celui-ci change, et la
+conversion se fait au tout dernier moment, à l'affichage. Un taux qui bouge ne
+réécrit donc jamais l'histoire — c'est la propriété que garde
+`test_devise.py`, et elle compte plus que la fonctionnalité elle-même.
+
+**Tout bascule ensemble**, livrets et immobilier compris. Ne convertir que les
+actions et les cryptos aurait donné un « patrimoine net » mélangeant des euros
+et des dollars, c'est-à-dire un total qui ne veut rien dire.
+
+**Le taux est celui du moment.** Quitter l'euro déclenche
+`POST /api/fx/refresh`, qui demande le cours au fournisseur configuré (Twelve
+Data en direct, avec repli sur la référence quotidienne de la BCE).
+
+L'affichage ne l'attend jamais : il bascule avec le dernier taux connu, puis se
+corrige tout seul si un plus frais arrive — et seulement si le chiffre a
+réellement bougé, redessiner l'onglet pour une valeur identique n'étant que de
+l'agitation. Une garde d'une minute évite qu'un aller-retour entre les deux
+crans ne déclenche une requête à chaque clic.
+
+C'est la **deuxième et dernière** route qui sorte sur le réseau, et de loin la
+moins bavarde : elle envoie une paire de devises, « EUR/USD », et rien
+d'autre. Là où les symboles interrogés par un rafraîchissement de cours
+renseignent sur la composition du portefeuille, une paire de devises ne dit
+rien de personne. Elle reste néanmoins soumise au réglage **cours de
+marché** : rien ne sort de la machine tant que vous ne l'avez pas autorisé.
+
+Sans réseau, la lecture en dollars continue de fonctionner sur le dernier taux
+en cache, dont la date s'affiche en infobulle du sélecteur. À défaut d'un taux
+`EUR -> USD`, l'**inverse** de `USD -> EUR` est utilisé : ce dernier est relevé
+depuis toujours pour convertir les titres cotés en dollars, et attendre un
+rafraîchissement pour le même renseignement rendait la fonctionnalité
+indisponible sans raison. Tant qu'aucun des deux n'existe, le sélecteur reste
+**masqué** — convertir avec un taux inventé serait pire que ne pas convertir.
+
+Le choix est mémorisé dans le navigateur (`localStorage`), comme le thème, le
+mois affiché et le masquage des valeurs. Basculer ne redemande rien au serveur :
+l'onglet se redessine à partir de ce qu'il a déjà en mémoire.
+
+Le masquage des valeurs suit : `App.metricList` reconnaît un montant à son
+symbole monétaire, et les deux comptent désormais. Un pourcentage ou une date
+n'en portent pas, et restent lisibles.
 
 ## Une seule façon d'ajouter quelque chose
 
@@ -758,10 +1021,16 @@ pastille qui dit s'ils sont à jour ; l'automatique au lancement ne bouge pas.
 ### La fiche d'un actif : deux onglets, plus cinq
 
 « Résumé » et « PRU & TRI » affichaient les mêmes lignes sous deux angles. Leurs
-chiffres — capital investi, valeur de marché, plus-value, PRU moyen, TRI — sont
-maintenant en tête des positions. Reste **Mes supports** (ou *Mes cryptos*) et
+chiffres (capital investi, valeur de marché, plus-value, TRI) sont maintenant en
+tête des positions. Reste **Mes supports** (ou *Mes cryptos*) et
 **Historique** ; l'immobilier garde son onglet *Prêt & rendement*. La comparaison
 à un indice se replie sous les positions.
+
+Le **PRU moyen du compte** a disparu : il mélangeait le prix de parts sans
+rapport entre elles. Chaque ligne garde le sien. Le **TRI** ne s'affiche qu'à
+partir d'un an de détention : annualiser deux mois transformait 19 % en 327 %.
+Les actions d'une ligne (achat, vente ou frais, échange) sont dans un menu
+« ⋯ » plutôt qu'en trois boutons répétés à chaque ligne.
 
 ### Ajouter une ligne : trois champs, plus neuf
 

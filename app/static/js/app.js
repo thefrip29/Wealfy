@@ -1,8 +1,75 @@
 /* Amorçage : navigation par onglets, sélecteur de mois, rafraîchissements. */
 App.currentTab = 'overview';
 
+/* Les taux de change disponibles, et le choix memorise.
+
+   Lecture purement locale : ces taux ont ete poses par le rafraichissement des
+   cours, la seule route qui sorte sur le reseau. Un taux absent n'est pas une
+   panne, c'est un « pas encore releve » — l'euro reste alors seul propose. */
+App.chargerDevises = async function () {
+  try {
+    const res = await App.api.get('/api/fx');
+    App.state.devises = (res.devises || []).filter((d) => d.taux);
+  } catch (e) {
+    App.state.devises = [];
+  }
+  let choisie = null;
+  try { choisie = localStorage.getItem(App.CLE_DEVISE); } catch (e) { /* ignore */ }
+  const dispo = (App.state.devises || []).find((d) => d.code === choisie);
+  App.devise = dispo || { code: 'EUR', taux: 1, date: null };
+  // Ouvrir l'application en dollars doit donner un taux du jour, pas celui de
+  // la derniere session. Sans `await` : le premier rendu passe avant.
+  if (App.devise.code !== 'EUR') {
+    App.rafraichirDevises().then((change) => {
+      if (change && App.currentTab === 'wealth') App.tabs.wealth.load();
+    });
+  }
+};
+
+/* Le taux du moment, demande au fournisseur de cours.
+
+   L'affichage ne l'attend JAMAIS : on bascule avec le dernier taux connu, et
+   l'onglet se corrige tout seul si un plus frais arrive. Changer de devise ne
+   doit pas donner l'impression d'attendre le reseau — et sans cours actives,
+   la lecture en dollars continue de fonctionner sur le taux en cache. */
+App.DELAI_TAUX = 60000;
+
+App.rafraichirDevises = async function () {
+  App.state.tauxDemandeA = Date.now();
+  let res;
+  try { res = await App.api.post('/api/fx/refresh', {}); } catch (e) { return false; }
+  const dispos = (res.devises || []).filter((d) => d.taux);
+  if (!dispos.length) return false;
+  const avantTaux = App.devise.taux;
+  App.state.devises = dispos;
+  const frais = dispos.find((d) => d.code === App.devise.code);
+  if (frais) App.devise = frais;
+  return !!frais && frais.taux !== avantTaux;
+};
+
+/* Une garde d'une minute : basculer d'avant en arriere ne doit pas declencher
+   une requete a chaque aller-retour. */
+App.tauxARedemander = function () {
+  return Date.now() - (App.state.tauxDemandeA || 0) > App.DELAI_TAUX;
+};
+
+App.choisirDevise = function (code) {
+  const d = (App.state.devises || []).find((x) => x.code === code);
+  App.devise = d || { code: 'EUR', taux: 1, date: null };
+  try { localStorage.setItem(App.CLE_DEVISE, App.devise.code); } catch (e) { /* ignore */ }
+  if (App.devise.code !== 'EUR' && App.tauxARedemander()) {
+    App.rafraichirDevises().then((change) => {
+      // On ne repeint que si le taux a REELLEMENT bouge : redessiner l'onglet
+      // sous les yeux de l'utilisateur pour un chiffre identique serait une
+      // agitation gratuite.
+      if (change) App.tabs.wealth.load();
+    });
+  }
+};
+
 App.loadMeta = async function () {
   App.state.meta = await App.api.get('/api/meta');
+  await App.chargerDevises();
 };
 
 /* Donnees de reference, lues UNE fois par navigation.
@@ -248,11 +315,11 @@ App.placeIndicator = function () {
   const actif = App.el('.tab.active');
   if (!barre || !trait || !actif) return;
 
-  // Le trait s'arrête à la marge interne du bouton, comme l'ancien ::after :
-  // il souligne le mot, pas la zone cliquable.
-  const marge = parseFloat(getComputedStyle(actif).paddingLeft) || 0;
-  barre.style.setProperty('--indicator-x', `${actif.offsetLeft + marge}px`);
-  barre.style.setProperty('--indicator-w', `${actif.offsetWidth - 2 * marge}px`);
+  // La pilule de verre couvre l'onglet entier. Elle reprenait le calage de
+  // l'ancien trait, arrêté aux marges du mot : 28 px trop étroite, elle
+  // laissait déborder le libellé de part et d'autre.
+  barre.style.setProperty('--indicator-x', `${actif.offsetLeft}px`);
+  barre.style.setProperty('--indicator-w', `${actif.offsetWidth}px`);
 
   // Première pose sans animation, sinon le trait arriverait en glissant depuis
   // le bord gauche au chargement de la page.
@@ -368,8 +435,20 @@ App.raccourcis = function (e) {
 
 /* Recharge l'onglet courant. Les references suivent, dans `showTab`, et
    seulement pour les onglets qui les lisent. */
+/* Redessine l'onglet courant SUR PLACE, après une écriture.
+
+   Il repassait par `showTab` : le panneau devenait transparent le temps de
+   l'aller-retour serveur, puis rejouait toute son animation d'entrée. Chaque
+   enregistrement faisait donc clignoter la page entière. Les animations
+   d'entrée restent réservées aux vrais changements d'onglet ou de mois. */
 App.refresh = async function () {
-  await App.showTab(App.currentTab);
+  const name = App.currentTab;
+  try {
+    if (App.BESOIN_REFS[name]) await App.loadRefs();
+    await App.tabs[name].load();
+  } catch (e) {
+    App.toast(e.message, 'error');
+  }
 };
 
 /* Redessine les graphiques de l'onglet courant depuis les donnees deja
@@ -411,6 +490,13 @@ App.setMonth = async function (ym, sens) {
   // `sens || null` et non `sens` : passer `undefined` laisserait showTab
   // déduire un sens depuis les onglets, alors qu'on reste sur le même.
   await App.showTab(App.currentTab, sens || null);
+};
+
+/* Depuis un graphique ou un budget : les transactions d'une catégorie, sur le
+   mois affiché. Le filtre est posé avant le rendu de l'onglet. */
+App.voirCategorie = async function (categorie) {
+  App.tabs.expenses.filtreAPoser = categorie;
+  await App.showTab('expenses');
 };
 
 /* Depuis l'archive : on change de mois ET d'onglet. Le mois est posé sans
@@ -479,20 +565,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     () => App.tabs.overview.toggleChart(b.dataset.zoom)));
   App.el('#toggle-privacy').addEventListener('click',
     () => App.setPrivacy(!App.privacyOn()));
-  App.el('#toggle-theme').addEventListener('click', () => {
-    // Cycle système -> clair -> sombre -> système. Passer par « système »
-    // à chaque tour est ce qui permet de revenir au suivi automatique ;
-    // l'ancien bouton à deux positions l'interdisait définitivement.
-    const suivant = App.THEMES[(App.THEMES.indexOf(App.themeChoisi()) + 1) % App.THEMES.length];
-    App.setTheme(suivant);
-    // Les graphiques lisent leurs couleurs au rendu : on les refait, et rien
-    // d'autre. Recharger l'onglet entier rejouait toute l'apparition et
-    // redemandait au serveur des séries qu'on avait déjà en mémoire.
-    App.redessinerGraphiques();
-  });
 
   App.el('#ex-add').addEventListener('click', () => App.tabs.expenses.openForm(null));
   App.el('#ex-import').addEventListener('click', () => App.tabs.expenses.openImport());
+  App.el('#ex-last-import').addEventListener('click', () => App.tabs.expenses.openJournal());
   // Recherche debouncee : `renderTable` reconstruit toutes les lignes, et le
   // faire a chaque frappe rendait la saisie pateuse sur un mois charge.
   let rechercheDelai;
@@ -507,6 +583,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   App.el('#we-refresh-quotes').addEventListener('click',
     (e) => App.tabs.wealth.refreshQuotes(e.target));
   App.el('#we-add').addEventListener('click', () => App.tabs.wealth.openAddChooser());
+  App.el('#we-versements').addEventListener('click', () => App.tabs.wealth.openVersementsDuMois());
+  App.el('#ov-cat-png').addEventListener('click', () => App.tabs.overview.exporterCategoriesPNG());
 
   App.state.month = localStorage.getItem('patrimoine.month') || App.monthISO();
   App.setMonthLabel(App.state.month);

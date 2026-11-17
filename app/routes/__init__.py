@@ -14,7 +14,9 @@ l'adressage. Les URL n'ont donc pas bouge, et aucun prefixe n'est ajoute.
     quotes        cours de marche
     settings      parametres et regles de categorisation
     backups       sauvegardes CSV
+    exports       images PNG des graphiques
     transfers     virements internes
+    subscriptions abonnements et prelevements recurrents
 
 Importer un module suffit a enregistrer ses routes : c'est le decorateur
 `@bp.get`/`@bp.post` qui fait le travail, a l'import. D'ou la liste ci-dessous,
@@ -27,12 +29,14 @@ from . import (                                                  # noqa: F401
     assets,
     backups,
     bank_imports,
+    exports,
     liabilities,
     movements,
     page,
     positions,
     quotes,
     settings,
+    subscriptions,
     transactions,
     transfers,
 )

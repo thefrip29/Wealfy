@@ -972,6 +972,30 @@ class TestYahooFinance(unittest.TestCase):
         self.assertEqual(found, {})
         self.assertEqual(errors[0]["erreur"], "No data found")
 
+    def test_une_valeur_euronext_sans_suffixe_prend_celui_de_sa_place(self):
+        """« DCAM » mappe du temps de Twelve Data : Yahoo veut « DCAM.PA »."""
+        ok = {"chart": {"result": [{"meta": {"regularMarketPrice": 6.29, "currency": "EUR"}}]}}
+
+        def faux(url, params=None):
+            if url.endswith("/DCAM.PA"):
+                return ok
+            raise market.MarketError("HTTP 404")
+
+        with unittest.mock.patch.object(market, "_get_json", side_effect=faux):
+            found, errors = market.YahooFinance().quotes([{
+                "cle": "DCAM", "symbol": "DCAM", "exchange": "Euronext",
+                "isin": "FR001400U5Q4"}])
+        self.assertEqual(errors, [])
+        self.assertEqual(found["DCAM"]["price"], 6.29)
+
+    def test_hors_euronext_pas_de_suffixe_invente(self):
+        with unittest.mock.patch.object(market, "_get_json",
+                                        side_effect=market.MarketError("HTTP 404")) as faux:
+            found, errors = market.YahooFinance().quotes(
+                [{"cle": "SPCX", "symbol": "SPCX", "exchange": "NASDAQ"}])
+        self.assertEqual((found, faux.call_count), ({}, 1))
+        self.assertEqual(errors[0]["erreur"], "HTTP 404")
+
     def test_la_serie_ignore_les_seances_sans_cloture(self):
         payload = {"chart": {"result": [{
             "timestamp": [1_704_067_200, 1_704_153_600, 1_704_240_000],

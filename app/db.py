@@ -76,7 +76,7 @@ DEFAULT_SETTINGS = {
     "date_credit_interets": "12-31",
     "mois_precaution_cible": 4,      # mois de depenses couverts par les livrets
     "seuil_concentration": 40,       # % des actifs financiers sur une seule ligne
-    "seuil_crypto": 10,              # % du patrimoine net
+    "seuil_crypto": 10,              # % du total des actifs
     "seuil_endettement": 35,         # % des revenus (reference HCSF)
 
     # --- Cours de marche (V2) ---------------------------------------------
@@ -182,6 +182,7 @@ def _migrate_columns(con):
     colonne ajoutee au schema doit donc etre appliquee explicitement.
     """
     wanted = {
+        "assets": [("date_cloture", "TEXT")],
         "securities": [("kind", "TEXT NOT NULL DEFAULT 'titre'"),
                        ("taux_annuel", "REAL")],
         "asset_movements": [("dedup_hash", "TEXT"),
@@ -198,11 +199,29 @@ def _migrate_columns(con):
             if name not in existing:
                 con.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
+    dater_clotures(con)
+
     # Index unique cree ici et non dans schema.sql : sur une base anterieure,
     # le script s'executerait avant l'ajout de la colonne et echouerait.
     con.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_dedup "
         "ON asset_movements(dedup_hash) WHERE dedup_hash IS NOT NULL"
+    )
+
+
+def dater_clotures(con):
+    """Donne une date aux produits clotures avant que la colonne existe.
+
+    Sans date, un produit clos disparaissait aussi du passe : courbe, archive
+    et gain de l'annee etaient recalcules sans lui. Son dernier mouvement est
+    la meilleure trace de sa fermeture ; a defaut, le jour de la migration.
+    Appelee aussi apres la restauration d'une sauvegarde anterieure.
+    """
+    con.execute(
+        "UPDATE assets SET date_cloture = COALESCE("
+        "(SELECT MAX(m.date) FROM asset_movements m WHERE m.asset_id = assets.id),"
+        " date('now')) "
+        "WHERE archived = 1 AND date_cloture IS NULL"
     )
 
 

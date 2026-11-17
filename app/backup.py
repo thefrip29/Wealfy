@@ -28,7 +28,7 @@ import shutil
 from datetime import date, datetime
 
 from . import finance
-from .db import get_db, get_setting, query, rows_to_list
+from .db import dater_clotures, get_db, get_setting, query, rows_to_list
 from .paths import data_dir
 
 # Ordre de restauration : les tables référencées d'abord.
@@ -328,6 +328,7 @@ def restore_backup(identifiant):
                     valeurs[:len(entetes)],
                 )
                 total += 1
+        dater_clotures(con)
         con.commit()
     except Exception:
         con.rollback()
